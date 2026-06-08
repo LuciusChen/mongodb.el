@@ -74,7 +74,11 @@ After a checked-out pooled connection fails during command execution, non-timeou
 network errors clear the pool generation.  In load-balanced mode, only the
 failing connection's =serviceId= generation is cleared and the pool remains
 available for other serviceIds.  Command response timeouts do not clear the
-pool.
+pool.  =mongo-pool-cursor-results= and =mongo-pool-find= keep one connection
+checked out for the initial cursor command, getMore, and killCursors.  This is
+required for load-balanced cursors, where getMore must stay on the same socket;
+after a load-balanced getMore network error, the helper does not issue
+killCursors on the failed pinned connection.
 When a load-balanced =serviceId= is supplied to =mongo-pool-clear=, only
 connections for that serviceId are cleared and the pool is not paused.  Basic
 CMAP-style lifecycle, checkout, checkin, clear, close, connection-created,
@@ -165,6 +169,16 @@ or load-balanced service tracking:
 
 #+begin_src emacs-lisp
 (mongo-find conn "app" "users" '(("active" . t)))
+#+end_src
+
+Use =mongo-pool-find=, or the lower-level =mongo-pool-cursor-results= helper,
+when draining cursor results from a pool:
+
+#+begin_src emacs-lisp
+(let ((pool (mongo-pool-open '(:url "mongodb://127.0.0.1:27017/app"))))
+  (unwind-protect
+      (mongo-pool-find pool "app" "users" '(("active" . t)))
+    (mongo-pool-disconnect pool)))
 #+end_src
 
 =mongo-aggregate= accepts a vector pipeline:

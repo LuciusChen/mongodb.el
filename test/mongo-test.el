@@ -7651,9 +7651,137 @@
          (seq-some (lambda (event)
                      (and (eq (alist-get 'type event)
                               'connection-pool-cleared)
-                          (equal (alist-get 'service-id event)
-                                 service-a)))
+	                          (equal (alist-get 'service-id event)
+	                                 service-a)))
                    events))))))
+
+
+
+(ert-deftest mongo-test-pool-cursor-results-pins-connection-until-drained ()
+  "Pooled cursor helpers should keep one connection checked out for getMore."
+  (let ((conn (make-mongo-conn :process 'proc))
+        pool commands in-use-states)
+    (cl-letf (((symbol-function 'mongo-connect)
+               (lambda (_params) conn))
+              ((symbol-function 'process-live-p)
+               (lambda (_proc) t))
+              ((symbol-function 'mongo-command)
+               (lambda (wire database command &optional _timeout _sequences)
+                 (push (list wire database command) commands)
+                 (push (memq conn (mongo-pool-in-use pool)) in-use-states)
+                 (cond
+                  ((assoc "find" command)
+                   '(("cursor" . (("id" . 42)
+                                  ("ns" . "app.users")
+                                  ("firstBatch" . ((("n" . 1))))))))
+                  ((assoc "getMore" command)
+                   '(("cursor" . (("id" . 0)
+                                  ("ns" . "app.users")
+                                  ("nextBatch" . ((("n" . 2))))))))
+                  (t
+                   (ert-fail
+                    (format "unexpected command: %S" command)))))))
+      (setq pool (mongo-pool-open '(:max-pool-size 1)))
+      (should (equal
+               (mongo-pool-cursor-results
+                pool "app" "users"
+                '(("find" . "users")
+                  ("filter" . (("active" . t))))
+                "firstBatch")
+               '((("n" . 1))
+                 (("n" . 2)))))
+      (should (equal (mapcar (lambda (entry)
+                               (list (eq (nth 0 entry) conn)
+                                     (nth 1 entry)
+                                     (caar (nth 2 entry))))
+                             (nreverse commands))
+                     '((t "app" "find")
+                       (t "app" "getMore"))))
+      (should (equal (nreverse in-use-states)
+                     (list (list conn) (list conn))))
+      (should-not (mongo-pool-in-use pool))
+      (should (equal (mapcar #'mongo--pool-entry-conn
+                             (mongo-pool-available pool))
+                     (list conn))))))
+
+
+(ert-deftest mongo-test-pool-cursor-load-balanced-getmore-error-skips-kill ()
+  "Load-balanced pooled cursors should not killCursors after getMore network errors."
+  (let* ((service-id '(("$oid" . "64f0000000000000000000aa")))
+         (conn (make-mongo-conn :process 'proc
+                                :load-balanced t
+                                :service-id service-id))
+         (pool (make-mongo-pool :params '(:load-balanced t)
+                                :max-size 1
+                                :max-connecting 2))
+         disconnected commands)
+    (mongo--pool-record-connection-id pool conn 1)
+    (mongo--pool-track-connection pool conn)
+    (setf (mongo-pool-available pool)
+          (list (make-mongo--pool-entry
+                 :conn conn
+                 :idle-since (float-time)
+                 :generation
+                 (mongo--pool-connection-generation pool conn))))
+    (cl-letf (((symbol-function 'process-live-p)
+               (lambda (_proc) t))
+              ((symbol-function 'mongo-disconnect)
+               (lambda (wire)
+                 (push wire disconnected)))
+              ((symbol-function 'mongo-command)
+               (lambda (_wire _database command &optional _timeout _sequences)
+                 (push command commands)
+                 (cond
+                  ((assoc "find" command)
+                   '(("cursor" . (("id" . 42)
+                                  ("ns" . "app.users")
+                                  ("firstBatch" . ((("n" . 1))))))))
+                  ((assoc "getMore" command)
+                   (signal 'mongo-error
+                           (list "connection closed while reading MongoDB response")))
+                  ((assoc "killCursors" command)
+                   (ert-fail
+                    "load-balanced getMore network errors should not killCursors"))
+                  (t
+                   (ert-fail
+                    (format "unexpected command: %S" command)))))))
+      (should-error
+       (mongo-pool-cursor-results
+        pool "app" "users"
+        '(("find" . "users")) "firstBatch")
+       :type 'mongo-error)
+      (should-not (mongo-pool-paused pool))
+      (should-not (mongo-pool-in-use pool))
+      (should-not (mongo-pool-available pool))
+      (should (equal disconnected (list conn)))
+      (should (= (mongo--pool-service-count pool service-id) 0))
+      (should (equal (mapcar #'caar (nreverse commands))
+                     '("find" "getMore"))))))
+
+
+(ert-deftest mongo-test-pool-find-uses-pool-cursor-results ()
+  "mongo-pool-find should build a find command for pooled cursor draining."
+  (let (captured)
+    (cl-letf (((symbol-function 'mongo-pool-cursor-results)
+               (lambda (&rest args)
+                 (setq captured args)
+                 '((("name" . "Ann"))))))
+      (should (equal
+               (mongo-pool-find
+                'pool "app" "users"
+                '(("active" . t)) '(("name" . 1)) 5 2
+                '(("batchSize" . 3)))
+               '((("name" . "Ann"))))))
+    (should (equal captured
+                   '(pool "app" "users"
+                          (("find" . "users")
+                           ("filter" . (("active" . t)))
+                           ("batchSize" . 3)
+                           ("projection" . (("name" . 1)))
+                           ("limit" . 5)
+                           ("skip" . 2))
+                          "firstBatch" nil
+                          (("batchSize" . 3)))))))
 
 
 

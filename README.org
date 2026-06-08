@@ -36,6 +36,8 @@ Implemented areas include:
   labels, command-stage non-timeout network errors clear the pool or matching
   load-balanced =serviceId= generation, =waitQueueTimeoutMS= 0 means no
   checkout deadline, and
+  pooled cursor helpers keep the same checked-out connection for the initial
+  cursor command, getMore, and killCursors, including load-balanced cursors;
   basic CMAP-style events are exposed via =mongo-pool-event-hook=, including
   sanitized pool addresses and non-default pool-created options
 - basic command monitoring events via =mongo-command-event-hook=, including

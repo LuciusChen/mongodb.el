@@ -3018,11 +3018,13 @@ FALLBACK is used when the server reply omits cursor namespace metadata."
        ("cursors" . ,(vconcat cursor-ids))))))
 
 (defun mongo--cursor-results
-    (conn database collection response first-key &optional get-more-options)
+    (conn database collection response first-key
+          &optional get-more-options suppress-network-error-kill)
   "Return all cursor results from RESPONSE, fetching more as needed.
 GET-MORE-OPTIONS may include batchSize and maxAwaitTimeMS.  If it includes
 _stopOnEmptyBatch, stop when an awaitable cursor returns an empty non-terminal
-batch and close that server-side cursor."
+batch and close that server-side cursor.  When SUPPRESS-NETWORK-ERROR-KILL is
+non-nil, do not issue killCursors after a getMore network error."
   (let* ((get-more-options (mongo--option-pairs get-more-options))
          (get-more-batch-size (or (cdr (assoc "batchSize" get-more-options))
                                   1000))
@@ -3071,7 +3073,9 @@ batch and close that server-side cursor."
           rows)
       (error
        (when (and (integerp cursor-id)
-                  (not (zerop cursor-id)))
+                  (not (zerop cursor-id))
+                  (not (and suppress-network-error-kill
+                            (mongo--network-error-p err))))
          (ignore-errors
            (mongo-kill-cursors
             conn database cursor-collection (list cursor-id))))
@@ -6078,11 +6082,18 @@ BINDING has the form (CONN POOL &optional TIMEOUT)."
   (declare (indent 1))
   (let ((conn (nth 0 binding))
         (pool (nth 1 binding))
-        (timeout (nth 2 binding)))
+	(timeout (nth 2 binding)))
     `(let ((,conn (mongo-pool-checkout ,pool ,timeout)))
        (unwind-protect
            (progn ,@body)
          (mongo-pool-release ,pool ,conn)))))
+
+(defun mongo--pool-resignal-command-error (pool conn err)
+  "Clear POOL for checked-out CONN when ERR requires it, then signal ERR."
+  (when (mongo--pool-command-clear-error-p err)
+    (mongo-pool-clear
+     pool (mongo--pool-connection-service-id conn)))
+  (signal (car err) (cdr err)))
 
 (defun mongo-pool-command (pool database command &optional timeout sequences)
   "Run MongoDB COMMAND on DATABASE using one connection from POOL."
@@ -6091,11 +6102,37 @@ BINDING has the form (CONN POOL &optional TIMEOUT)."
         (condition-case err
             (mongo-command conn database command timeout sequences)
           (error
-           (when (mongo--pool-command-clear-error-p err)
-             (mongo-pool-clear
-              pool (mongo--pool-connection-service-id conn)))
-           (signal (car err) (cdr err))))
+           (mongo--pool-resignal-command-error pool conn err)))
       (mongo-pool-release pool conn))))
+
+(defun mongo-pool-cursor-results
+    (pool database collection command first-key
+          &optional timeout get-more-options sequences)
+  "Run cursor COMMAND from POOL and return all result documents.
+The same checked-out connection is used for the initial command, getMore, and
+killCursors.  This is required for load-balanced cursor operations and is also a
+safe default for ordinary pools."
+  (let ((conn (mongo-pool-checkout pool)))
+    (unwind-protect
+        (condition-case err
+            (let ((response
+                   (mongo-command conn database command timeout sequences)))
+              (mongo--cursor-results
+               conn database collection response first-key get-more-options
+               (mongo-conn-load-balanced conn)))
+          (error
+           (mongo--pool-resignal-command-error pool conn err)))
+      (mongo-pool-release pool conn))))
+
+(defun mongo-pool-find
+    (pool database collection &optional filter projection limit skip options timeout)
+  "Return documents from COLLECTION in DATABASE using one connection from POOL."
+  (let ((option-pairs (mongo--option-pairs options)))
+    (mongo-pool-cursor-results
+     pool database collection
+     (mongo-find-command collection filter projection limit skip option-pairs)
+     "firstBatch" timeout
+     (mongo--cursor-get-more-options option-pairs))))
 
 (provide 'mongo)
 ;;; mongo.el ends here
