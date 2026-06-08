@@ -46,15 +46,17 @@ and ready paths also refill the pool after idle/dead connections are pruned.
 available connections are closed immediately, and checked-out connections from
 older generations are closed when released.  Clearing pauses the pool until
 =mongo-pool-ready= is called.  Manually opened pools start ready; callers that
-want SDAM-style background recovery can opt into =mongo-pool-start-monitor=.
+want SDAM-style background recovery can opt into =mongo-pool-start-monitor= for
+non-load-balanced pools.  Load-balanced pools do not open dedicated monitor
+connections.
 Callers may pass non-nil =interrupt-in-use-connections= to =mongo-pool-clear=
 to close affected checked-out connections immediately; the pool-cleared event
 then includes =interrupt-in-use-connections=.
 Clearing an already paused non-load-balanced pool advances the generation
 without emitting a duplicate =connection-pool-cleared= event.
-The pool monitor uses a dedicated monitor connection: successful heartbeats mark
-cleared pools ready, while failed heartbeats clear and pause the pool until a
-later successful heartbeat recovers it.
+The non-load-balanced pool monitor uses a dedicated monitor connection:
+successful heartbeats mark cleared pools ready, while failed heartbeats clear
+and pause the pool until a later successful heartbeat recovers it.
 Checkout attempts waiting for a connection are evicted when the pool is cleared
 and receive a =connection-check-out-failed= event with =reason=
 =connection-error= instead of waiting for =waitQueueTimeoutMS=.  Checkout

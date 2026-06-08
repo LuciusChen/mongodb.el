@@ -6216,6 +6216,30 @@
 
 
 
+(ert-deftest mongo-test-monitor-once-load-balanced-is-noop ()
+  "Load-balanced connections should not run monitoring hello commands."
+  (let* ((last-hello '(("ok" . 1)
+                       ("maxWireVersion" . 17)
+                       ("serviceId" . "service-1")))
+         (conn (make-mongo-conn :host "lb"
+                                :port 27017
+                                :database "app"
+                                :load-balanced t
+                                :last-hello last-hello)))
+    (setf (mongo-conn-monitor-error conn) '(mongo-error "old"))
+    (cl-letf (((symbol-function 'mongo-hello)
+               (lambda (&rest _args)
+                 (ert-fail "load-balanced monitor should not call hello")))
+              ((symbol-function 'mongo-awaitable-hello)
+               (lambda (&rest _args)
+                 (ert-fail
+                  "load-balanced monitor should not call awaitable hello"))))
+      (should (equal (mongo-monitor-once conn 250 3)
+                     last-hello)))
+    (should-not (mongo-conn-monitor-error conn))))
+
+
+
 (ert-deftest mongo-test-monitor-once-marks-server-unknown-on-error ()
   "Monitor errors should mark current server Unknown while preserving topology."
   (let* ((conn (make-mongo-conn :host "db"
@@ -6275,6 +6299,27 @@
       (should (eq (mongo-stop-monitor conn) conn))
       (should-not (mongo-conn-monitor-timer conn))
       (should (equal cancelled '(fake-monitor-timer))))))
+
+
+
+(ert-deftest mongo-test-start-monitor-load-balanced-is-noop ()
+  "Load-balanced connections should not schedule monitor timers."
+  (let ((conn (make-mongo-conn :host "lb"
+                               :port 27017
+                               :database "app"
+                               :load-balanced t
+                               :monitor-timer 'old-monitor-timer))
+        cancelled)
+    (cl-letf (((symbol-function 'cancel-timer)
+               (lambda (timer)
+                 (push timer cancelled)))
+              ((symbol-function 'run-at-time)
+               (lambda (&rest _args)
+                 (ert-fail
+                  "load-balanced monitor should not schedule a timer"))))
+      (should (eq (mongo-start-monitor conn 2 250 4) conn)))
+    (should-not (mongo-conn-monitor-timer conn))
+    (should (equal cancelled '(old-monitor-timer)))))
 
 
 
@@ -7123,6 +7168,31 @@
           (should (eq (alist-get 'reason (cadr ordered)) 'stale)))))))
 
 
+(ert-deftest mongo-test-pool-monitor-load-balanced-is-noop ()
+  "Load-balanced pools should not open dedicated monitor connections."
+  (let* ((monitor (make-mongo-conn :process 'old-monitor-proc))
+         (pool (make-mongo-pool
+                :params '(:load-balanced t)
+                :monitor-conn monitor
+                :monitor-error '(mongo-error "old")))
+         disconnected)
+    (cl-letf (((symbol-function 'mongo-connect)
+               (lambda (&rest _args)
+                 (ert-fail
+                  "load-balanced pool monitor should not open a connection")))
+              ((symbol-function 'mongo-monitor-once)
+               (lambda (&rest _args)
+                 (ert-fail
+                  "load-balanced pool monitor should not heartbeat")))
+              ((symbol-function 'mongo-disconnect)
+               (lambda (conn)
+                 (push conn disconnected))))
+      (should-not (mongo-pool-monitor-once pool 250 3)))
+    (should-not (mongo-pool-monitor-error pool))
+    (should-not (mongo-pool-monitor-conn pool))
+    (should (equal disconnected (list monitor)))))
+
+
 (ert-deftest mongo-test-pool-start-stop-monitor-schedules-tick ()
   "Pool monitors should schedule SDAM heartbeat ticks and stop cleanly."
   (let ((pool (make-mongo-pool
@@ -7149,6 +7219,31 @@
       (should (eq (mongo-pool-stop-monitor pool) pool))
       (should-not (mongo-pool-monitor-timer pool))
       (should (equal cancelled '(fake-pool-monitor-timer))))))
+
+
+(ert-deftest mongo-test-pool-start-monitor-load-balanced-is-noop ()
+  "Load-balanced pools should not schedule SDAM monitor timers."
+  (let* ((monitor (make-mongo-conn :process 'old-monitor-proc))
+         (pool (make-mongo-pool
+                :params '(:load-balanced t)
+                :monitor-conn monitor
+                :monitor-timer 'old-pool-monitor-timer))
+         cancelled disconnected)
+    (cl-letf (((symbol-function 'cancel-timer)
+               (lambda (timer)
+                 (push timer cancelled)))
+              ((symbol-function 'mongo-disconnect)
+               (lambda (conn)
+                 (push conn disconnected)))
+              ((symbol-function 'run-at-time)
+               (lambda (&rest _args)
+                 (ert-fail
+                  "load-balanced pool monitor should not schedule a timer"))))
+      (should (eq (mongo-pool-start-monitor pool) pool)))
+    (should-not (mongo-pool-monitor-timer pool))
+    (should-not (mongo-pool-monitor-conn pool))
+    (should (equal cancelled '(old-pool-monitor-timer)))
+    (should (equal disconnected (list monitor)))))
 
 
 (ert-deftest mongo-test-pool-disconnect-stops-monitor ()

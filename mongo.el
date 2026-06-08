@@ -4188,22 +4188,28 @@ normal post-handshake hello."
 The heartbeat uses awaitable hello when the server has a topologyVersion,
 unless CONN is configured with serverMonitoringMode=poll.
 On success, return the hello response and clear `mongo-conn-monitor-error'.
-On failure, record the error, mark the current server Unknown, and signal it."
-  (condition-case err
-      (let* ((max-await (or max-await-time-ms
-                            mongo-monitor-max-await-time-ms))
-             (timeout (or timeout
-                          (+ 1 (/ (float max-await) 1000.0))))
-             (hello (let ((mongo--suppress-command-events t))
-                      (if (eq (mongo-conn-server-monitoring-mode conn) 'poll)
-                          (mongo-hello conn timeout)
-                        (mongo-awaitable-hello conn max-await timeout)))))
+On failure, record the error, mark the current server Unknown, and signal it.
+In load-balanced mode, do not run a monitoring command; return the cached hello
+response from the initial connection handshake instead."
+  (if (mongo-conn-load-balanced conn)
+      (progn
         (setf (mongo-conn-monitor-error conn) nil)
-        hello)
-    (error
-     (setf (mongo-conn-monitor-error conn) err)
-     (mongo--mark-current-server-unknown conn err)
-     (signal (car err) (cdr err)))))
+        (mongo-conn-last-hello conn))
+    (condition-case err
+        (let* ((max-await (or max-await-time-ms
+                              mongo-monitor-max-await-time-ms))
+               (timeout (or timeout
+                            (+ 1 (/ (float max-await) 1000.0))))
+               (hello (let ((mongo--suppress-command-events t))
+                        (if (eq (mongo-conn-server-monitoring-mode conn) 'poll)
+                            (mongo-hello conn timeout)
+                          (mongo-awaitable-hello conn max-await timeout)))))
+          (setf (mongo-conn-monitor-error conn) nil)
+          hello)
+      (error
+       (setf (mongo-conn-monitor-error conn) err)
+       (mongo--mark-current-server-unknown conn err)
+       (signal (car err) (cdr err))))))
 
 (defun mongo--monitor-tick (conn max-await-time-ms timeout)
   "Run one scheduled monitor tick for CONN."
@@ -4226,19 +4232,20 @@ On failure, record the error, mark the current server Unknown, and signal it."
 The monitor is not started automatically by `mongo-connect'; callers opt in
 when background topology refresh is appropriate for their UI/runtime."
   (mongo-stop-monitor conn)
-  (let* ((heartbeat (or heartbeat-seconds
-                        (mongo-conn-heartbeat-frequency conn)
-                        mongo-monitor-heartbeat-seconds))
-         (max-await (or max-await-time-ms
-                        (and (mongo-conn-heartbeat-frequency conn)
-                             (round (* 1000 heartbeat)))
-                        mongo-monitor-max-await-time-ms))
-         (timeout (or timeout
-                      (+ 1 (/ (float max-await) 1000.0)))))
-    (setf (mongo-conn-monitor-timer conn)
-          (run-at-time 0 heartbeat
-                       #'mongo--monitor-tick
-                       conn max-await timeout)))
+  (unless (mongo-conn-load-balanced conn)
+    (let* ((heartbeat (or heartbeat-seconds
+                          (mongo-conn-heartbeat-frequency conn)
+                          mongo-monitor-heartbeat-seconds))
+           (max-await (or max-await-time-ms
+                          (and (mongo-conn-heartbeat-frequency conn)
+                               (round (* 1000 heartbeat)))
+                          mongo-monitor-max-await-time-ms))
+           (timeout (or timeout
+                        (+ 1 (/ (float max-await) 1000.0)))))
+      (setf (mongo-conn-monitor-timer conn)
+            (run-at-time 0 heartbeat
+                         #'mongo--monitor-tick
+                         conn max-await timeout))))
   conn)
 
 (defun mongo--hello-primary-p (hello)
@@ -5966,6 +5973,9 @@ connections affected by the clear instead of waiting for release."
 
 (defun mongo--pool-monitor-connection (pool)
   "Return a live dedicated monitor connection for POOL."
+  (when (mongo--params-load-balanced-p (mongo-pool-params pool))
+    (signal 'mongo-error
+            (list "MongoDB load-balanced pools do not use monitor connections")))
   (let ((conn (mongo-pool-monitor-conn pool)))
     (unless (mongo-live-p conn)
       (mongo--pool-monitor-disconnect pool)
@@ -5977,22 +5987,28 @@ connections affected by the clear instead of waiting for release."
     (pool &optional max-await-time-ms timeout)
   "Run one SDAM monitor heartbeat for POOL.
 On success, mark a cleared pool ready.  On failure, record the error, close the
-dedicated monitor connection, clear the pool, and signal the heartbeat error."
+dedicated monitor connection, clear the pool, and signal the heartbeat error.
+In load-balanced mode, do not open a dedicated monitoring connection."
   (when (mongo-pool-closed pool)
     (signal 'mongo-error
             (list "MongoDB connection pool is closed")))
-  (condition-case err
-      (let* ((conn (mongo--pool-monitor-connection pool))
-             (hello (mongo-monitor-once conn max-await-time-ms timeout)))
+  (if (mongo--params-load-balanced-p (mongo-pool-params pool))
+      (progn
         (setf (mongo-pool-monitor-error pool) nil)
-        (mongo-pool-ready pool)
-        hello)
-    (error
-     (setf (mongo-pool-monitor-error pool) err)
-     (mongo--pool-monitor-disconnect pool)
-     (unless (mongo-pool-closed pool)
-       (mongo-pool-clear pool))
-     (signal (car err) (cdr err)))))
+        (mongo--pool-monitor-disconnect pool)
+        nil)
+    (condition-case err
+        (let* ((conn (mongo--pool-monitor-connection pool))
+               (hello (mongo-monitor-once conn max-await-time-ms timeout)))
+          (setf (mongo-pool-monitor-error pool) nil)
+          (mongo-pool-ready pool)
+          hello)
+      (error
+       (setf (mongo-pool-monitor-error pool) err)
+       (mongo--pool-monitor-disconnect pool)
+       (unless (mongo-pool-closed pool)
+         (mongo-pool-clear pool))
+       (signal (car err) (cdr err))))))
 
 (defun mongo--pool-monitor-tick (pool max-await-time-ms timeout)
   "Run one scheduled SDAM monitor tick for POOL."
@@ -6019,18 +6035,19 @@ pause the pool so later successful checks can recover it."
     (signal 'mongo-error
             (list "MongoDB connection pool is closed")))
   (mongo-pool-stop-monitor pool)
-  (let* ((params (mongo-pool-params pool))
-         (heartbeat (or heartbeat-seconds
-                        (mongo--params-heartbeat-frequency params)
-                        mongo-monitor-heartbeat-seconds))
-         (max-await (or max-await-time-ms
-                        (round (* 1000 heartbeat))))
-         (timeout (or timeout
-                      (+ 1 (/ (float max-await) 1000.0)))))
-    (setf (mongo-pool-monitor-timer pool)
-          (run-at-time 0 heartbeat
-                       #'mongo--pool-monitor-tick
-                       pool max-await timeout)))
+  (unless (mongo--params-load-balanced-p (mongo-pool-params pool))
+    (let* ((params (mongo-pool-params pool))
+           (heartbeat (or heartbeat-seconds
+                          (mongo--params-heartbeat-frequency params)
+                          mongo-monitor-heartbeat-seconds))
+           (max-await (or max-await-time-ms
+                          (round (* 1000 heartbeat))))
+           (timeout (or timeout
+                        (+ 1 (/ (float max-await) 1000.0)))))
+      (setf (mongo-pool-monitor-timer pool)
+            (run-at-time 0 heartbeat
+                         #'mongo--pool-monitor-tick
+                         pool max-await timeout))))
   pool)
 
 (defun mongo-pool-disconnect (pool)

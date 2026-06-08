@@ -28,12 +28,14 @@ Implemented areas include:
   including ready/checkout maintenance of =minPoolSize=, load-balanced
   per-=serviceId= clearing, optional interruption of checked-out connections,
   and connection-count accounting;
-  =mongo-pool-start-monitor= can run SDAM-style heartbeats that clear unhealthy
-  pools and mark cleared pools ready again, waiting checkouts are evicted on
-  pool clear with =RetryableError=, connection-establishment / initial hello
-  network errors get CMAP backpressure labels, command-stage non-timeout network
-  errors clear the pool or matching load-balanced =serviceId= generation,
-  =waitQueueTimeoutMS= 0 means no checkout deadline, and
+  =mongo-pool-start-monitor= can run SDAM-style heartbeats for
+  non-load-balanced pools that clear unhealthy pools and mark cleared pools
+  ready again; load-balanced pools do not open dedicated monitor connections.
+  Waiting checkouts are evicted on pool clear with =RetryableError=,
+  connection-establishment / initial hello network errors get CMAP backpressure
+  labels, command-stage non-timeout network errors clear the pool or matching
+  load-balanced =serviceId= generation, =waitQueueTimeoutMS= 0 means no
+  checkout deadline, and
   basic CMAP-style events are exposed via =mongo-pool-event-hook=, including
   sanitized pool addresses and non-default pool-created options
 - basic command monitoring events via =mongo-command-event-hook=, including
