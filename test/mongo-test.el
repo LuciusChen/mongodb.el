@@ -6556,6 +6556,52 @@
       (should-not (mongo-pool-available pool)))))
 
 
+(ert-deftest mongo-test-pool-checkout-tracks-purpose ()
+  "MongoDB pools should track checked-out connection purposes."
+  (let ((conn (make-mongo-conn :process 'proc))
+        pool)
+    (cl-letf (((symbol-function 'mongo-connect)
+               (lambda (_params) conn))
+              ((symbol-function 'process-live-p)
+               (lambda (_proc) t)))
+      (setq pool (mongo-pool-open '(:max-pool-size 1)))
+      (should (eq (mongo-pool-checkout pool nil 'cursor) conn))
+      (should (eq (mongo--pool-connection-purpose pool conn) 'cursor))
+      (should (= (mongo--pool-purpose-count pool 'cursor) 1))
+      (should (= (mongo--pool-purpose-count pool 'transaction) 0))
+      (should (= (mongo--pool-purpose-count pool 'other) 0))
+      (mongo-pool-release pool conn)
+      (should-not (mongo-pool-conn-purposes pool))
+      (mongo-with-pool-connection (checked-out pool nil 'transaction)
+        (should (eq checked-out conn))
+        (should (eq (mongo--pool-connection-purpose pool conn)
+                    'transaction)))
+      (should-not (mongo-pool-conn-purposes pool))
+      (should (eq (mongo-pool-checkout pool) conn))
+      (should (eq (mongo--pool-connection-purpose pool conn) 'other)))))
+
+
+(ert-deftest mongo-test-pool-load-balanced-timeout-reports-purpose-counts ()
+  "Load-balanced wait queue timeouts should report checked-out purpose counts."
+  (let* ((cursor-conn (make-mongo-conn :process 'cursor-proc))
+         (txn-conn (make-mongo-conn :process 'txn-proc))
+         (other-conn (make-mongo-conn :process 'other-proc))
+         (pool (make-mongo-pool
+                :params '(:load-balanced t)
+                :max-size 3
+                :max-connecting 2
+                :in-use (list cursor-conn txn-conn other-conn)
+                :conn-purposes `((,cursor-conn . cursor)
+                                 (,txn-conn . transaction)
+                                 (,other-conn . other)))))
+    (let ((err (should-error (mongo-pool-checkout pool 0)
+                             :type 'mongo-error)))
+      (should (string-match-p
+               (regexp-quote
+                "Timeout waiting for connection from the connection pool. maxPoolSize: 3, connections in use by cursors: 1, connections in use by transactions: 1, connections in use by other operations: 1")
+               (error-message-string err))))))
+
+
 (ert-deftest mongo-test-pool-emits-lifecycle-and-checkout-events ()
   "MongoDB pools should expose basic CMAP-style lifecycle events."
   (let ((created 0)
@@ -7649,10 +7695,10 @@
         (should (mongo--pool-current-generation-connection-p pool conn-b))
         (should
          (seq-some (lambda (event)
-                     (and (eq (alist-get 'type event)
-                              'connection-pool-cleared)
-	                          (equal (alist-get 'service-id event)
-	                                 service-a)))
+	                     (and (eq (alist-get 'type event)
+	                              'connection-pool-cleared)
+                          (equal (alist-get 'service-id event)
+                                 service-a)))
                    events))))))
 
 
@@ -7660,7 +7706,7 @@
 (ert-deftest mongo-test-pool-cursor-results-pins-connection-until-drained ()
   "Pooled cursor helpers should keep one connection checked out for getMore."
   (let ((conn (make-mongo-conn :process 'proc))
-        pool commands in-use-states)
+        pool commands in-use-states purposes)
     (cl-letf (((symbol-function 'mongo-connect)
                (lambda (_params) conn))
               ((symbol-function 'process-live-p)
@@ -7669,6 +7715,7 @@
                (lambda (wire database command &optional _timeout _sequences)
                  (push (list wire database command) commands)
                  (push (memq conn (mongo-pool-in-use pool)) in-use-states)
+                 (push (mongo--pool-connection-purpose pool conn) purposes)
                  (cond
                   ((assoc "find" command)
                    '(("cursor" . (("id" . 42)
@@ -7699,7 +7746,10 @@
                        (t "app" "getMore"))))
       (should (equal (nreverse in-use-states)
                      (list (list conn) (list conn))))
+      (should (equal (nreverse purposes)
+                     '(cursor cursor)))
       (should-not (mongo-pool-in-use pool))
+      (should-not (mongo-pool-conn-purposes pool))
       (should (equal (mapcar #'mongo--pool-entry-conn
                              (mongo-pool-available pool))
                      (list conn))))))

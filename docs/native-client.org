@@ -64,7 +64,10 @@ attempts against a paused or cleared pool signal a retryable
 =mongo-error= with =RetryableError=.  As in the MongoDB connection string
 specification, =waitQueueTimeoutMS= 0 means the wait queue has no configured
 deadline; callers that need an immediate or shorter bound can pass the optional
-=timeout= argument to =mongo-pool-checkout=.
+=timeout= argument to =mongo-pool-checkout=.  The optional checkout purpose
+argument accepts =cursor=, =transaction=, or =other=; load-balanced wait queue
+timeouts include the configured =maxPoolSize= and checked-out counts for those
+three categories.
 Connection-establishment and initial hello network errors receive the CMAP
 backpressure labels =SystemOverloadedError= and =RetryableError=.  Errors that
 are known not to indicate server overload, such as SOCKS5 proxy failures,

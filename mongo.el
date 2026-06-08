@@ -280,6 +280,7 @@ UnsatisfiableWriteConcern.")
   conn-generations
   conn-service-ids
   conn-ids
+  conn-purposes
   next-connection-id
   monitor-conn
   monitor-timer
@@ -5468,6 +5469,65 @@ local port-forwarded development deployments without preferring aliases."
    (cons 'duration-ms
          (mongo--pool-duration-ms checkout-start))))
 
+(defun mongo--pool-normalize-purpose (purpose)
+  "Return POOL checkout PURPOSE normalized to a CMAP tracking symbol."
+  (pcase purpose
+    ((or 'cursor :cursor) 'cursor)
+    ((or 'transaction :transaction) 'transaction)
+    (_ 'other)))
+
+(defun mongo--pool-set-connection-purpose (pool conn purpose)
+  "Record CONN's checked-out PURPOSE in POOL."
+  (setf (mongo-pool-conn-purposes pool)
+        (cons (cons conn (mongo--pool-normalize-purpose purpose))
+              (cl-remove conn
+                         (mongo-pool-conn-purposes pool)
+                         :key #'car
+                         :test #'eq)))
+  conn)
+
+(defun mongo--pool-forget-connection-purpose (pool conn)
+  "Forget CONN's checked-out purpose in POOL."
+  (setf (mongo-pool-conn-purposes pool)
+        (cl-remove conn
+                   (mongo-pool-conn-purposes pool)
+                   :key #'car
+                   :test #'eq)))
+
+(defun mongo--pool-connection-purpose (pool conn)
+  "Return CONN's checked-out purpose in POOL."
+  (or (cdr (cl-assoc conn
+                     (mongo-pool-conn-purposes pool)
+                     :test #'eq))
+      'other))
+
+(defun mongo--pool-purpose-count (pool purpose)
+  "Return how many checked-out POOL connections have PURPOSE."
+  (let ((purpose (mongo--pool-normalize-purpose purpose)))
+    (cl-count purpose
+              (mongo-pool-in-use pool)
+              :key (lambda (conn)
+                     (mongo--pool-connection-purpose pool conn)))))
+
+(defun mongo--pool-checkout-timeout-message (pool)
+  "Return the wait queue timeout message for POOL."
+  (if (mongo--params-load-balanced-p (mongo-pool-params pool))
+      (format
+       "Timeout waiting for connection from the connection pool. maxPoolSize: %s, connections in use by cursors: %d, connections in use by transactions: %d, connections in use by other operations: %d"
+       (or (mongo-pool-max-size pool) 0)
+       (mongo--pool-purpose-count pool 'cursor)
+       (mongo--pool-purpose-count pool 'transaction)
+       (mongo--pool-purpose-count pool 'other))
+    "Timed out waiting for a MongoDB pooled connection"))
+
+(defun mongo--pool-checkout-succeed (pool checkout-start conn purpose)
+  "Record CONN as checked out from POOL with PURPOSE and return CONN."
+  (push conn (mongo-pool-in-use pool))
+  (mongo--pool-set-connection-purpose pool conn purpose)
+  (mongo--pool-maintain-min-size pool)
+  (mongo--pool-emit-checked-out pool checkout-start conn)
+  conn)
+
 (defun mongo--pool-signal-cleared-checkout-error (pool checkout-start)
   "Signal a retryable checkout error because POOL is cleared or paused."
   (let ((err `(mongo-error
@@ -5831,11 +5891,12 @@ maxConnecting.  Connections are still ordinary native `mongo-conn' values."
     (mongo-pool-ready pool)
     pool))
 
-(defun mongo-pool-checkout (pool &optional timeout)
+(defun mongo-pool-checkout (pool &optional timeout purpose)
   "Check out and return one live MongoDB connection from POOL.
 TIMEOUT overrides waitQueueTimeoutMS and is measured in seconds.
 A nil pool wait queue timeout has no deadline.  A numeric TIMEOUT of 0 waits
-no time."
+no time.  PURPOSE is one of `cursor', `transaction', or `other' and is used for
+load-balanced wait queue diagnostics."
   (let* ((checkout-start (float-time))
          (wait-timeout (or timeout
                            (mongo-pool-wait-queue-timeout pool)))
@@ -5849,19 +5910,17 @@ no time."
         (mongo--pool-checkout-signal-unavailable pool checkout-start)
         (setq conn (mongo--pool-pop-available pool))
         (when conn
-          (push conn (mongo-pool-in-use pool))
-          (mongo--pool-maintain-min-size pool)
-          (mongo--pool-emit-checked-out pool checkout-start conn)
-          (throw 'done conn))
+          (throw 'done
+                 (mongo--pool-checkout-succeed
+                  pool checkout-start conn purpose)))
         (unless (or (mongo--pool-at-capacity-p pool)
                     (mongo--pool-connecting-at-capacity-p pool))
           (condition-case err
               (progn
                 (setq conn (mongo--pool-open-connection pool))
-                (push conn (mongo-pool-in-use pool))
-                (mongo--pool-maintain-min-size pool)
-                (mongo--pool-emit-checked-out pool checkout-start conn)
-                (throw 'done conn))
+                (throw 'done
+                       (mongo--pool-checkout-succeed
+                        pool checkout-start conn purpose)))
             (error
              (mongo--pool-emit-checkout-failed
               pool checkout-start 'connection-error err)
@@ -5870,7 +5929,7 @@ no time."
                    (<= deadline (float-time)))
           (mongo--pool-emit-checkout-failed pool checkout-start 'timeout)
           (signal 'mongo-error
-                  (list "Timed out waiting for a MongoDB pooled connection")))
+                  (list (mongo--pool-checkout-timeout-message pool))))
         (accept-process-output nil 0.05)
         (sit-for 0 t)))))
 
@@ -5881,6 +5940,7 @@ no time."
             (list "MongoDB connection is not checked out from this pool")))
   (setf (mongo-pool-in-use pool)
         (delq conn (mongo-pool-in-use pool)))
+  (mongo--pool-forget-connection-purpose pool conn)
   (mongo--pool-emit-event
    pool 'connection-checked-in
    (cons 'connection conn)
@@ -6071,6 +6131,7 @@ pause the pool so later successful checks can recover it."
     (setf (mongo-pool-conn-generations pool) nil)
     (setf (mongo-pool-conn-service-ids pool) nil)
     (setf (mongo-pool-conn-ids pool) nil)
+    (setf (mongo-pool-conn-purposes pool) nil)
     (setf (mongo-pool-paused pool) nil)
     (setf (mongo-pool-connecting pool) 0)
     (mongo--pool-emit-event pool 'connection-pool-closed))
@@ -6078,12 +6139,13 @@ pause the pool so later successful checks can recover it."
 
 (defmacro mongo-with-pool-connection (binding &rest body)
   "Run BODY with a connection checked out according to BINDING.
-BINDING has the form (CONN POOL &optional TIMEOUT)."
+BINDING has the form (CONN POOL &optional TIMEOUT PURPOSE)."
   (declare (indent 1))
   (let ((conn (nth 0 binding))
         (pool (nth 1 binding))
-	(timeout (nth 2 binding)))
-    `(let ((,conn (mongo-pool-checkout ,pool ,timeout)))
+        (timeout (nth 2 binding))
+        (purpose (nth 3 binding)))
+    `(let ((,conn (mongo-pool-checkout ,pool ,timeout ,purpose)))
        (unwind-protect
            (progn ,@body)
          (mongo-pool-release ,pool ,conn)))))
@@ -6097,7 +6159,7 @@ BINDING has the form (CONN POOL &optional TIMEOUT)."
 
 (defun mongo-pool-command (pool database command &optional timeout sequences)
   "Run MongoDB COMMAND on DATABASE using one connection from POOL."
-  (let ((conn (mongo-pool-checkout pool)))
+  (let ((conn (mongo-pool-checkout pool nil 'other)))
     (unwind-protect
         (condition-case err
             (mongo-command conn database command timeout sequences)
@@ -6112,7 +6174,7 @@ BINDING has the form (CONN POOL &optional TIMEOUT)."
 The same checked-out connection is used for the initial command, getMore, and
 killCursors.  This is required for load-balanced cursor operations and is also a
 safe default for ordinary pools."
-  (let ((conn (mongo-pool-checkout pool)))
+  (let ((conn (mongo-pool-checkout pool nil 'cursor)))
     (unwind-protect
         (condition-case err
             (let ((response
