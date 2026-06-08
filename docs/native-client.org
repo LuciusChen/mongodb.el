@@ -235,10 +235,11 @@ The transaction helpers are:
 - =mongo-abort-transaction=
 - =mongo-in-transaction-p=
 
-Transactions require server logical session support.  Commands inside a
-transaction carry =lsid=, =txnNumber=, and =autocommit: false=.  Commit retries
-follow MongoDB's retryable commit behavior and expose error labels through
-=mongo-error-has-label-p=.
+Transactions require logical session support.  Load-balanced connections always
+support sessions, matching MongoDB's load balancer rules, even when hello omits
+=logicalSessionTimeoutMinutes=.  Commands inside a transaction carry =lsid=,
+=txnNumber=, and =autocommit: false=.  Commit retries follow MongoDB's retryable
+commit behavior and expose error labels through =mongo-error-has-label-p=.
 
 * Scope Boundaries
 

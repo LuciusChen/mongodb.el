@@ -2406,14 +2406,16 @@ reuse."
 
 (defun mongo--conn-session-supported-p (conn)
   "Return non-nil when CONN reports logical session support."
-  (or (mongo-conn-session-id conn)
-      (and (mongo-conn-last-hello conn)
-           (mongo--session-supported-p (mongo-conn-last-hello conn)))
-      (let ((topology (mongo-conn-topology conn)))
-        (and topology
-             (numberp
-              (mongo-topology-description-logical-session-timeout-minutes
-               topology))))))
+  (and (mongo-conn-p conn)
+       (or (mongo-conn-session-id conn)
+           (mongo-conn-load-balanced conn)
+           (and (mongo-conn-last-hello conn)
+                (mongo--session-supported-p (mongo-conn-last-hello conn)))
+           (let ((topology (mongo-conn-topology conn)))
+             (and topology
+                  (numberp
+                   (mongo-topology-description-logical-session-timeout-minutes
+                    topology)))))))
 
 (defun mongo--ensure-session (conn)
   "Ensure CONN has an implicit logical session and return it."
@@ -2971,7 +2973,9 @@ that can legally return exhaust-style replies."
 
 (defun mongo--initialize-session (conn hello)
   "Initialize an implicit logical session on CONN if HELLO supports sessions."
-  (when (and (mongo--session-supported-p hello)
+  (when (and (mongo-conn-p conn)
+             (or (mongo-conn-load-balanced conn)
+                 (mongo--session-supported-p hello))
              (not (mongo-conn-session-id conn)))
     (setf (mongo-conn-session-id conn)
           (mongo--make-session-id))))

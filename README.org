@@ -18,8 +18,9 @@ Implemented areas include:
 - SCRAM-SHA-256, SCRAM-SHA-1, X.509, PLAIN, AWS, and one-step OIDC auth
 - OP_MSG command helpers, cursors, getMore, killCursors, and compression
   (=snappy=, =zlib=, and optional =zstd= via =mongo-zstd-program=)
-- read preference, read concern, write concern, Stable API, sessions, retryable
-  reads/writes, transaction helpers, and client-level =bulkWrite=
+- read preference, read concern, write concern, Stable API, sessions including
+  load-balanced session support, retryable reads/writes, transaction helpers,
+  and client-level =bulkWrite=
 - Single-host, direct, replica-set seed-list, and single-socket load-balanced
   connection paths
 - connection pool helpers with =minPoolSize=, =maxPoolSize=,

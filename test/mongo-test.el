@@ -2413,6 +2413,20 @@
       (should (= (mongo-binary-subtype id) 4)))))
 
 
+(ert-deftest mongo-test-initialize-session-for-load-balanced ()
+  "Load-balanced connections should support sessions without timeout metadata."
+  (let ((conn (make-mongo-conn :closed nil
+                               :load-balanced t)))
+    (mongo--initialize-session
+     conn
+     '(("ok" . 1)
+       ("serviceId" . (("$oid" . "64f0000000000000000000aa")))))
+    (should (mongo-conn-session-id conn))
+    (let ((id (cdr (assoc "id" (mongo-conn-session-id conn)))))
+      (should (mongo-binary-p id))
+      (should (= (mongo-binary-subtype id) 4)))))
+
+
 
 (ert-deftest mongo-test-disconnect-ends-session ()
   "MongoDB disconnect should end an open logical session."
@@ -8859,6 +8873,31 @@
                    (mongo-int64 1)))))
 
 
+(ert-deftest mongo-test-transaction-load-balanced-creates-session ()
+  "Load-balanced transactions should not require logicalSessionTimeoutMinutes."
+  (let ((conn (make-mongo-conn :host "lb"
+                               :port 27017
+                               :database "app"
+                               :process 'proc
+                               :closed nil
+                               :max-wire-version 17
+                               :txn-number 0
+                               :load-balanced t
+                               :service-id
+                               '(("$oid" . "64f0000000000000000000aa"))
+                               :last-hello
+                               '(("ok" . 1)
+                                 ("serviceId" .
+                                  (("$oid" . "64f0000000000000000000aa")))))))
+    (cl-letf (((symbol-function 'process-live-p)
+               (lambda (_proc) t)))
+      (mongo-start-transaction conn))
+    (should (mongo-conn-session-id conn))
+    (should (eq (mongo-conn-transaction-state conn) 'starting))
+    (should (equal (mongo-conn-transaction-number conn)
+                   (mongo-int64 1)))))
+
+
 
 (ert-deftest mongo-test-transaction-inherits-connection-write-concern ()
   "Transactions should use connection writeConcern when no option overrides it."
@@ -10681,8 +10720,14 @@
               ((symbol-function 'set-process-coding-system) #'ignore)
               ((symbol-function 'mongo--send-document)
                (lambda (_conn document)
-                 (setq captured-command document)
-                 (push :op-msg-hello events)
+                 (cond
+                  ((assoc "hello" document)
+                   (setq captured-command document)
+                   (push :op-msg-hello events))
+                  ((assoc "endSessions" document)
+                   (push :end-sessions events))
+                  (t
+                   (push :op-msg-command events)))
                  1))
               ((symbol-function 'mongo--send-handshake)
                (lambda (&rest _args)
@@ -10707,7 +10752,7 @@
         (when conn
           (mongo-disconnect conn))))
     (should (equal (nreverse events)
-                   '(:open :op-msg-hello)))
+                   '(:open :op-msg-hello :end-sessions)))
     (should (equal (cdr (assoc "hello" captured-command)) 1))
     (should (eq (cdr (assoc "loadBalanced" captured-command)) t))
     (should (mongo-conn-load-balanced conn))
