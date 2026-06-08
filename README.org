@@ -1,0 +1,111 @@
+#+TITLE: mongo.el
+
+=mongo.el= is a native MongoDB wire protocol client for Emacs Lisp.
+
+It speaks modern MongoDB =OP_MSG= directly and encodes/decodes BSON in Emacs
+Lisp.  It is a command-level driver, not a JavaScript evaluator and not a JDBC
+adapter.
+
+* Status
+
+This package is under active development.  It is intended to become the
+standalone protocol layer used by Clutch's =mongodb= backend.
+
+Implemented areas include:
+
+- BSON encode/decode for core and compatibility types
+- TCP, UNIX-domain socket, TLS, =mongodb://=, and =mongodb+srv://=
+- SCRAM-SHA-256, SCRAM-SHA-1, X.509, PLAIN, AWS, and one-step OIDC auth
+- OP_MSG command helpers, cursors, getMore, killCursors, and compression
+  (=snappy=, =zlib=, and optional =zstd= via =mongo-zstd-program=)
+- read preference, read concern, write concern, Stable API, sessions, retryable
+  reads/writes, transaction helpers, and client-level =bulkWrite=
+- Single-host, direct, replica-set seed-list, and single-socket load-balanced
+  connection paths
+- connection pool helpers with =minPoolSize=, =maxPoolSize=,
+  =maxIdleTimeMS=, =waitQueueTimeoutMS=, =maxConnecting= accounting, and basic
+  generation-based pool clearing via =mongo-pool-clear= / =mongo-pool-ready=,
+  including ready/checkout maintenance of =minPoolSize=, load-balanced
+  per-=serviceId= clearing, optional interruption of checked-out connections,
+  and connection-count accounting;
+  =mongo-pool-start-monitor= can run SDAM-style heartbeats that clear unhealthy
+  pools and mark cleared pools ready again, waiting checkouts are evicted on
+  pool clear with =RetryableError=, connection-establishment / initial hello
+  network errors get CMAP backpressure labels, command-stage non-timeout network
+  errors clear the pool or matching load-balanced =serviceId= generation,
+  =waitQueueTimeoutMS= 0 means no checkout deadline, and
+  basic CMAP-style events are exposed via =mongo-pool-event-hook=, including
+  sanitized pool addresses and non-default pool-created options
+- basic command monitoring events via =mongo-command-event-hook=, including
+  request id correlation, command duration, OP_MSG document sequence exposure,
+  bulkWrite =operation-id= correlation, sensitive command redaction, and
+  load-balanced =serviceId= on command events
+
+Known incomplete areas include complete SDAM/CMAP/command event and waitQueue
+spec-suite parity, client-side field level encryption, and full MongoDB
+upstream specification-suite parity.
+
+* Usage
+
+#+begin_src emacs-lisp
+(require 'mongo)
+
+(let ((conn (mongo-connect '(:url "mongodb://127.0.0.1:27017/app"))))
+  (unwind-protect
+      (mongo-find conn "app" "users" '(("active" . t)))
+    (mongo-disconnect conn)))
+#+end_src
+
+Run arbitrary command documents with =mongo-command=:
+
+#+begin_src emacs-lisp
+(mongo-command conn "admin" '(("ping" . 1)))
+#+end_src
+
+Use explicit BSON wrappers when the wire type matters:
+
+#+begin_src emacs-lisp
+(mongo-insert conn "app" "events"
+              (list (list (cons "_id" (mongo-new-object-id))
+                          (cons "createdAt" (mongo-datetime 1704164645678))
+                          (cons "counter" (mongo-int64 9223372036854775807)))))
+#+end_src
+
+* Tests
+
+Run unit tests from this repository:
+
+#+begin_src sh
+emacs -Q --batch -L . -l ert -l test/mongo-test.el \
+  --eval '(ert-run-tests-batch-and-exit)'
+#+end_src
+
+Byte-compile:
+
+#+begin_src sh
+emacs -Q --batch -L . -f batch-byte-compile mongo*.el test/mongo-test.el
+#+end_src
+
+* Module Layout
+
+=mongo.el= remains the public entry point.  Implementation modules are split by
+stable protocol responsibility:
+
+- =mongo-bson.el= contains BSON value wrappers, BSON encode/decode, byte
+  primitives, checksums, and cryptographic byte helpers.
+- =mongo-wire.el= contains OP_MSG, OP_COMPRESSED, legacy OP_REPLY frame
+  encoding/decoding, snappy/zlib/zstd wire compression helpers, and responseTo
+  validation.  zstd uses the optional =mongo-zstd-program= executable.
+- =mongo-params.el= contains URI parsing, SRV DNS resolution, connection
+  params normalization, TLS params, credentials, read/write concern, server API,
+  and pool option helpers.
+- =mongo-auth.el= contains native SCRAM, X.509, PLAIN, MONGODB-AWS, and
+  MONGODB-OIDC authentication plus ObjectId/session id byte helpers.
+- =mongo.el= assembles the client, including connection-state transport
+  send/receive glue, command helpers, server selection, transactions, pooling,
+  and lifecycle management.
+
+* Documentation
+
+See [[file:docs/native-client.org][docs/native-client.org]] for current API and
+capability notes.
