@@ -1692,8 +1692,11 @@ Documents that already contain `_id' are returned unchanged."
   (and (mongo-conn-session-id conn)
        (>= (or (mongo-conn-max-wire-version conn) 0) 6)
        (when-let* ((server (mongo-select-server conn 'write)))
-         (memq (mongo-server-description-type server)
-               '(rs-primary mongos load-balanced)))))
+         (let ((type (mongo-server-description-type server)))
+           (and (memq type '(rs-primary mongos load-balanced))
+                (or (eq type 'load-balanced)
+                    (mongo-server-description-logical-session-timeout-minutes
+                     server)))))))
 
 (defun mongo--retryable-write-enabled-p (conn command sequences)
   "Return non-nil when CONN should retry write COMMAND once."

@@ -10622,6 +10622,7 @@
                                 :session-id session-id))
          (hello '(("ok" . 1)
                   ("maxWireVersion" . 17)
+                  ("logicalSessionTimeoutMinutes" . 30)
                   ("setName" . "rs0")
                   ("isWritablePrimary" . t)))
          captured)
@@ -10649,6 +10650,54 @@
     (should (= (mongo-conn-txn-number conn) 1))))
 
 
+(ert-deftest mongo-test-command-skips-retryable-write-without-session-timeout ()
+  "Servers without logicalSessionTimeoutMinutes should not use retryable writes."
+  (let* ((session-id `(("id" . ,(mongo-binary 4 "abcdefghijklmnop"))))
+         (conn (make-mongo-conn :host "seed-a"
+                                :port 27017
+                                :database "app"
+                                :process 'proc
+                                :closed nil
+                                :max-wire-version 17
+                                :retry-writes t
+                                :txn-number 0
+                                :session-id session-id))
+         (hello '(("ok" . 1)
+                  ("maxWireVersion" . 17)
+                  ("setName" . "rs0")
+                  ("isWritablePrimary" . t)))
+         captured
+         (recv-count 0))
+    (setf (mongo-conn-topology conn)
+          (mongo--topology-description-from-hello conn hello))
+    (cl-letf (((symbol-function 'process-live-p)
+               (lambda (_proc) t))
+              ((symbol-function 'mongo--send-document)
+               (lambda (_conn document &optional _sequences)
+                 (setq captured document)
+                 1))
+              ((symbol-function 'mongo--recv-message)
+               (lambda (&rest _args)
+                 (cl-incf recv-count)
+                 (signal 'mongo-error
+                         (list "Timed out waiting for MongoDB response"))))
+              ((symbol-function 'mongo--reconnect-current-server)
+               (lambda (&rest _args)
+                 (ert-fail "server without session timeout should not retry"))))
+      (let ((mongo--retryable-write-context t))
+        (should-error
+         (mongo-command
+          conn
+          "app"
+          '(("insert" . "users"))
+          nil
+          `(("documents" . [,(mongo-document '(("_id" . "a")))])))
+         :type 'mongo-error)))
+    (should (= recv-count 1))
+    (should-not (assoc "txnNumber" captured))
+    (should (= (mongo-conn-txn-number conn) 0))))
+
+
 
 (ert-deftest mongo-test-command-retries-write-network-error ()
   "Retryable write commands should retry once with the same txnNumber."
@@ -10664,6 +10713,7 @@
                                 :session-id session-id))
          (hello '(("ok" . 1)
                   ("maxWireVersion" . 17)
+                  ("logicalSessionTimeoutMinutes" . 30)
                   ("setName" . "rs0")
                   ("isWritablePrimary" . t)))
          sends
@@ -10724,6 +10774,7 @@
                                 :session-id session-id))
          (hello '(("ok" . 1)
                   ("maxWireVersion" . 17)
+                  ("logicalSessionTimeoutMinutes" . 30)
                   ("setName" . "rs0")
                   ("isWritablePrimary" . t)))
          (recv-count 0)
@@ -10780,6 +10831,7 @@
                                 :session-id session-id))
          (hello '(("ok" . 1)
                   ("maxWireVersion" . 17)
+                  ("logicalSessionTimeoutMinutes" . 30)
                   ("setName" . "rs0")
                   ("isWritablePrimary" . t)))
          captured)
@@ -10819,6 +10871,7 @@
                                 :session-id session-id))
          (hello '(("ok" . 1)
                   ("maxWireVersion" . 17)
+                  ("logicalSessionTimeoutMinutes" . 30)
                   ("setName" . "rs0")
                   ("isWritablePrimary" . t)))
          captured)
