@@ -112,9 +112,10 @@ Each EVENT is an alist with at least a `type' entry.  Heartbeat event types are
 `server-heartbeat-started', `server-heartbeat-succeeded', and
 `server-heartbeat-failed'; these include `connection-id', `address', and
 `awaited'.  Terminal heartbeat events include `duration-ms' and either `reply'
-or `failure'.  Description event types are `server-description-changed' and
-`topology-description-changed'; these include `topology-id',
-`previous-description', and `new-description'."
+or `failure'.  Lifecycle event types are `topology-opening', `server-opening',
+`server-closed', and `topology-closed'.  Description event types are
+`server-description-changed' and `topology-description-changed'; these include
+`topology-id', `previous-description', and `new-description'."
   :type 'hook
   :group 'mongo)
 
@@ -1174,6 +1175,15 @@ document, matching MongoDB command monitoring semantics."
   `((connection . ,conn)
     (topology-id . ,(mongo--conn-topology-id conn))))
 
+(defun mongo--emit-sdam-lifecycle-event (conn type &optional address)
+  "Emit SDAM lifecycle event TYPE for CONN."
+  (apply #'mongo--emit-sdam-event
+         type
+         (append
+          (mongo--sdam-description-event-fields conn)
+          (when address
+            (list (cons 'address address))))))
+
 (defun mongo--sdam-server-description-event-value (server)
   "Return SERVER normalized for SDAM description-changed comparison."
   (when (mongo-server-description-p server)
@@ -1214,6 +1224,15 @@ document, matching MongoDB command monitoring semantics."
   (when (mongo-topology-description-p topology)
     (cdr (assoc address (mongo-topology-description-servers topology)))))
 
+(defun mongo--unknown-topology-description (conn)
+  "Return an Unknown SDAM topology description for CONN's current address."
+  (let* ((address (mongo--conn-address conn))
+         (server (mongo--unknown-server-description address)))
+    (make-mongo-topology-description
+     :type 'unknown
+     :servers `((,address . ,server))
+     :compatible t)))
+
 (defun mongo--emit-sdam-description-changes (conn old-topology new-topology)
   "Emit SDAM description-changed events for CONN topology changes."
   (when (and mongo-sdam-event-hook old-topology new-topology)
@@ -1246,6 +1265,25 @@ document, matching MongoDB command monitoring semantics."
     (when old-topology
       (mongo--emit-sdam-description-changes conn old-topology topology)))
   topology)
+
+(defun mongo--emit-sdam-opening-events (conn topology)
+  "Emit initial SDAM opening events for CONN and TOPOLOGY."
+  (when mongo-sdam-event-hook
+    (let ((address (mongo--conn-address conn))
+          (previous (mongo--unknown-topology-description conn)))
+      (mongo--emit-sdam-lifecycle-event conn 'topology-opening)
+      (mongo--emit-sdam-lifecycle-event conn 'server-opening address)
+      (mongo--emit-sdam-description-changes conn previous topology))))
+
+(defun mongo--emit-sdam-closing-events (conn)
+  "Emit terminal SDAM closing events for CONN."
+  (when (and mongo-sdam-event-hook
+             (mongo-conn-topology conn)
+             (not (mongo-conn-closed conn)))
+    (let ((address (mongo--conn-address conn)))
+      (mongo--set-conn-topology conn (mongo--unknown-topology-description conn))
+      (mongo--emit-sdam-lifecycle-event conn 'server-closed address)
+      (mongo--emit-sdam-lifecycle-event conn 'topology-closed))))
 
 (defun mongo--monitor-awaitable-p (conn)
   "Return non-nil when CONN's next monitor heartbeat is awaitable."
@@ -4286,6 +4324,8 @@ returning."
                        (not service-id))
               (signal 'mongo-error
                       (list "Driver attempted to initialize in load balancing mode, but the server does not support this mode.")))
+            (mongo--emit-sdam-opening-events
+             conn (mongo-conn-topology conn))
             (setq phase 'auth)
             (when (and authenticate credential)
               (mongo--authenticate conn credential hello speculative-auth))
@@ -5574,6 +5614,7 @@ local port-forwarded development deployments without preferring aliases."
           (mongo-command
            conn "admin"
            `(("endSessions" . ,(vector session-id)))))))
+    (mongo--emit-sdam-closing-events conn)
     (setf (mongo-conn-closed conn) t)
     (when-let* ((proc (mongo-conn-process conn)))
       (when (process-live-p proc)

@@ -6503,6 +6503,73 @@
                   'replica-set-no-primary)))))
 
 
+(ert-deftest mongo-test-sdam-lifecycle-events-connect-disconnect ()
+  "Connect/disconnect should emit SDAM opening and closed lifecycle events."
+  (let (events conn)
+    (cl-letf (((symbol-function 'make-network-process)
+               (lambda (&rest _args) 'proc))
+              ((symbol-function 'set-process-coding-system) #'ignore)
+              ((symbol-function 'mongo--send-handshake)
+               (lambda (&rest _args) 1))
+              ((symbol-function 'mongo--recv-handshake-message)
+               (lambda (&rest _args)
+                 '(("ok" . 1)
+                   ("maxWireVersion" . 17))))
+              ((symbol-function 'process-live-p)
+               (lambda (_proc) t))
+              ((symbol-function 'delete-process) #'ignore))
+      (let ((mongo-sdam-event-hook
+             (list (lambda (event)
+                     (push event events)))))
+        (unwind-protect
+            (setq conn (mongo-connect '(:host "db"
+                                        :port 27017
+                                        :database "app")))
+          (when conn
+            (mongo-disconnect conn)
+            (mongo-disconnect conn)))))
+    (let* ((ordered (nreverse events))
+           (types (mapcar (lambda (event)
+                            (alist-get 'type event))
+                          ordered))
+           (topology-ids (delq nil
+                               (mapcar (lambda (event)
+                                         (alist-get 'topology-id event))
+                                       ordered))))
+      (should (equal types
+                     '(topology-opening
+                       server-opening
+                       server-description-changed
+                       topology-description-changed
+                       server-description-changed
+                       topology-description-changed
+                       server-closed
+                       topology-closed)))
+      (should (seq-every-p (lambda (id)
+                             (equal id (car topology-ids)))
+                           topology-ids))
+      (should (equal (alist-get 'address (nth 1 ordered)) "db:27017"))
+      (should (eq (mongo-server-description-type
+                   (alist-get 'previous-description (nth 2 ordered)))
+                  'unknown))
+      (should (eq (mongo-server-description-type
+                   (alist-get 'new-description (nth 2 ordered)))
+                  'standalone))
+      (should (eq (mongo-topology-description-type
+                   (alist-get 'previous-description (nth 3 ordered)))
+                  'unknown))
+      (should (eq (mongo-topology-description-type
+                   (alist-get 'new-description (nth 3 ordered)))
+                  'single))
+      (should (eq (mongo-server-description-type
+                   (alist-get 'new-description (nth 4 ordered)))
+                  'unknown))
+      (should (eq (mongo-topology-description-type
+                   (alist-get 'new-description (nth 5 ordered)))
+                  'unknown))
+      (should (eq (car (last types)) 'topology-closed)))))
+
+
 
 (ert-deftest mongo-test-monitor-once-can-use-poll-mode ()
   "serverMonitoringMode=poll should use ordinary hello for monitoring."
