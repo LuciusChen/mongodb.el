@@ -6354,26 +6354,20 @@ pause the pool so later successful checks can recover it."
   pool)
 
 (defun mongo-pool-disconnect (pool)
-  "Close all connections owned by MongoDB POOL."
+  "Close MongoDB POOL.
+Available connections are closed immediately.  Checked-out connections remain
+associated with POOL and are closed with reason `pool-closed' when released."
   (when pool
     (mongo-pool-stop-monitor pool)
-    (setf (mongo-pool-closed pool) t)
-    (dolist (entry (mongo-pool-available pool))
-      (mongo--pool-close-connection
-       pool (mongo--pool-entry-conn entry) 'pool-closed))
-    (dolist (conn (mongo-pool-in-use pool))
-      (mongo--pool-close-connection pool conn 'pool-closed))
-    (setf (mongo-pool-available pool) nil)
-    (setf (mongo-pool-in-use pool) nil)
-    (setf (mongo-pool-service-generations pool) nil)
-    (setf (mongo-pool-service-counts pool) nil)
-    (setf (mongo-pool-conn-generations pool) nil)
-    (setf (mongo-pool-conn-service-ids pool) nil)
-    (setf (mongo-pool-conn-ids pool) nil)
-    (setf (mongo-pool-conn-purposes pool) nil)
-    (setf (mongo-pool-paused pool) nil)
-    (setf (mongo-pool-connecting pool) 0)
-    (mongo--pool-emit-event pool 'connection-pool-closed))
+    (unless (mongo-pool-closed pool)
+      (setf (mongo-pool-closed pool) t)
+      (dolist (entry (mongo-pool-available pool))
+        (mongo--pool-close-connection
+         pool (mongo--pool-entry-conn entry) 'pool-closed))
+      (setf (mongo-pool-available pool) nil)
+      (setf (mongo-pool-paused pool) nil)
+      (setf (mongo-pool-connecting pool) 0)
+      (mongo--pool-emit-event pool 'connection-pool-closed)))
   pool)
 
 (defmacro mongo-with-pool-connection (binding &rest body)

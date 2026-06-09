@@ -7689,6 +7689,51 @@
       (should (equal disconnected (list monitor))))))
 
 
+(ert-deftest mongo-test-pool-disconnect-closes-checked-out-on-release ()
+  "Checked-out connections should close when released to a closed pool."
+  (let (events pool conn disconnected)
+    (cl-letf (((symbol-function 'mongo-connect)
+               (lambda (_params)
+                 (make-mongo-conn :process 'proc)))
+              ((symbol-function 'process-live-p)
+               (lambda (_proc) t))
+              ((symbol-function 'mongo-disconnect)
+               (lambda (wire)
+                 (push wire disconnected))))
+      (let ((mongo-pool-event-hook
+             (list (lambda (event)
+                     (push event events)))))
+        (setq pool (mongo-pool-open '(:max-pool-size 1)))
+        (setq conn (mongo-pool-checkout pool))
+        (setq events nil)
+        (should (eq (mongo-pool-disconnect pool) pool))
+        (should (mongo-pool-closed pool))
+        (should (memq conn (mongo-pool-in-use pool)))
+        (should-not disconnected)
+        (should (equal (mapcar (lambda (event)
+                                 (alist-get 'type event))
+                               (nreverse events))
+                       '(connection-pool-closed)))
+        (setq events nil)
+        (should (eq (mongo-pool-disconnect pool) pool))
+        (should-not events)
+        (mongo-pool-release pool conn)
+        (let ((ordered (nreverse events)))
+          (should (equal (mapcar (lambda (event)
+                                   (alist-get 'type event))
+                                 ordered)
+                         '(connection-checked-in
+                           connection-closed)))
+          (should (= (alist-get 'connection-id (car ordered)) 1))
+          (should (= (alist-get 'connection-id (cadr ordered)) 1))
+          (should (eq (alist-get 'reason (cadr ordered))
+                      'pool-closed)))
+        (should (equal disconnected (list conn)))
+        (should-not (mongo-pool-in-use pool))
+        (should-not (mongo-pool-conn-ids pool))
+        (should-not (mongo-pool-conn-generations pool))))))
+
+
 
 (ert-deftest mongo-test-pool-release-after-clear-disconnects-stale-connection ()
   "Checked-out connections from old pool generations should not return to idle."
