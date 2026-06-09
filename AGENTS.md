@@ -292,7 +292,7 @@ private helper from Clutch.
 - Byte-compile distributable `mongodb*.el` files with zero warnings after code
   changes.
 - Run checkdoc on distributable `mongodb*.el` files and package-lint on
-  `mongodb.el` before release.
+  `mongodb.el` with zero warnings before committing package code.
 - Run live MongoDB tests for changes that touch sockets, TLS, URI/SRV parsing,
   auth, command execution, cursors, sessions, retry behavior, transactions,
   compression, server selection, or pooling.
@@ -343,8 +343,10 @@ private helper from Clutch.
 - Every public `defun`, `defmacro`, `defcustom`, and `defvar` must have a
   docstring.
 - Docstring first line must be a complete sentence ending with a period.
-- Argument names in docstrings should be UPPERCASED.
-- Run checkdoc across distributable `mongodb*.el` files.
+- Argument names in docstrings must be mentioned as UPPERCASE when checkdoc
+  expects them.
+- Literal open parentheses at column zero in docstrings must be escaped.
+- Run checkdoc across distributable `mongodb*.el` files with zero warnings.
 
 ### Common pitfalls
 
@@ -486,11 +488,21 @@ emacs -Q --batch -L . -f batch-byte-compile mongodb*.el test/mongodb-test.el
 Remove generated `*.elc` files after byte-compilation in a source checkout
 unless they are intentionally committed artifacts.
 
-### 8. Run package checks before release
+### 8. Run package checks
 
-Run package-lint on `mongodb.el`, and run checkdoc across distributable
-`mongodb*.el` files.  Do not move package metadata into split files to satisfy
-per-file lint.
+```bash
+emacs -Q --batch --eval '(require (quote package))' \
+  --eval '(package-initialize)' -L . -l package-lint \
+  --eval '(setq package-lint-main-file "mongodb.el")' \
+  -f package-lint-batch-and-exit mongodb*.el
+
+emacs -Q --batch -L . --eval '(require (quote checkdoc))' \
+  --eval '(dolist (file (directory-files default-directory t "^mongodb.*\\.el$")) (checkdoc-file file))' \
+  --eval '(dolist (name (quote ("*Warnings*" "*warn*"))) (when-let ((buf (get-buffer name))) (with-current-buffer buf (goto-char (point-min)) (when (re-search-forward "^Warning" nil t) (princ (buffer-string)) (kill-emacs 1)))))'
+```
+
+Both commands must pass with zero warnings.  Do not move package metadata into
+split files to satisfy per-file lint.
 
 ### 9. Update tests when behavior changes
 

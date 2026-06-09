@@ -449,7 +449,9 @@ fails or returns no answers."
         options))))
 
 (defun mongodb--resolve-srv (host &optional service-name)
-  "Resolve MongoDB SRV HOST and return a `mongodb--srv-resolution'."
+  "Resolve MongoDB SRV HOST and return a `mongodb--srv-resolution'.
+
+Arguments: HOST, SERVICE-NAME."
   (let* ((host (mongodb--normalize-dns-name host))
          (parent-domain (mongodb--validate-srv-host host))
          (service-name (mongodb--validate-srv-service-name service-name))
@@ -472,7 +474,9 @@ fails or returns no answers."
      :options (mongodb--srv-txt-options host))))
 
 (defun mongodb--srv-resolution (host &optional service-name)
-  "Return cached MongoDB SRV resolution for HOST."
+  "Return cached MongoDB SRV resolution for HOST.
+
+Arguments: HOST, SERVICE-NAME."
   (let* ((host (mongodb--normalize-dns-name host))
          (service-name (mongodb--validate-srv-service-name service-name))
          (cache-key (cons host service-name))
@@ -534,7 +538,9 @@ the host list, for example %2Ftmp%2Fmongodb-27017.sock."
 
 (defun mongodb--host-ports (hostspec &optional default-port)
   "Return a list of (HOST PORT) endpoints parsed from HOSTSPEC.
-HOSTSPEC may be a MongoDB comma-separated seed list."
+HOSTSPEC may be a MongoDB comma-separated seed list.
+
+Arguments: HOSTSPEC, DEFAULT-PORT."
   (mapcar (lambda (item)
             (mongodb--host-port item default-port))
           (split-string hostspec "," t "[[:space:]\n\r\t]*")))
@@ -586,7 +592,9 @@ UNIX-domain socket endpoints use a nil PORT."
         (mongodb--url-option options "replicaSet"))))
 
 (defun mongodb--params-raw-replica-set-name (params)
-  "Return requested replica set name without SRV TXT merging."
+  "Return requested replica set name without SRV TXT merging.
+
+Arguments: PARAMS."
   (mongodb--params-raw-option-value
    params '(:replica-set :replicaSet) "replicaSet"))
 
@@ -596,7 +604,9 @@ UNIX-domain socket endpoints use a nil PORT."
    params '(:direct-connection :directConnection) "directConnection"))
 
 (defun mongodb--params-raw-direct-connection-p (params)
-  "Return directConnection without SRV TXT merging."
+  "Return directConnection without SRV TXT merging.
+
+Arguments: PARAMS."
   (mongodb--params-raw-bool-option-p
    params '(:direct-connection :directConnection) "directConnection"))
 
@@ -606,7 +616,9 @@ UNIX-domain socket endpoints use a nil PORT."
    params '(:load-balanced :loadBalanced) "loadBalanced"))
 
 (defun mongodb--params-raw-load-balanced-p (params)
-  "Return loadBalanced without SRV TXT merging."
+  "Return loadBalanced without SRV TXT merging.
+
+Arguments: PARAMS."
   (mongodb--params-raw-bool-option-p
    params '(:load-balanced :loadBalanced) "loadBalanced"))
 
@@ -648,7 +660,9 @@ UNIX-domain socket endpoints use a nil PORT."
     (upcase (replace-regexp-in-string "-" "_" text t t))))
 
 (defun mongodb--mechanism-property-pair (name value)
-  "Return a normalized auth mechanism property pair."
+  "Return a normalized auth mechanism property pair.
+
+Arguments: NAME, VALUE."
   (let ((name (mongodb--mechanism-property-name name)))
     (when (string-empty-p name)
       (signal 'mongodb-error
@@ -747,7 +761,9 @@ UNIX-domain socket endpoints use a nil PORT."
 
 (defun mongodb--validate-oidc-configuration
     (properties oidc-callback oidc-human-callback)
-  "Validate MONGODB-OIDC PROPERTIES and callback configuration."
+  "Validate MONGODB-OIDC PROPERTIES and callback configuration.
+
+Arguments: PROPERTIES, OIDC-CALLBACK, OIDC-HUMAN-CALLBACK."
   (let ((environment (mongodb--oidc-mechanism-environment properties))
         (token-resource (mongodb--oidc-token-resource properties)))
     (when (and environment
@@ -808,7 +824,9 @@ UNIX-domain socket endpoints use a nil PORT."
       mongodb--oidc-default-allowed-hosts)))
 
 (defun mongodb--params-api-bool (params options keys option-key)
-  "Return (SPECIFIED . VALUE) for boolean KEYS or URL OPTION-KEY."
+  "Return (SPECIFIED . VALUE) for boolean KEYS or URL OPTION-KEY.
+
+Arguments: PARAMS, OPTIONS, KEYS, OPTION-KEY."
   (let ((found nil)
         value)
     (dolist (key keys)
@@ -958,14 +976,18 @@ UNIX-domain socket endpoints use a nil PORT."
 (defun mongodb--params-raw-bool-option-p (params keys url-name)
   "Return raw boolean option URL-NAME from PARAMS.
 Structured PARAMS values are used as booleans directly; URI values are parsed
-with MongoDB URI boolean rules."
+with MongoDB URI boolean rules.
+
+Arguments: PARAMS, KEYS, URL-NAME."
   (let ((value (mongodb--params-raw-option-value params keys url-name)))
     (if (stringp value)
         (mongodb--url-bool-option-value value url-name)
       value)))
 
 (defun mongodb--params-bool-option-p (params keys url-name)
-  "Return boolean option URL-NAME from PARAMS or effective URL options."
+  "Return boolean option URL-NAME from PARAMS or effective URL options.
+
+Arguments: PARAMS, KEYS, URL-NAME."
   (let ((value (mongodb--params-option-value params keys url-name)))
     (if (stringp value)
         (mongodb--url-bool-option-value value url-name)
@@ -973,7 +995,9 @@ with MongoDB URI boolean rules."
 
 (defun mongodb--params-nonnegative-integer-option
     (params keys url-name display-name)
-  "Return non-negative integer option DISPLAY-NAME from PARAMS."
+  "Return non-negative integer option DISPLAY-NAME from PARAMS.
+
+Arguments: PARAMS, KEYS, URL-NAME, DISPLAY-NAME."
   (let ((value (mongodb--params-option-value params keys url-name)))
     (when-let* ((number (mongodb--parse-integer-option value display-name)))
       (when (< number 0)
@@ -1029,7 +1053,9 @@ with MongoDB URI boolean rules."
 (defun mongodb--params-server-selection-try-once-p (params)
   "Return non-nil when MongoDB server selection scans only once.
 This single-threaded driver option defaults to true, matching the MongoDB URI
-option semantics for single-threaded drivers."
+option semantics for single-threaded drivers.
+
+Arguments: PARAMS."
   (let ((options (mongodb--params-effective-url-options params)))
     (cond
      ((plist-member params :server-selection-try-once)
@@ -1063,14 +1089,18 @@ option semantics for single-threaded drivers."
           (/ millis 1000.0)))))
 
 (defun mongodb--params-proxy-option-present-p (params keys url-name options)
-  "Return non-nil when PARAMS or OPTIONS explicitly include URL-NAME."
+  "Return non-nil when PARAMS or OPTIONS explicitly include URL-NAME.
+
+Arguments: PARAMS, KEYS, URL-NAME, OPTIONS."
   (or (seq-some (lambda (key)
                   (plist-member params key))
                 keys)
       (mongodb--url-option-present-p options url-name)))
 
 (defun mongodb--params-proxy-string (value name &optional empty-is-nil)
-  "Return validated MongoDB SOCKS5 proxy string VALUE for NAME."
+  "Return validated MongoDB SOCKS5 proxy string VALUE for NAME.
+
+Arguments: VALUE, NAME, EMPTY-IS-NIL."
   (cond
    ((null value) nil)
    ((not (stringp value))
@@ -1520,7 +1550,9 @@ MongoDB drivers treat -1 as unset and require positive values to be at least
    (t (format "%s" value))))
 
 (defun mongodb--params-bool-option (params options keys option-key)
-  "Return (SPECIFIED . VALUE) for boolean KEYS or URL OPTION-KEY."
+  "Return (SPECIFIED . VALUE) for boolean KEYS or URL OPTION-KEY.
+
+Arguments: PARAMS, OPTIONS, KEYS, OPTION-KEY."
   (let ((found nil)
         value)
     (dolist (key keys)
@@ -1701,7 +1733,9 @@ explicit non-zero levels are rejected rather than silently ignored."
      (t nil))))
 
 (defun mongodb--params-tls-bool (params options param-key option-key default)
-  "Return a TLS boolean from PARAMS, OPTIONS, or DEFAULT."
+  "Return a TLS boolean from PARAMS, OPTIONS, or DEFAULT.
+
+Arguments: PARAMS, OPTIONS, PARAM-KEY, OPTION-KEY, DEFAULT."
   (cond
    ((plist-member params param-key)
     (plist-get params param-key))
@@ -1870,7 +1904,9 @@ explicit non-zero levels are rejected rather than silently ignored."
        :oidc-allowed-hosts oidc-allowed-hosts))))
 
 (defun mongodb--validate-raw-load-balanced-params (params)
-  "Validate loadBalanced constraints that do not need SRV TXT records."
+  "Validate loadBalanced constraints that do not need SRV TXT records.
+
+Arguments: PARAMS."
   (when (mongodb--params-raw-load-balanced-p params)
     (when (mongodb--params-raw-replica-set-name params)
       (signal 'mongodb-error
@@ -1883,7 +1919,9 @@ explicit non-zero levels are rejected rather than silently ignored."
               (list "MongoDB loadBalanced=true cannot be combined with srvMaxHosts")))))
 
 (defun mongodb--validate-raw-srv-max-hosts-params (params)
-  "Validate srvMaxHosts constraints that do not need SRV TXT records."
+  "Validate srvMaxHosts constraints that do not need SRV TXT records.
+
+Arguments: PARAMS."
   (when (and (mongodb--params-srv-max-hosts params)
              (mongodb--params-raw-replica-set-name params))
     (signal 'mongodb-error

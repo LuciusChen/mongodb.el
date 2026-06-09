@@ -80,7 +80,9 @@ when the connection explicitly requests or receives zstd OP_COMPRESSED frames."
 ;;;; OP_MSG framing
 
 (defun mongodb--make-op-query (request-id database document)
-  "Return a legacy OP_QUERY command for initial handshake DOCUMENT."
+  "Return a legacy OP_QUERY command for initial handshake DOCUMENT.
+
+Arguments: REQUEST-ID, DATABASE, DOCUMENT."
   (let* ((body (concat (mongodb--pack-int32 0)
                        (mongodb--encode-cstring (format "%s.$cmd" database))
                        (mongodb--pack-int32 0)
@@ -595,7 +597,9 @@ the MongoDB protocol path independent from external compression libraries."
               body))))
 
 (defun mongodb--decode-message-frame (message &optional allow-more-to-come)
-  "Decode a MongoDB OP_MSG wire MESSAGE and return a decoded frame."
+  "Decode a MongoDB OP_MSG wire MESSAGE and return a decoded frame.
+
+Arguments: MESSAGE, ALLOW-MORE-TO-COME."
   (let* ((reader (make-mongodb--reader :data message :pos 0))
          (_length (mongodb--read-int32 reader))
          (_request-id (mongodb--read-int32 reader))
@@ -613,7 +617,9 @@ the MongoDB protocol path independent from external compression libraries."
               (list (format "Unexpected MongoDB opcode: %s" opcode)))))))
 
 (defun mongodb--decode-message (message &optional allow-more-to-come)
-  "Decode a MongoDB wire MESSAGE and return its body document."
+  "Decode a MongoDB wire MESSAGE and return its body document.
+
+Arguments: MESSAGE, ALLOW-MORE-TO-COME."
   (mongodb--decoded-message-document
    (mongodb--decode-message-frame message allow-more-to-come)))
 

@@ -370,7 +370,10 @@ for speculative authentication."
 (defun mongodb--scram-client-final
     (mechanism username secret client-first-bare client-nonce server-first-message)
   "Return SCRAM final data for MECHANISM and SERVER-FIRST-MESSAGE.
-The returned plist contains :message, :server-signature, and :server-nonce."
+The returned plist contains :message, :server-signature, and :server-nonce.
+
+Arguments: MECHANISM, USERNAME, SECRET, CLIENT-FIRST-BARE, CLIENT-NONCE,
+SERVER-FIRST-MESSAGE."
   (let* ((attrs (mongodb--scram-parse-attrs server-first-message))
          (server-nonce (cdr (assoc "r" attrs)))
          (salt64 (cdr (assoc "s" attrs)))
@@ -457,14 +460,19 @@ The returned plist contains :message, :server-signature, and :server-nonce."
 
 (defun mongodb--scram-sha256-client-final
     (secret client-first-bare client-nonce server-first-message)
-  "Return SCRAM-SHA-256 final data for SERVER-FIRST-MESSAGE."
+  "Return SCRAM-SHA-256 final data for SERVER-FIRST-MESSAGE.
+
+Arguments: SECRET, CLIENT-FIRST-BARE, CLIENT-NONCE, SERVER-FIRST-MESSAGE."
   (mongodb--scram-client-final
    "SCRAM-SHA-256" nil secret client-first-bare client-nonce
    server-first-message))
 
 (defun mongodb--scram-sha1-client-final
     (username secret client-first-bare client-nonce server-first-message)
-  "Return SCRAM-SHA-1 final data for SERVER-FIRST-MESSAGE."
+  "Return SCRAM-SHA-1 final data for SERVER-FIRST-MESSAGE.
+
+Arguments: USERNAME, SECRET, CLIENT-FIRST-BARE, CLIENT-NONCE,
+SERVER-FIRST-MESSAGE."
   (mongodb--scram-client-final
    "SCRAM-SHA-1" username secret client-first-bare client-nonce
    server-first-message))
@@ -730,7 +738,9 @@ When REQUIRE-EXPIRATION is non-nil, VALUE must include an Expiration field."
 (defun mongodb--aws-env-credentials
     (credential explicit-credentials &optional explicit-only)
   "Return explicit or environment AWS credentials for CREDENTIAL.
-When EXPLICIT-ONLY is non-nil, do not consult process environment variables."
+When EXPLICIT-ONLY is non-nil, do not consult process environment variables.
+
+Arguments: CREDENTIAL, EXPLICIT-CREDENTIALS, EXPLICIT-ONLY."
   (let* ((explicit-access-key-id
           (mongodb--nonempty-string
            (mongodb--credential-username credential)))
@@ -922,7 +932,9 @@ When EXPLICIT-ONLY is non-nil, do not consult process environment variables."
 
 (defun mongodb--aws-authorization-header
     (credentials host server-nonce amz-date)
-  "Return AWS SigV4 Authorization header for MONGODB-AWS."
+  "Return AWS SigV4 Authorization header for MONGODB-AWS.
+
+Arguments: CREDENTIALS, HOST, SERVER-NONCE, AMZ-DATE."
   (let* ((host (mongodb--aws-validate-sts-host host))
          (region (mongodb--aws-region host))
          (date-stamp (substring amz-date 0 8))
@@ -999,7 +1011,9 @@ When EXPLICIT-ONLY is non-nil, do not consult process environment variables."
     ("autoAuthorize" . 1)))
 
 (defun mongodb--aws-server-first (response client-nonce)
-  "Return decoded MONGODB-AWS server-first data from RESPONSE."
+  "Return decoded MONGODB-AWS server-first data from RESPONSE.
+
+Arguments: RESPONSE, CLIENT-NONCE."
   (let* ((payload (cdr (assoc "payload" response)))
          (document
           (and payload
@@ -1027,7 +1041,9 @@ When EXPLICIT-ONLY is non-nil, do not consult process environment variables."
           :conversation-id conversation-id)))
 
 (defun mongodb--aws-client-second-command (conversation-id credentials server-first)
-  "Return the MONGODB-AWS saslContinue command."
+  "Return the MONGODB-AWS saslContinue command.
+
+Arguments: CONVERSATION-ID, CREDENTIALS, SERVER-FIRST."
   (let* ((amz-date (mongodb--aws-date))
          (server-nonce (plist-get server-first :server-nonce))
          (host (plist-get server-first :host))
@@ -1238,7 +1254,9 @@ When EXPLICIT-ONLY is non-nil, do not consult process environment variables."
       token)))
 
 (defun mongodb--oidc-human-callback-token (credential idp-info)
-  "Return an OIDC access token from CREDENTIAL's human callback."
+  "Return an OIDC access token from CREDENTIAL's human callback.
+
+Arguments: CREDENTIAL, IDP-INFO."
   (let ((callback (mongodb--credential-oidc-human-callback credential)))
     (unless (functionp callback)
       (signal 'mongodb-error
@@ -1332,7 +1350,9 @@ When EXPLICIT-ONLY is non-nil, do not consult process environment variables."
     ("autoAuthorize" . 1)))
 
 (defun mongodb--oidc-continue-command (conversation-id token)
-  "Return a MONGODB-OIDC saslContinue command for TOKEN."
+  "Return a MONGODB-OIDC saslContinue command for TOKEN.
+
+Arguments: CONVERSATION-ID, TOKEN."
   `(("saslContinue" . 1)
     ("conversationId" . ,conversation-id)
     ("payload" . ,(mongodb-binary
@@ -1400,7 +1420,9 @@ When EXPLICIT-ONLY is non-nil, do not consult process environment variables."
       (equal host allowed)))))
 
 (defun mongodb--oidc-allowed-host-p (host allowed-hosts)
-  "Return non-nil when HOST is allowed for a human OIDC callback."
+  "Return non-nil when HOST is allowed for a human OIDC callback.
+
+Arguments: HOST, ALLOWED-HOSTS."
   (seq-some (lambda (allowed)
               (mongodb--oidc-host-matches-allowed-p host allowed))
             (or allowed-hosts mongodb--oidc-default-allowed-hosts)))

@@ -212,7 +212,9 @@ PATTERN is the regex pattern.  OPTIONS is a BSON regex option string."
            sum (ash (mongodb--read-byte reader) shift)))
 
 (defun mongodb--signed (value bits)
-  "Return unsigned VALUE interpreted as a signed BITS-bit integer."
+  "Return unsigned VALUE interpreted as a signed BITS-bit integer.
+
+Arguments: VALUE, BITS."
   (let ((sign (expt 2 (1- bits)))
         (modulus (expt 2 bits)))
     (if (>= value sign)
@@ -783,7 +785,9 @@ DOCUMENT may be a `mongodb-document', hash table, alist, or nil.  Signal
           (format "E%+d" exponent)))
 
 (defun mongodb--format-decimal128 (negative coefficient exponent)
-  "Return canonical text for Decimal128 COEFFICIENT and EXPONENT."
+  "Return canonical text for Decimal128 COEFFICIENT and EXPONENT.
+
+Arguments: NEGATIVE, COEFFICIENT, EXPONENT."
   (let* ((sign (if negative "-" ""))
          (digits (number-to-string coefficient)))
     (if (zerop coefficient)
@@ -1029,7 +1033,9 @@ DOCUMENT may be a `mongodb-document', hash table, alist, or nil.  Signal
 
 (defun mongodb--pbkdf2-hmac-sha256 (secret salt iterations)
   "Return PBKDF2-HMAC-SHA-256 for SECRET and SALT.
-The derived key length is SHA-256's 32-byte digest length."
+The derived key length is SHA-256's 32-byte digest length.
+
+Arguments: SECRET, SALT, ITERATIONS."
   (unless (and (integerp iterations)
                (> iterations 0))
     (signal 'mongodb-error
@@ -1048,7 +1054,9 @@ The derived key length is SHA-256's 32-byte digest length."
 
 (defun mongodb--pbkdf2-hmac-sha1 (secret salt iterations)
   "Return PBKDF2-HMAC-SHA-1 for SECRET and SALT.
-The derived key length is SHA-1's 20-byte digest length."
+The derived key length is SHA-1's 20-byte digest length.
+
+Arguments: SECRET, SALT, ITERATIONS."
   (unless (and (integerp iterations)
                (> iterations 0))
     (signal 'mongodb-error

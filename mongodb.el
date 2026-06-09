@@ -374,7 +374,9 @@ UnsatisfiableWriteConcern.")
       message)))
 
 (defun mongodb--wait-for-bytes (conn count timeout)
-  "Wait until CONN buffer contains at least COUNT bytes."
+  "Wait until CONN buffer contains at least COUNT bytes.
+
+Arguments: CONN, COUNT, TIMEOUT."
   (let* ((proc (mongodb-conn-process conn))
          (buffer (mongodb-conn-buffer conn))
          (deadline (+ (float-time) timeout)))
@@ -392,7 +394,9 @@ UnsatisfiableWriteConcern.")
 
 (defun mongodb--recv-message-frame
     (conn &optional timeout expected-response-to allow-more-to-come)
-  "Read one OP_MSG wire message frame from CONN."
+  "Read one OP_MSG wire message frame from CONN.
+
+Arguments: CONN, TIMEOUT, EXPECTED-RESPONSE-TO, ALLOW-MORE-TO-COME."
   (let* ((buffer (mongodb-conn-buffer conn))
          (timeout (or timeout
                       (mongodb-conn-socket-timeout conn)
@@ -419,13 +423,17 @@ UnsatisfiableWriteConcern.")
 
 (defun mongodb--recv-message
     (conn &optional timeout expected-response-to allow-more-to-come)
-  "Read one OP_MSG wire message from CONN."
+  "Read one OP_MSG wire message from CONN.
+
+Arguments: CONN, TIMEOUT, EXPECTED-RESPONSE-TO, ALLOW-MORE-TO-COME."
   (mongodb--decoded-message-document
    (mongodb--recv-message-frame
     conn timeout expected-response-to allow-more-to-come)))
 
 (defun mongodb--recv-handshake-message (conn &optional timeout expected-response-to)
-  "Read one legacy handshake reply from CONN."
+  "Read one legacy handshake reply from CONN.
+
+Arguments: CONN, TIMEOUT, EXPECTED-RESPONSE-TO."
   (let* ((buffer (mongodb-conn-buffer conn))
          (timeout (or timeout
                       (mongodb-conn-socket-timeout conn)
@@ -776,7 +784,9 @@ session state without advancing the deployment-level cluster time."
 
 (defun mongodb--advance-transaction-recovery-token-from-response
     (conn transaction-state response)
-  "Cache latest transaction recoveryToken from RESPONSE on CONN."
+  "Cache latest transaction recoveryToken from RESPONSE on CONN.
+
+Arguments: CONN, TRANSACTION-STATE, RESPONSE."
   (when (and transaction-state
              (mongodb--ok-p response))
     (when-let* ((token (cdr (assoc "recoveryToken" response))))
@@ -792,7 +802,11 @@ session state without advancing the deployment-level cluster time."
     (command database &optional server-api session-id read-preference
              read-concern write-concern txn-number transaction-state
              transaction-read-concern cluster-time)
-  "Return COMMAND with MongoDB driver-level metadata added."
+  "Return COMMAND with MongoDB driver-level metadata added.
+
+Arguments: COMMAND, DATABASE, SERVER-API, SESSION-ID, READ-PREFERENCE,
+READ-CONCERN, WRITE-CONCERN, TXN-NUMBER, TRANSACTION-STATE,
+TRANSACTION-READ-CONCERN, CLUSTER-TIME."
   (let ((pairs (copy-sequence
                 (mongodb--document-pairs command))))
     (unless (assoc "$db" pairs)
@@ -935,7 +949,9 @@ data list."
       (signal 'mongodb-error (list message)))))
 
 (defun mongodb--signal-transaction-error-with-labels (conn message labels)
-  "Signal MongoDB transaction error MESSAGE after applying LABELS side effects."
+  "Signal MongoDB transaction error MESSAGE after applying LABELS side effects.
+
+Arguments: CONN, MESSAGE, LABELS."
   (mongodb--transaction-unpin-for-labels conn labels)
   (mongodb--signal-error-with-labels message labels))
 
@@ -1026,7 +1042,9 @@ document, matching MongoDB command monitoring semantics."
 
 (defun mongodb--command-event-common-fields
     (conn database command-name request-id)
-  "Return common command monitoring fields for CONN."
+  "Return common command monitoring fields for CONN.
+
+Arguments: CONN, DATABASE, COMMAND-NAME, REQUEST-ID."
   (let ((fields `((connection . ,conn)
                   (connection-id . ,(mongodb--conn-address conn))
                   (database-name . ,database)
@@ -1160,7 +1178,9 @@ document, matching MongoDB command monitoring semantics."
       event)))
 
 (defun mongodb--sdam-heartbeat-event-fields (conn awaited)
-  "Return common SDAM heartbeat event fields for CONN."
+  "Return common SDAM heartbeat event fields for CONN.
+
+Arguments: CONN, AWAITED."
   (let* ((address (mongodb--conn-address conn))
          (fields `((connection . ,conn)
                    (connection-id . ,address)
@@ -1243,7 +1263,9 @@ document, matching MongoDB command monitoring semantics."
      :compatible t)))
 
 (defun mongodb--emit-sdam-description-changes (conn old-topology new-topology)
-  "Emit SDAM description-changed events for CONN topology changes."
+  "Emit SDAM description-changed events for CONN topology changes.
+
+Arguments: CONN, OLD-TOPOLOGY, NEW-TOPOLOGY."
   (when (and mongodb-sdam-event-hook old-topology new-topology)
     (let* ((address (mongodb--conn-address conn))
            (old-server (mongodb--topology-server-description
@@ -1423,14 +1445,18 @@ document, matching MongoDB command monitoring semantics."
           message))))
 
 (defun mongodb--transaction-transient-condition-p (conn command err)
-  "Return non-nil when ERR should have TransientTransactionError."
+  "Return non-nil when ERR should have TransientTransactionError.
+
+Arguments: CONN, COMMAND, ERR."
   (and (mongodb-in-transaction-p conn)
        (not (equal (mongodb--command-name command) "commitTransaction"))
        (or (mongodb--network-error-p err)
            (mongodb--server-selection-error-p err))))
 
 (defun mongodb--signal-transaction-transient-error (err &optional conn)
-  "Signal ERR with TransientTransactionError added."
+  "Signal ERR with TransientTransactionError added.
+
+Arguments: ERR, CONN."
   (when conn
     (mongodb--unpin-transaction conn))
   (mongodb--signal-error-with-labels
@@ -1577,7 +1603,9 @@ Documents that already contain `_id' are returned unchanged."
     (nreverse chunks)))
 
 (defun mongodb--command-for-size-estimate (conn database command)
-  "Return COMMAND with the metadata known before send for size estimates."
+  "Return COMMAND with the metadata known before send for size estimates.
+
+Arguments: CONN, DATABASE, COMMAND."
   (if (mongodb-conn-p conn)
       (let* ((transaction-state (mongodb--transaction-command-state conn command))
              (transaction-number
@@ -1601,7 +1629,9 @@ Documents that already contain `_id' are returned unchanged."
   (+ 1 4 (length (mongodb--encode-cstring identifier))))
 
 (defun mongodb--insert-batch-byte-budget (conn database command)
-  "Return safe document-sequence byte budget for insert COMMAND."
+  "Return safe document-sequence byte budget for insert COMMAND.
+
+Arguments: CONN, DATABASE, COMMAND."
   (let* ((command-document
           (mongodb--command-for-size-estimate conn database command))
          (base-message
@@ -1618,7 +1648,9 @@ Documents that already contain `_id' are returned unchanged."
     budget))
 
 (defun mongodb--insert-document-batches (conn database command docs)
-  "Return DOCS split for insert using count and wire-size limits."
+  "Return DOCS split for insert using count and wire-size limits.
+
+Arguments: CONN, DATABASE, COMMAND, DOCS."
   (let ((max-bson (mongodb--max-bson-object-size conn))
         (max-count (mongodb--max-write-batch-size conn))
         (max-bytes (mongodb--insert-batch-byte-budget conn database command))
@@ -1699,7 +1731,9 @@ Documents that already contain `_id' are returned unchanged."
                      server)))))))
 
 (defun mongodb--retryable-write-enabled-p (conn command sequences)
-  "Return non-nil when CONN should retry write COMMAND once."
+  "Return non-nil when CONN should retry write COMMAND once.
+
+Arguments: CONN, COMMAND, SEQUENCES."
   (and mongodb--retryable-write-context
        (mongodb-conn-retry-writes conn)
        (not (mongodb-in-transaction-p conn))
@@ -1715,7 +1749,9 @@ Documents that already contain `_id' are returned unchanged."
     (mongodb-int64 next)))
 
 (defun mongodb--retryable-write-concern-error-p (conn response)
-  "Return non-nil when RESPONSE has a retryable writeConcernError."
+  "Return non-nil when RESPONSE has a retryable writeConcernError.
+
+Arguments: CONN, RESPONSE."
   (let ((write-concern-error (cdr (assoc "writeConcernError" response))))
     (and write-concern-error
          (not (eq (mongodb--topology-current-server-type conn) 'mongos))
@@ -1723,7 +1759,9 @@ Documents that already contain `_id' are returned unchanged."
                  mongodb--retryable-write-error-codes))))
 
 (defun mongodb--retryable-write-server-error-p (conn response)
-  "Return non-nil when RESPONSE reports a retryable write server error."
+  "Return non-nil when RESPONSE reports a retryable write server error.
+
+Arguments: CONN, RESPONSE."
   (let ((code (cdr (assoc "code" response)))
         (labels (cdr (assoc "errorLabels" response))))
     (or (and labels
@@ -1767,7 +1805,9 @@ Documents that already contain `_id' are returned unchanged."
 
 (defun mongodb--topology-with-replaced-server
     (conn server &optional old-topology)
-  "Return topology for CONN with current address replaced by SERVER."
+  "Return topology for CONN with current address replaced by SERVER.
+
+Arguments: CONN, SERVER, OLD-TOPOLOGY."
   (let* ((topology (or old-topology
                        (mongodb--ensure-topology-description conn)))
          (address (mongodb--conn-address conn))
@@ -1912,7 +1952,9 @@ state-change errors can be compared for freshness."
 
 (defun mongodb--server-staleness-seconds
     (server topology heartbeat-seconds)
-  "Return SERVER's estimated staleness in seconds, or nil."
+  "Return SERVER's estimated staleness in seconds, or nil.
+
+Arguments: SERVER, TOPOLOGY, HEARTBEAT-SECONDS."
   (let ((server-last-write (mongodb-server-description-last-write-date server))
         (heartbeat (or heartbeat-seconds
                        mongodb-monitor-heartbeat-seconds)))
@@ -1937,7 +1979,9 @@ state-change errors can be compared for freshness."
 
 (defun mongodb--server-within-max-staleness-p
     (server read-preference topology heartbeat-seconds)
-  "Return non-nil when SERVER satisfies READ-PREFERENCE max staleness."
+  "Return non-nil when SERVER satisfies READ-PREFERENCE max staleness.
+
+Arguments: SERVER, READ-PREFERENCE, TOPOLOGY, HEARTBEAT-SECONDS."
   (let ((max-staleness
          (and read-preference
               (mongodb--read-preference-max-staleness-seconds
@@ -1956,7 +2000,9 @@ state-change errors can be compared for freshness."
 
 (defun mongodb--server-matches-read-preference-constraints-p
     (server read-preference topology heartbeat-seconds)
-  "Return non-nil when SERVER satisfies read preference constraints."
+  "Return non-nil when SERVER satisfies read preference constraints.
+
+Arguments: SERVER, READ-PREFERENCE, TOPOLOGY, HEARTBEAT-SECONDS."
   (and (mongodb--server-matches-read-preference-tags-p
         server read-preference)
        (mongodb--server-within-max-staleness-p
@@ -1964,7 +2010,9 @@ state-change errors can be compared for freshness."
 
 (defun mongodb--readable-server-p
     (server read-preference topology &optional heartbeat-seconds)
-  "Return non-nil when SERVER satisfies READ-PREFERENCE in TOPOLOGY."
+  "Return non-nil when SERVER satisfies READ-PREFERENCE in TOPOLOGY.
+
+Arguments: SERVER, READ-PREFERENCE, TOPOLOGY, HEARTBEAT-SECONDS."
   (let ((type (and server
                    (mongodb-server-description-type server)))
         (mode (if read-preference
@@ -2047,7 +2095,9 @@ calculation and defaults to `mongodb-monitor-heartbeat-seconds'."
   "Return effective OP_MSG read preference for CONN and COMMAND.
 In Server Selection Spec Single topology, reads against a replica-set member
 must carry primaryPreferred when the application did not request a non-primary
-read preference.  This allows directConnection=true reads from secondaries."
+read preference.  This allows directConnection=true reads from secondaries.
+
+Arguments: CONN, COMMAND, READ-PREFERENCE."
   (let* ((topology (mongodb--ensure-topology-description conn))
          (server (mongodb--current-server-description conn))
          (mode (and read-preference
@@ -2073,7 +2123,9 @@ read preference.  This allows directConnection=true reads from secondaries."
   "Return the selected current server description for CONN and PURPOSE.
 PURPOSE may be `write' or `read'.  The current implementation tracks one
 socket; this function exposes the server-selection boundary used by future
-  multi-server topology monitoring."
+  multi-server topology monitoring.
+
+Arguments: CONN, PURPOSE, READ-PREFERENCE."
   (let* ((topology (mongodb--ensure-topology-description conn))
          (server (mongodb--current-server-description conn))
          (read-preference (or read-preference
@@ -2118,7 +2170,9 @@ socket; this function exposes the server-selection boundary used by future
       (format "%s" type))))
 
 (defun mongodb--ensure-writable-server (conn command &optional timeout)
-  "Refresh CONN if COMMAND needs a writable server and none is selected."
+  "Refresh CONN if COMMAND needs a writable server and none is selected.
+
+Arguments: CONN, COMMAND, TIMEOUT."
   (when (and (mongodb--write-command-p command)
              (not (mongodb-select-server conn 'write)))
     (ignore-errors
@@ -2133,7 +2187,9 @@ socket; this function exposes the server-selection boundary used by future
 
 (defun mongodb--ensure-readable-server
     (conn command &optional timeout read-preference)
-  "Refresh CONN if COMMAND needs a readable server and none is selected."
+  "Refresh CONN if COMMAND needs a readable server and none is selected.
+
+Arguments: CONN, COMMAND, TIMEOUT, READ-PREFERENCE."
   (when (and (mongodb--read-command-p command)
              (not (mongodb-select-server conn 'read read-preference)))
     (ignore-errors
@@ -2261,7 +2317,9 @@ purposes, or nil when RESPONSE is not a state-change error."
                 (list "Cannot set write concern after starting a transaction"))))))
 
 (defun mongodb--command-timeout (conn timeout)
-  "Return the effective timeout seconds for a MongoDB command on CONN."
+  "Return the effective timeout seconds for a MongoDB command on CONN.
+
+Arguments: CONN, TIMEOUT."
   (or timeout
       (mongodb-conn-operation-timeout conn)
       (mongodb-conn-socket-timeout conn)
@@ -2280,7 +2338,9 @@ purposes, or nil when RESPONSE is not a state-change error."
   conn)
 
 (defun mongodb--transaction-pinnable-server (conn)
-  "Return current server when transaction commands should pin to it."
+  "Return current server when transaction commands should pin to it.
+
+Arguments: CONN."
   (when-let* ((server (mongodb--current-server-description conn)))
     (when (memq (mongodb-server-description-type server)
                 '(mongos load-balanced))
@@ -2324,7 +2384,9 @@ to the selected serviceId on the single socket."
 (defun mongodb--send-command-and-receive
     (conn database command timeout sequences txn-number)
   "Send one MongoDB COMMAND attempt and return the response alist.
-SEQUENCES, when non-nil, is sent as OP_MSG document sequence sections."
+SEQUENCES, when non-nil, is sent as OP_MSG document sequence sections.
+
+Arguments: CONN, DATABASE, COMMAND, TIMEOUT, SEQUENCES, TXN-NUMBER."
   (unless (mongodb-live-p conn)
     (signal 'mongodb-error
             (list "MongoDB connection is closed")))
@@ -2401,7 +2463,9 @@ SEQUENCES, when non-nil, is sent as OP_MSG document sequence sections."
     (conn database command timeout sequences)
   "Send one MongoDB COMMAND attempt with exhaustAllowed and return responses.
 SEQUENCES, when non-nil, is sent as OP_MSG document sequence sections.  The
-caller must only use commands whose server semantics allow exhaust replies."
+caller must only use commands whose server semantics allow exhaust replies.
+
+Arguments: CONN, DATABASE, COMMAND, TIMEOUT, SEQUENCES."
   (unless (mongodb-live-p conn)
     (signal 'mongodb-error
             (list "MongoDB connection is closed")))
@@ -2835,7 +2899,9 @@ writeConcern rules."
           `(("recoveryToken" . ,recovery-token))))))
 
 (defun mongodb--effective-commit-max-time-ms (conn max-time-ms)
-  "Return effective commitTransaction maxTimeMS for CONN."
+  "Return effective commitTransaction maxTimeMS for CONN.
+
+Arguments: CONN, MAX-TIME-MS."
   (or (mongodb--validate-nonnegative-time-ms max-time-ms "maxTimeMS")
       (mongodb-conn-transaction-max-commit-time-ms conn)))
 
@@ -2851,13 +2917,17 @@ writeConcern rules."
                          "UnsatisfiableWriteConcern")))))))
 
 (defun mongodb--commit-response-unknown-result-p (conn response)
-  "Return non-nil when commitTransaction RESPONSE should be labeled unknown."
+  "Return non-nil when commitTransaction RESPONSE should be labeled unknown.
+
+Arguments: CONN, RESPONSE."
   (or (mongodb--retryable-write-server-error-p conn response)
       (= (or (cdr (assoc "code" response)) -1) 50)
       (mongodb--commit-write-concern-unknown-result-p response)))
 
 (defun mongodb--commit-response-labels (conn response)
-  "Return error labels for commitTransaction RESPONSE."
+  "Return error labels for commitTransaction RESPONSE.
+
+Arguments: CONN, RESPONSE."
   (let ((labels (mongodb--response-error-labels response)))
     (when (mongodb--commit-response-unknown-result-p conn response)
       (setq labels
@@ -2885,7 +2955,9 @@ writeConcern rules."
    mongodb--unknown-transaction-commit-result-label))
 
 (defun mongodb--commit-response-retryable-p (conn response)
-  "Return non-nil when commitTransaction RESPONSE should be retried once."
+  "Return non-nil when commitTransaction RESPONSE should be retried once.
+
+Arguments: CONN, RESPONSE."
   (or (mongodb--retryable-write-server-error-p conn response)
       (mongodb--retryable-write-concern-error-p conn response)))
 
@@ -2900,7 +2972,9 @@ writeConcern rules."
           `(("recoveryToken" . ,recovery-token))))))
 
 (defun mongodb--abort-response-retryable-p (conn response)
-  "Return non-nil when abortTransaction RESPONSE should be retried once."
+  "Return non-nil when abortTransaction RESPONSE should be retried once.
+
+Arguments: CONN, RESPONSE."
   (or (mongodb--retryable-write-server-error-p conn response)
       (mongodb--retryable-write-concern-error-p conn response)))
 
@@ -2918,7 +2992,9 @@ writeConcern rules."
 (defun mongodb--run-commit-transaction
     (conn max-time-ms retry-attempt)
   "Run commitTransaction for CONN and return the response.
-RETRY-ATTEMPT means apply commit retry writeConcern rules to the first attempt."
+RETRY-ATTEMPT means apply commit retry writeConcern rules to the first attempt.
+
+Arguments: CONN, MAX-TIME-MS, RETRY-ATTEMPT."
   (let ((retries 1)
         response)
     (condition-case final-error
@@ -3201,7 +3277,9 @@ SEQUENCES, when non-nil, is sent as OP_MSG document sequence sections."
   "Run MongoDB COMMAND with OP_MSG exhaustAllowed and return response alists.
 SEQUENCES, when non-nil, is sent as OP_MSG document sequence sections.  This is
 a low-level protocol helper; callers must only use it with MongoDB commands
-that can legally return exhaust-style replies."
+that can legally return exhaust-style replies.
+
+Arguments: CONN, DATABASE, COMMAND, TIMEOUT, SEQUENCES."
   (when conn
     (mongodb--clear-ended-transaction-for-command conn command))
   (mongodb--send-command-exhaust-and-receive
@@ -3288,7 +3366,10 @@ FALLBACK is used when the server reply omits cursor namespace metadata."
 GET-MORE-OPTIONS may include batchSize and maxAwaitTimeMS.  If it includes
 _stopOnEmptyBatch, stop when an awaitable cursor returns an empty non-terminal
 batch and close that server-side cursor.  When SUPPRESS-NETWORK-ERROR-KILL is
-non-nil, do not issue killCursors after a getMore network error."
+non-nil, do not issue killCursors after a getMore network error.
+
+Arguments: CONN, DATABASE, COLLECTION, RESPONSE, FIRST-KEY, GET-MORE-OPTIONS,
+SUPPRESS-NETWORK-ERROR-KILL."
   (let* ((get-more-options (mongodb--option-pairs get-more-options))
          (get-more-batch-size (or (cdr (assoc "batchSize" get-more-options))
                                   1000))
@@ -3390,7 +3471,9 @@ OPTIONS is an alist or document of additional create command fields."
 
 (defun mongodb-find-command
     (collection &optional filter projection limit skip options)
-  "Return a MongoDB find command document for COLLECTION."
+  "Return a MongoDB find command document for COLLECTION.
+
+Arguments: COLLECTION, FILTER, PROJECTION, LIMIT, SKIP, OPTIONS."
   (let ((option-pairs (mongodb--option-pairs options)))
     `(("find" . ,collection)
       ("filter" . ,(or filter (mongodb-document nil)))
@@ -3528,7 +3611,9 @@ start with a stage that does not require an underlying collection."
 
 (defun mongodb-watch-command (collection &optional pipeline options)
   "Return a MongoDB aggregate command that opens a change stream.
-COLLECTION may be a collection name or 1 for database-level watches."
+COLLECTION may be a collection name or 1 for database-level watches.
+
+Arguments: COLLECTION, PIPELINE, OPTIONS."
   (mongodb-aggregate-command
    collection
    (mongodb--watch-pipeline pipeline options)
@@ -3538,7 +3623,9 @@ COLLECTION may be a collection name or 1 for database-level watches."
     (conn database collection &optional pipeline options)
   "Open a collection change stream and return available events.
 Clutch consumes a finite batch rather than returning a live cursor object: once
-an empty await batch is observed, the server cursor is closed."
+an empty await batch is observed, the server cursor is closed.
+
+Arguments: CONN, DATABASE, COLLECTION, PIPELINE, OPTIONS."
   (let* ((option-pairs (mongodb--option-pairs options))
          (response
           (mongodb--operation-command
@@ -3551,7 +3638,9 @@ an empty await batch is observed, the server cursor is closed."
 (defun mongodb-watch-database
     (conn database &optional pipeline options)
   "Open a database-level change stream and return available events.
-This is the protocol equivalent of mongosh `db.watch'."
+This is the protocol equivalent of mongosh `db.watch'.
+
+Arguments: CONN, DATABASE, PIPELINE, OPTIONS."
   (let* ((option-pairs (mongodb--option-pairs options))
          (response
           (mongodb--operation-command
@@ -3735,7 +3824,9 @@ values follow mongosh compatibility rules."
 
 (defun mongodb--bulk-write-validate-write-concern
     (conn command verbose-results)
-  "Signal when bulkWrite COMMAND uses invalid unacknowledged write concern."
+  "Signal when bulkWrite COMMAND uses invalid unacknowledged write concern.
+
+Arguments: CONN, COMMAND, VERBOSE-RESULTS."
   (let ((write-concern (mongodb--write-concern-value conn command))
         (ordered (mongodb--wire-truthy-p
                   (mongodb--document-field command "ordered"))))
@@ -3745,7 +3836,9 @@ values follow mongosh compatibility rules."
               (list "MongoDB bulkWrite with unacknowledged write concern requires ordered=false and verboseResults=false")))))
 
 (defun mongodb--bulk-write-batch-command (operations options)
-  "Return one bulkWrite (COMMAND . SEQUENCES) batch for OPERATIONS."
+  "Return one bulkWrite (COMMAND . SEQUENCES) batch for OPERATIONS.
+
+Arguments: OPERATIONS, OPTIONS."
   (let ((namespaces (list nil))
         (ops nil))
     (dolist (operation operations)
@@ -3766,7 +3859,9 @@ matching the bulkWrite batching rule."
 
 (defun mongodb--bulk-write-batch-within-budget-p
     (conn command sequences)
-  "Return non-nil when bulkWrite COMMAND and SEQUENCES fit one batch."
+  "Return non-nil when bulkWrite COMMAND and SEQUENCES fit one batch.
+
+Arguments: CONN, COMMAND, SEQUENCES."
   (<= (mongodb--bulk-write-message-size conn command sequences)
       (- (mongodb--max-message-size-bytes conn)
          mongodb--write-batch-message-safety-bytes)))
@@ -3818,9 +3913,8 @@ matching the bulkWrite batching rule."
 
 (defun mongodb-bulk-write-command (operations &optional options)
   "Return (COMMAND . SEQUENCES) for MongoDB client-level bulkWrite.
-OPERATIONS is a list or vector of operation documents.  Each operation uses
-one of (\"insert\" . \"db.coll\"), (\"update\" . \"db.coll\"), or
-(\"delete\" . \"db.coll\") plus the command fields for that operation.
+OPERATIONS is a list or vector of operation documents.  Each operation names an
+insert, update, or delete namespace plus the command fields for that operation.
 OPTIONS is a MongoDB command option document."
   (mongodb--bulk-write-batch-command
    (mongodb--bulk-write-operations-list operations)
@@ -3851,7 +3945,9 @@ OPTIONS is a MongoDB command option document."
   "Run a MongoDB client-level bulkWrite on CONN.
 The command is sent to admin using OP_MSG document sequences for ops and
 nsInfo.  The returned response includes a \"results\" vector containing all
-cursor result documents."
+cursor result documents.
+
+Arguments: CONN, OPERATIONS, OPTIONS, TIMEOUT."
   (let* ((operations (mongodb--bulk-write-operations-list operations))
          (command (mongodb--bulk-write-command-document options))
          (verbose-results
@@ -4120,7 +4216,9 @@ REMOVE is non-nil.  OPTIONS is a MongoDB options document."
     (unibyte-string #x00)))
 
 (defun mongodb--socks5-username-password-auth (proc buffer proxy timeout)
-  "Authenticate SOCKS5 PROC with username/password PROXY credentials."
+  "Authenticate SOCKS5 PROC with username/password PROXY credentials.
+
+Arguments: PROC, BUFFER, PROXY, TIMEOUT."
   (let* ((username (mongodb--utf8-bytes (plist-get proxy :username)))
          (password (mongodb--utf8-bytes (plist-get proxy :password)))
          (reply nil))
@@ -4159,7 +4257,9 @@ REMOVE is non-nil.  OPTIONS is a MongoDB options document."
             (mongodb--pack-uint16-be port))))
 
 (defun mongodb--socks5-read-reply (proc buffer timeout)
-  "Read and validate a SOCKS5 CONNECT reply from PROC BUFFER."
+  "Read and validate a SOCKS5 CONNECT reply from PROC BUFFER.
+
+Arguments: PROC, BUFFER, TIMEOUT."
   (let* ((header (mongodb--process-read-bytes
                   proc buffer 4 timeout "MongoDB SOCKS5 CONNECT reply"))
          (version (aref header 0))
@@ -4199,7 +4299,9 @@ REMOVE is non-nil.  OPTIONS is a MongoDB options document."
                                 (format "reply code %s" reply-code))))))))
 
 (defun mongodb--socks5-connect (proc buffer host port proxy timeout)
-  "Open a SOCKS5 tunnel over PROC to MongoDB HOST and PORT using PROXY."
+  "Open a SOCKS5 tunnel over PROC to MongoDB HOST and PORT using PROXY.
+
+Arguments: PROC, BUFFER, HOST, PORT, PROXY, TIMEOUT."
   (let* ((methods (mongodb--socks5-auth-methods proxy))
          (reply nil))
     (mongodb--socks5-send
@@ -4235,7 +4337,10 @@ REMOVE is non-nil.  OPTIONS is a MongoDB options document."
 (defun mongodb--send-initial-handshake
     (conn credential compressors server-api load-balanced speculative-auth
           app-name)
-  "Send the initial MongoDB handshake and return the hello response."
+  "Send the initial MongoDB handshake and return the hello response.
+
+Arguments: CONN, CREDENTIAL, COMPRESSORS, SERVER-API, LOAD-BALANCED,
+SPECULATIVE-AUTH, APP-NAME."
   (let ((command (mongodb--initial-handshake-command
                   credential compressors server-api load-balanced
                   speculative-auth app-name)))
@@ -4399,7 +4504,9 @@ returning."
 
 (defun mongodb--hello-command-document
     (conn &optional topology-version max-await-time-ms)
-  "Return a post-handshake hello command document for CONN."
+  "Return a post-handshake hello command document for CONN.
+
+Arguments: CONN, TOPOLOGY-VERSION, MAX-AWAIT-TIME-MS."
   (let ((command-name (or (mongodb-conn-hello-command conn) "hello")))
     `((,command-name . 1)
       ,@(when topology-version
@@ -4428,7 +4535,9 @@ returning."
   "Run a post-handshake hello probe on CONN and return the response.
 This is the command shape used for topology monitoring: it does not include
 initial handshake metadata such as client information, compression, or
-speculative authentication."
+speculative authentication.
+
+Arguments: CONN, TIMEOUT."
   (mongodb--run-hello-command
    conn
    (mongodb--hello-command-document conn)
@@ -4440,7 +4549,9 @@ speculative authentication."
 When the current server description has a topologyVersion, include both
 topologyVersion and MAX-AWAIT-TIME-MS, matching MongoDB's awaitable hello
 monitoring protocol.  Older servers without topologyVersion fall back to a
-normal post-handshake hello."
+normal post-handshake hello.
+
+Arguments: CONN, MAX-AWAIT-TIME-MS, TIMEOUT."
   (let* ((server (mongodb--current-server-description conn))
          (topology-version
           (and server
@@ -4461,7 +4572,9 @@ unless CONN is configured with serverMonitoringMode=poll.
 On success, return the hello response and clear `mongodb-conn-monitor-error'.
 On failure, record the error, mark the current server Unknown, and signal it.
 In load-balanced mode, do not run a monitoring command; return the cached hello
-response from the initial connection handshake instead."
+response from the initial connection handshake instead.
+
+Arguments: CONN, MAX-AWAIT-TIME-MS, TIMEOUT."
   (if (mongodb-conn-load-balanced conn)
       (progn
         (setf (mongodb-conn-monitor-error conn) nil)
@@ -4502,7 +4615,9 @@ response from the initial connection handshake instead."
          (signal (car err) (cdr err)))))))
 
 (defun mongodb--monitor-tick (conn max-await-time-ms timeout)
-  "Run one scheduled monitor tick for CONN."
+  "Run one scheduled monitor tick for CONN.
+
+Arguments: CONN, MAX-AWAIT-TIME-MS, TIMEOUT."
   (if (not (mongodb-live-p conn))
       (mongodb-stop-monitor conn)
     (ignore-errors
@@ -4520,7 +4635,9 @@ response from the initial connection handshake instead."
     (conn &optional heartbeat-seconds max-await-time-ms timeout)
   "Start an explicit MongoDB monitor timer for CONN.
 The monitor is not started automatically by `mongodb-connect'; callers opt in
-when background topology refresh is appropriate for their UI/runtime."
+when background topology refresh is appropriate for their UI/runtime.
+
+Arguments: CONN, HEARTBEAT-SECONDS, MAX-AWAIT-TIME-MS, TIMEOUT."
   (mongodb-stop-monitor conn)
   (unless (mongodb-conn-load-balanced conn)
     (let* ((heartbeat (or heartbeat-seconds
@@ -4620,7 +4737,9 @@ Endpoints whose keys already appear in ENDPOINTS or EXCLUDED-KEYS are skipped."
                    (cdr (assoc "arbiters" hello)))))))
 
 (defun mongodb--hello-server-type (hello &optional load-balanced)
-  "Return an SDAM-style server type symbol for HELLO."
+  "Return an SDAM-style server type symbol for HELLO.
+
+Arguments: HELLO, LOAD-BALANCED."
   (cond
    (load-balanced 'load-balanced)
    ((not (mongodb--ok-p hello)) 'unknown)
@@ -4638,7 +4757,9 @@ Endpoints whose keys already appear in ENDPOINTS or EXCLUDED-KEYS are skipped."
 
 (defun mongodb--unknown-server-description
     (address &optional error topology-version)
-  "Return an Unknown server description for ADDRESS."
+  "Return an Unknown server description for ADDRESS.
+
+Arguments: ADDRESS, ERROR, TOPOLOGY-VERSION."
   (make-mongodb-server-description
    :address address
    :type 'unknown
@@ -4658,7 +4779,9 @@ MEASUREMENT is the latest hello round trip time in seconds."
 
 (defun mongodb--server-description-from-hello
     (address hello &optional load-balanced round-trip-time)
-  "Return a server description for ADDRESS from HELLO."
+  "Return a server description for ADDRESS from HELLO.
+
+Arguments: ADDRESS, HELLO, LOAD-BALANCED, ROUND-TRIP-TIME."
   (make-mongodb-server-description
    :address address
    :type (mongodb--hello-server-type hello load-balanced)
@@ -4729,7 +4852,9 @@ compare by counter."
   "Return non-nil when NEW topologyVersion is fresh for app error handling.
 Application state-change errors only replace a server description when the
 error's topologyVersion is newer than the current description.  Missing
-topologyVersion values are treated as fresh for older servers."
+topologyVersion values are treated as fresh for older servers.
+
+Arguments: NEW, CURRENT."
   (cond
    ((not new) t)
    ((not current) t)
@@ -4799,7 +4924,9 @@ Return -1, 0, or 1."
   "Compare primary version tuple A with B for MAX-WIRE-VERSION.
 Return -1, 0, or 1, or nil when either tuple is incomplete.  MongoDB 6.0+
 uses electionId before setVersion; older wire versions keep the historical
-driver ordering for compatibility."
+driver ordering for compatibility.
+
+Arguments: ELECTION-A, SET-A, ELECTION-B, SET-B, MAX-WIRE-VERSION."
   (when (and election-a set-a election-b set-b)
     (let* ((modern (>= (or max-wire-version 0) 17))
            (first (if modern
@@ -4834,7 +4961,9 @@ driver ordering for compatibility."
            (or (mongodb--server-set-version-value server) "unknown"))))
 
 (defun mongodb--topology-primary-version-values (server topology)
-  "Return (ELECTION-ID . SET-VERSION) after considering primary SERVER."
+  "Return (ELECTION-ID . SET-VERSION) after considering primary SERVER.
+
+Arguments: SERVER, TOPOLOGY."
   (let ((max-election
          (and topology
               (mongodb-topology-description-max-election-id topology)))
@@ -4984,7 +5113,9 @@ existing members in place until a primary becomes authoritative."
 
 (defun mongodb--replica-set-set-name-mismatch-p
     (conn old-topology server)
-  "Return non-nil when SERVER has the wrong replica-set name."
+  "Return non-nil when SERVER has the wrong replica-set name.
+
+Arguments: CONN, OLD-TOPOLOGY, SERVER."
   (and (not (mongodb--conn-direct-connection-p conn))
        (not (mongodb-conn-load-balanced conn))
        (mongodb--replica-set-server-type-p server)
@@ -5001,7 +5132,9 @@ existing members in place until a primary becomes authoritative."
       (error nil))))
 
 (defun mongodb--replica-set-me-mismatch-p (conn old-topology address server)
-  "Return non-nil when SERVER should be removed for a `me' mismatch."
+  "Return non-nil when SERVER should be removed for a `me' mismatch.
+
+Arguments: CONN, OLD-TOPOLOGY, ADDRESS, SERVER."
   (and old-topology
        (not (mongodb--conn-direct-connection-p conn))
        (not (mongodb-conn-load-balanced conn))
@@ -5133,7 +5266,9 @@ existing members in place until a primary becomes authoritative."
           (mongodb-conn-params conn)))))
 
 (defun mongodb--single-set-name-mismatch-error (conn server)
-  "Return a Single-topology setName mismatch message for SERVER, or nil."
+  "Return a Single-topology setName mismatch message for SERVER, or nil.
+
+Arguments: CONN, SERVER."
   (when (and (mongodb--conn-direct-connection-p conn)
              (not (eq (mongodb-server-description-type server) 'unknown)))
     (when-let* ((expected
@@ -5149,14 +5284,18 @@ existing members in place until a primary becomes authoritative."
                   actual expected)))))))
 
 (defun mongodb--verify-single-set-name (conn address server)
-  "Return SERVER or an Unknown description for Single setName mismatch."
+  "Return SERVER or an Unknown description for Single setName mismatch.
+
+Arguments: CONN, ADDRESS, SERVER."
   (if-let* ((error (mongodb--single-set-name-mismatch-error conn server)))
       (mongodb--unknown-server-description address error)
     server))
 
 (defun mongodb--topology-description-from-hello
     (conn hello &optional round-trip-time)
-  "Return a topology description for CONN from HELLO."
+  "Return a topology description for CONN from HELLO.
+
+Arguments: CONN, HELLO, ROUND-TRIP-TIME."
   (let* ((address (mongodb--endpoint-key
                    (mongodb-conn-host conn)
                    (mongodb-conn-port conn)))
@@ -5289,7 +5428,9 @@ a different canonical address; directConnection bypasses this discovery path."
     (mode constraints-ok hello)
   "Return non-nil when a `me' mismatch seed may remain a fallback.
 The fallback is only used if canonical hosts cannot be selected, preserving
-local port-forwarded development deployments without preferring aliases."
+local port-forwarded development deployments without preferring aliases.
+
+Arguments: MODE, CONSTRAINTS-OK, HELLO."
   (and (mongodb--hello-announces-me-p hello)
        (cond
         ((mongodb--hello-primary-p hello)
@@ -5308,7 +5449,9 @@ local port-forwarded development deployments without preferring aliases."
    (mongodb--params-read-preference params)))
 
 (defun mongodb--queue-announced-replica-hosts (hello seen queue database)
-  "Return QUEUE with unvisited replica-set hosts announced by HELLO appended."
+  "Return QUEUE with unvisited replica-set hosts announced by HELLO appended.
+
+Arguments: HELLO, SEEN, QUEUE, DATABASE."
   (mongodb--endpoints-append-unique
    queue
    (mongodb--hello-announced-endpoints hello database)
@@ -5316,7 +5459,9 @@ local port-forwarded development deployments without preferring aliases."
 
 (defun mongodb--hello-read-preference-constraints-p
     (params host port hello read-preference)
-  "Return non-nil when HELLO matches READ-PREFERENCE constraints."
+  "Return non-nil when HELLO matches READ-PREFERENCE constraints.
+
+Arguments: PARAMS, HOST, PORT, HELLO, READ-PREFERENCE."
   (let* ((probe (make-mongodb-conn
                  :host host
                  :port port
@@ -5334,7 +5479,9 @@ local port-forwarded development deployments without preferring aliases."
               mongodb-monitor-heartbeat-seconds)))))
 
 (defun mongodb--endpoint-result-server-description (conn host port hello)
-  "Return the server description for an endpoint RESULT."
+  "Return the server description for an endpoint RESULT.
+
+Arguments: CONN, HOST, PORT, HELLO."
   (let* ((address (mongodb--endpoint-key host port))
          (topology (and (mongodb-conn-p conn)
                         (mongodb-conn-topology conn)))
@@ -5363,7 +5510,9 @@ local port-forwarded development deployments without preferring aliases."
 
 (defun mongodb--candidates-within-latency-window
     (candidates local-threshold)
-  "Return CANDIDATES whose RTT is inside the local-threshold latency window."
+  "Return CANDIDATES whose RTT is inside the local-threshold latency window.
+
+Arguments: CANDIDATES, LOCAL-THRESHOLD."
   (let ((rtts (delq nil
                     (mapcar #'mongodb--candidate-round-trip-time
                             candidates))))
@@ -5378,7 +5527,9 @@ local port-forwarded development deployments without preferring aliases."
 
 (defun mongodb--select-candidate-within-latency-window
     (candidates local-threshold)
-  "Select one candidate from CANDIDATES within the latency window."
+  "Select one candidate from CANDIDATES within the latency window.
+
+Arguments: CANDIDATES, LOCAL-THRESHOLD."
   (when candidates
     (let* ((window (or (mongodb--candidates-within-latency-window
                        candidates local-threshold)
@@ -5395,7 +5546,9 @@ local port-forwarded development deployments without preferring aliases."
          (mongodb--server-candidate-conn candidate))))))
 
 (defun mongodb--finalize-selected-candidate (candidate credential)
-  "Authenticate and initialize CANDIDATE, then return its connection."
+  "Authenticate and initialize CANDIDATE, then return its connection.
+
+Arguments: CANDIDATE, CREDENTIAL."
   (let ((conn (mongodb--server-candidate-conn candidate))
         (hello (mongodb--server-candidate-hello candidate)))
     (when credential
@@ -5405,7 +5558,9 @@ local port-forwarded development deployments without preferring aliases."
     conn))
 
 (defun mongodb--connect-replica-server (params endpoints credential)
-  "Connect to a replica-set server selected from ENDPOINTS."
+  "Connect to a replica-set server selected from ENDPOINTS.
+
+Arguments: PARAMS, ENDPOINTS, CREDENTIAL."
   (let* ((expected-set (mongodb--params-replica-set-name params))
          (read-preference (mongodb--params-read-preference params))
          (mode (mongodb--read-preference-mode read-preference))
@@ -5618,7 +5773,9 @@ local port-forwarded development deployments without preferring aliases."
               (list "MongoDB loadBalanced=true cannot be combined with srvMaxHosts")))))
 
 (defun mongodb--validate-srv-max-hosts-params (params)
-  "Validate SRV max-host constraints after effective URL options are known."
+  "Validate SRV max-host constraints after effective URL options are known.
+
+Arguments: PARAMS."
   (when (and (mongodb--params-srv-max-hosts params)
              (mongodb--params-replica-set-name params))
     (signal 'mongodb-error
@@ -5825,7 +5982,9 @@ local port-forwarded development deployments without preferring aliases."
     "Timed out waiting for a MongoDB pooled connection"))
 
 (defun mongodb--pool-checkout-succeed (pool checkout-start conn purpose)
-  "Record CONN as checked out from POOL with PURPOSE and return CONN."
+  "Record CONN as checked out from POOL with PURPOSE and return CONN.
+
+Arguments: POOL, CHECKOUT-START, CONN, PURPOSE."
   (push conn (mongodb-pool-in-use pool))
   (mongodb--pool-set-connection-purpose pool conn purpose)
   (mongodb--pool-maintain-min-size pool)
@@ -5833,7 +5992,9 @@ local port-forwarded development deployments without preferring aliases."
   conn)
 
 (defun mongodb--pool-signal-cleared-checkout-error (pool checkout-start)
-  "Signal a retryable checkout error because POOL is cleared or paused."
+  "Signal a retryable checkout error because POOL is cleared or paused.
+
+Arguments: POOL, CHECKOUT-START."
   (let ((err `(mongodb-error
                "MongoDB connection pool was cleared before checkout completed"
                :error-labels (,mongodb--retryable-error-label))))
@@ -6075,7 +6236,9 @@ local port-forwarded development deployments without preferring aliases."
 
 (defun mongodb--pool-clear-generation-connection-p
     (pool conn service-id generation service-generation)
-  "Return non-nil when CONN is affected by a pool clear."
+  "Return non-nil when CONN is affected by a pool clear.
+
+Arguments: POOL, CONN, SERVICE-ID, GENERATION, SERVICE-GENERATION."
   (let ((conn-generation (mongodb--pool-connection-generation pool conn)))
     (and (or (not service-id)
              (mongodb--pool-connection-service-id-equal-p conn service-id))
@@ -6279,7 +6442,9 @@ load-balanced wait queue diagnostics."
 
 (defun mongodb--pool-interrupt-in-use
     (pool service-id generation service-generation)
-  "Close checked-out POOL connections affected by a clear."
+  "Close checked-out POOL connections affected by a clear.
+
+Arguments: POOL, SERVICE-ID, GENERATION, SERVICE-GENERATION."
   (dolist (conn (copy-sequence (mongodb-pool-in-use pool)))
     (when (mongodb--pool-clear-generation-connection-p
            pool conn service-id generation service-generation)
@@ -6368,7 +6533,9 @@ connections affected by the clear instead of waiting for release."
   "Run one SDAM monitor heartbeat for POOL.
 On success, mark a cleared pool ready.  On failure, record the error, close the
 dedicated monitor connection, clear the pool, and signal the heartbeat error.
-In load-balanced mode, do not open a dedicated monitoring connection."
+In load-balanced mode, do not open a dedicated monitoring connection.
+
+Arguments: POOL, MAX-AWAIT-TIME-MS, TIMEOUT."
   (when (mongodb-pool-closed pool)
     (signal 'mongodb-error
             (list "MongoDB connection pool is closed")))
@@ -6391,7 +6558,9 @@ In load-balanced mode, do not open a dedicated monitoring connection."
        (signal (car err) (cdr err))))))
 
 (defun mongodb--pool-monitor-tick (pool max-await-time-ms timeout)
-  "Run one scheduled SDAM monitor tick for POOL."
+  "Run one scheduled SDAM monitor tick for POOL.
+
+Arguments: POOL, MAX-AWAIT-TIME-MS, TIMEOUT."
   (if (mongodb-pool-closed pool)
       (mongodb-pool-stop-monitor pool)
     (ignore-errors
@@ -6410,7 +6579,9 @@ In load-balanced mode, do not open a dedicated monitoring connection."
     (pool &optional heartbeat-seconds max-await-time-ms timeout)
   "Start an SDAM-style monitor timer for POOL.
 Successful monitor checks mark a cleared pool ready; failed checks clear and
-pause the pool so later successful checks can recover it."
+pause the pool so later successful checks can recover it.
+
+Arguments: POOL, HEARTBEAT-SECONDS, MAX-AWAIT-TIME-MS, TIMEOUT."
   (when (mongodb-pool-closed pool)
     (signal 'mongodb-error
             (list "MongoDB connection pool is closed")))
@@ -6483,7 +6654,10 @@ BINDING has the form (CONN POOL &optional TIMEOUT PURPOSE)."
   "Run cursor COMMAND from POOL and return all result documents.
 The same checked-out connection is used for the initial command, getMore, and
 killCursors.  This is required for load-balanced cursor operations and is also a
-safe default for ordinary pools."
+safe default for ordinary pools.
+
+Arguments: POOL, DATABASE, COLLECTION, COMMAND, FIRST-KEY, TIMEOUT,
+GET-MORE-OPTIONS, SEQUENCES."
   (let ((conn (mongodb-pool-checkout pool nil 'cursor)))
     (unwind-protect
         (condition-case err
