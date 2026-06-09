@@ -7324,6 +7324,7 @@
                          "db.example.test:27018"))
           (should (= (alist-get 'connection-id (nth 2 ordered)) 1))
           (should (= (alist-get 'connection-id (nth 3 ordered)) 1))
+          (should-not (assoc 'service-id (nth 3 ordered)))
           (should (numberp (alist-get 'duration-ms (nth 3 ordered)))))
         (setq events nil)
         (setq conn (mongo-pool-checkout pool))
@@ -7350,6 +7351,30 @@
           (should (eq (alist-get 'reason (car ordered)) 'pool-closed))
           (should (equal (alist-get 'reason-string (car ordered))
                          "poolClosed")))))))
+
+
+(ert-deftest mongo-test-pool-connection-ready-includes-service-id ()
+  "Load-balanced connection-ready events should include serviceId."
+  (let ((service-id '(("$oid" . "64f0000000000000000000aa")))
+        events)
+    (cl-letf (((symbol-function 'mongo-connect)
+               (lambda (_params)
+                 (make-mongo-conn :process 'proc
+                                  :load-balanced t
+                                  :service-id service-id)))
+              ((symbol-function 'process-live-p)
+               (lambda (_proc) t)))
+      (let ((mongo-pool-event-hook
+             (list (lambda (event)
+                     (push event events)))))
+        (mongo-pool-open '(:load-balanced t
+                           :min-pool-size 1))))
+    (let ((ready (seq-find
+                  (lambda (event)
+                    (eq (alist-get 'type event) 'connection-ready))
+                  events)))
+      (should ready)
+      (should (equal (alist-get 'service-id ready) service-id)))))
 
 
 (ert-deftest mongo-test-pool-created-event-includes-options ()
@@ -7585,6 +7610,7 @@
                          '(connection-check-out-started
                            connection-pool-cleared
                            connection-check-out-failed)))
+          (should-not (assoc 'service-id (cadr ordered)))
           (should (eq (alist-get 'reason (caddr ordered))
                       'connection-error))
           (should (numberp (alist-get 'duration-ms (caddr ordered))))

@@ -92,7 +92,8 @@ Event types currently include `connection-pool-created',
 `connection-pool-closed', `connection-created', `connection-ready',
 `connection-closed', `connection-check-out-started',
 `connection-check-out-failed', `connection-checked-out', and
-`connection-checked-in'.  Pool-cleared events may include
+`connection-checked-in'.  Load-balanced pool-cleared and connection-ready
+events may include `service-id'.  Pool-cleared events may include
 `interrupt-in-use-connections' when checked-out connections are interrupted."
   :type 'hook
   :group 'mongo)
@@ -5764,6 +5765,11 @@ local port-forwarded development deployments without preferring aliases."
    (cons 'duration-ms
          (mongo--pool-duration-ms checkout-start))))
 
+(defun mongo--pool-service-id-field (service-id)
+  "Return a service-id event field when SERVICE-ID is non-nil."
+  (and service-id
+       (list (cons 'service-id service-id))))
+
 (defun mongo--pool-normalize-purpose (purpose)
   "Return POOL checkout PURPOSE normalized to a CMAP tracking symbol."
   (pcase purpose
@@ -6160,13 +6166,17 @@ local port-forwarded development deployments without preferring aliases."
             (let ((conn (mongo-connect (copy-sequence (mongo-pool-params pool)))))
               (mongo--pool-record-connection-id pool conn connection-id)
               (mongo--pool-track-connection pool conn)
-              (mongo--pool-emit-event
-               pool 'connection-ready
-               (cons 'connection conn)
-               (cons 'connection-id connection-id)
-               (cons 'service-id (mongo--pool-connection-service-id conn))
-               (cons 'duration-ms
-                     (mongo--pool-duration-ms connection-start)))
+              (apply #'mongo--pool-emit-event
+                     pool 'connection-ready
+                     (append
+                      (list
+                       (cons 'connection conn)
+                       (cons 'connection-id connection-id))
+                      (mongo--pool-service-id-field
+                       (mongo--pool-connection-service-id conn))
+                      (list
+                       (cons 'duration-ms
+                             (mongo--pool-duration-ms connection-start)))))
               conn)
           (error
            (mongo--pool-close-connection pool nil 'error connection-id)
@@ -6299,7 +6309,7 @@ connections affected by the clear instead of waiting for release."
               (1+ (mongo--pool-generation pool)))
         (setf (mongo-pool-paused pool) t))
       (when emit-cleared-event
-        (let ((fields (list (cons 'service-id service-id))))
+        (let ((fields (mongo--pool-service-id-field service-id)))
           (when interrupt-in-use-connections
             (setq fields
                   (append fields
