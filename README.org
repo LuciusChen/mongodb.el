@@ -49,7 +49,8 @@ Implemented areas include:
   load-balanced =serviceId= on command events
 - SDAM heartbeat monitoring events via =mongo-sdam-event-hook=, including
   paired =server-heartbeat-started= / =server-heartbeat-succeeded= /
-  =server-heartbeat-failed= events
+  =server-heartbeat-failed= events, plus =server-description-changed= and
+  =topology-description-changed= events for monitored topology state changes
 - SDAM topology availability predicates:
   =mongo-topology-description-has-readable-server-p= and
   =mongo-topology-description-has-writable-server-p=

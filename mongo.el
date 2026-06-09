@@ -108,10 +108,13 @@ events include `operation-id'; load-balanced events include `service-id'."
 
 (defcustom mongo-sdam-event-hook nil
   "Abnormal hook run with one argument for MongoDB SDAM events.
-Each EVENT is an alist with at least `type', `connection-id', `address', and
-`awaited' entries.  Heartbeat event types are `server-heartbeat-started',
-`server-heartbeat-succeeded', and `server-heartbeat-failed'.  Terminal
-heartbeat events include `duration-ms' and either `reply' or `failure'."
+Each EVENT is an alist with at least a `type' entry.  Heartbeat event types are
+`server-heartbeat-started', `server-heartbeat-succeeded', and
+`server-heartbeat-failed'; these include `connection-id', `address', and
+`awaited'.  Terminal heartbeat events include `duration-ms' and either `reply'
+or `failure'.  Description event types are `server-description-changed' and
+`topology-description-changed'; these include `topology-id',
+`previous-description', and `new-description'."
   :type 'hook
   :group 'mongo)
 
@@ -225,6 +228,9 @@ UnsatisfiableWriteConcern.")
 (defvar mongo--next-command-operation-id 0
   "Last allocated command monitoring operation id.")
 
+(defvar mongo--next-topology-id 0
+  "Last allocated SDAM topology id.")
+
 (defvar mongo--suppress-command-events nil
   "Non-nil suppresses command monitoring events for internal monitor heartbeats.")
 
@@ -332,6 +338,7 @@ UnsatisfiableWriteConcern.")
   hello-command
   last-hello
   topology
+  topology-id
   monitor-timer
   monitor-error
   session-id
@@ -1155,6 +1162,91 @@ document, matching MongoDB command monitoring semantics."
                            (list (cons 'server-connection-id server-id)))))
     fields))
 
+(defun mongo--conn-topology-id (conn)
+  "Return CONN's stable SDAM topology id."
+  (or (mongo-conn-topology-id conn)
+      (setf (mongo-conn-topology-id conn)
+            (setq mongo--next-topology-id
+                  (1+ mongo--next-topology-id)))))
+
+(defun mongo--sdam-description-event-fields (conn)
+  "Return common SDAM description event fields for CONN."
+  `((connection . ,conn)
+    (topology-id . ,(mongo--conn-topology-id conn))))
+
+(defun mongo--sdam-server-description-event-value (server)
+  "Return SERVER normalized for SDAM description-changed comparison."
+  (when (mongo-server-description-p server)
+    (let ((copy (copy-mongo-server-description server)))
+      (setf (mongo-server-description-last-update-time copy) nil)
+      (setf (mongo-server-description-round-trip-time copy) nil)
+      copy)))
+
+(defun mongo--sdam-topology-description-event-value (topology)
+  "Return TOPOLOGY normalized for SDAM description-changed comparison."
+  (when (mongo-topology-description-p topology)
+    (let ((copy (copy-mongo-topology-description topology)))
+      (setf (mongo-topology-description-servers copy)
+            (mapcar
+             (lambda (entry)
+               (cons (car entry)
+                     (mongo--sdam-server-description-event-value
+                      (cdr entry))))
+             (mongo-topology-description-servers topology)))
+      copy)))
+
+(defun mongo--sdam-description-event-equal-p (old new)
+  "Return non-nil when OLD and NEW are equal for SDAM changed events."
+  (cond
+   ((or (mongo-server-description-p old)
+        (mongo-server-description-p new))
+    (equal (mongo--sdam-server-description-event-value old)
+           (mongo--sdam-server-description-event-value new)))
+   ((or (mongo-topology-description-p old)
+        (mongo-topology-description-p new))
+    (equal (mongo--sdam-topology-description-event-value old)
+           (mongo--sdam-topology-description-event-value new)))
+   (t
+    (equal old new))))
+
+(defun mongo--topology-server-description (topology address)
+  "Return TOPOLOGY's server description for ADDRESS."
+  (when (mongo-topology-description-p topology)
+    (cdr (assoc address (mongo-topology-description-servers topology)))))
+
+(defun mongo--emit-sdam-description-changes (conn old-topology new-topology)
+  "Emit SDAM description-changed events for CONN topology changes."
+  (when (and mongo-sdam-event-hook old-topology new-topology)
+    (let* ((address (mongo--conn-address conn))
+           (old-server (mongo--topology-server-description
+                        old-topology address))
+           (new-server (mongo--topology-server-description
+                        new-topology address)))
+      (unless (mongo--sdam-description-event-equal-p old-server new-server)
+        (apply #'mongo--emit-sdam-event
+               'server-description-changed
+               (append
+                (mongo--sdam-description-event-fields conn)
+                (list (cons 'address address)
+                      (cons 'previous-description old-server)
+                      (cons 'new-description new-server)))))
+      (unless (mongo--sdam-description-event-equal-p
+               old-topology new-topology)
+        (apply #'mongo--emit-sdam-event
+               'topology-description-changed
+               (append
+                (mongo--sdam-description-event-fields conn)
+                (list (cons 'previous-description old-topology)
+                      (cons 'new-description new-topology))))))))
+
+(defun mongo--set-conn-topology (conn topology)
+  "Set CONN's TOPOLOGY and emit SDAM description change events."
+  (let ((old-topology (mongo-conn-topology conn)))
+    (setf (mongo-conn-topology conn) topology)
+    (when old-topology
+      (mongo--emit-sdam-description-changes conn old-topology topology)))
+  topology)
+
 (defun mongo--monitor-awaitable-p (conn)
   "Return non-nil when CONN's next monitor heartbeat is awaitable."
   (and (not (eq (mongo-conn-server-monitoring-mode conn) 'poll))
@@ -1665,8 +1757,9 @@ state-change errors can be compared for freshness."
                    address
                    (error-message-string error)
                    topology-version)))
-    (setf (mongo-conn-topology conn)
-          (mongo--topology-with-replaced-server conn unknown)))
+    (mongo--set-conn-topology
+     conn
+     (mongo--topology-with-replaced-server conn unknown)))
   conn)
 
 (defun mongo--object-id-value (value)
@@ -4235,9 +4328,10 @@ returning."
     (setf (mongo-conn-last-hello conn)
           hello)
     (mongo--apply-hello-limits conn hello)
-    (setf (mongo-conn-topology conn)
-          (mongo--topology-description-from-hello
-           conn hello hello-rtt))
+    (mongo--set-conn-topology
+     conn
+     (mongo--topology-description-from-hello
+      conn hello hello-rtt))
     (when (mongo--wire-truthy-p (cdr (assoc "helloOk" hello)))
       (setf (mongo-conn-hello-command conn)
             "hello"))

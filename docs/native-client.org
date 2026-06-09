@@ -107,7 +107,11 @@ SDAM heartbeat monitoring events are exposed through =mongo-sdam-event-hook=.
 non-load-balanced monitor heartbeats.  Events include =connection-id=,
 =address=, and =awaited=; terminal events also include =duration-ms= and
 either =reply= or =failure=.  Load-balanced connections do not run dedicated
-monitor heartbeats and therefore do not emit heartbeat events.
+monitor heartbeats and therefore do not emit heartbeat events.  Post-handshake
+hello refreshes and monitor error state changes emit =server-description-changed=
+and =topology-description-changed= events when the SDAM server/topology
+description changes.  RTT-only and last-update-time-only refreshes do not emit
+description-changed events.
 
 Callers that consume topology descriptions can test SDAM availability with
 =mongo-topology-description-has-readable-server-p= and

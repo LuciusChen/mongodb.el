@@ -6384,6 +6384,125 @@
                      '(mongo-error "heartbeat failed"))))))
 
 
+(ert-deftest mongo-test-sdam-description-change-events-from-hello ()
+  "Post-handshake hello should emit SDAM description change events."
+  (let* ((primary-hello
+          '(("ok" . 1)
+            ("maxWireVersion" . 17)
+            ("setName" . "rs0")
+            ("isWritablePrimary" . t)
+            ("hosts" . ("db:27017"))))
+         (secondary-hello
+          '(("ok" . 1)
+            ("maxWireVersion" . 17)
+            ("setName" . "rs0")
+            ("secondary" . t)
+            ("hosts" . ("db:27017"))))
+         (conn (make-mongo-conn :host "db"
+                                :port 27017
+                                :database "app"))
+         events)
+    (setf (mongo-conn-topology conn)
+          (mongo--topology-description-from-hello conn primary-hello))
+    (cl-letf (((symbol-function 'mongo-command)
+               (lambda (_conn _database command &optional _timeout)
+                 (should (equal command '(("hello" . 1))))
+                 secondary-hello)))
+      (let ((mongo-sdam-event-hook
+             (list (lambda (event)
+                     (push event events)))))
+        (should (equal (mongo-hello conn) secondary-hello))))
+    (let ((ordered (nreverse events)))
+      (should (equal (mapcar (lambda (event)
+                               (alist-get 'type event))
+                             ordered)
+                     '(server-description-changed
+                       topology-description-changed)))
+      (should (numberp (alist-get 'topology-id (nth 0 ordered))))
+      (should (equal (alist-get 'topology-id (nth 0 ordered))
+                     (alist-get 'topology-id (nth 1 ordered))))
+      (should (equal (alist-get 'address (nth 0 ordered))
+                     "db:27017"))
+      (should (eq (mongo-server-description-type
+                   (alist-get 'previous-description (nth 0 ordered)))
+                  'rs-primary))
+      (should (eq (mongo-server-description-type
+                   (alist-get 'new-description (nth 0 ordered)))
+                  'rs-secondary))
+      (should (eq (mongo-topology-description-type
+                   (alist-get 'previous-description (nth 1 ordered)))
+                  'replica-set-with-primary))
+      (should (eq (mongo-topology-description-type
+                   (alist-get 'new-description (nth 1 ordered)))
+                  'replica-set-no-primary)))))
+
+
+(ert-deftest mongo-test-sdam-description-change-ignores-rtt-only ()
+  "SDAM description change events should ignore RTT-only refreshes."
+  (let* ((hello
+          '(("ok" . 1)
+            ("maxWireVersion" . 17)
+            ("setName" . "rs0")
+            ("secondary" . t)
+            ("hosts" . ("db:27017"))))
+         (conn (make-mongo-conn :host "db"
+                                :port 27017
+                                :database "app"))
+         events)
+    (setf (mongo-conn-topology conn)
+          (mongo--topology-description-from-hello conn hello 0.100))
+    (cl-letf (((symbol-function 'float-time)
+               (let ((times '(1000.0 1000.2)))
+                 (lambda ()
+                   (prog1 (or (pop times) 1000.2)))))
+              ((symbol-function 'mongo-command)
+               (lambda (&rest _args)
+                 hello)))
+      (let ((mongo-sdam-event-hook
+             (list (lambda (event)
+                     (push event events)))))
+        (should (equal (mongo-hello conn) hello))))
+    (should-not events)))
+
+
+(ert-deftest mongo-test-sdam-description-change-events-from-monitor-error ()
+  "Monitor errors should emit SDAM description changes to Unknown."
+  (let* ((hello
+          '(("ok" . 1)
+            ("maxWireVersion" . 17)
+            ("setName" . "rs0")
+            ("isWritablePrimary" . t)
+            ("hosts" . ("db:27017"))))
+         (conn (make-mongo-conn :host "db"
+                                :port 27017
+                                :database "app"))
+         events)
+    (setf (mongo-conn-topology conn)
+          (mongo--topology-description-from-hello conn hello))
+    (cl-letf (((symbol-function 'mongo-awaitable-hello)
+               (lambda (&rest _args)
+                 (signal 'mongo-error (list "heartbeat failed")))))
+      (let ((mongo-sdam-event-hook
+             (list (lambda (event)
+                     (push event events)))))
+        (should-error (mongo-monitor-once conn 250 3)
+                      :type 'mongo-error)))
+    (let ((ordered (nreverse events)))
+      (should (equal (mapcar (lambda (event)
+                               (alist-get 'type event))
+                             ordered)
+                     '(server-heartbeat-started
+                       server-description-changed
+                       topology-description-changed
+                       server-heartbeat-failed)))
+      (should (eq (mongo-server-description-type
+                   (alist-get 'new-description (nth 1 ordered)))
+                  'unknown))
+      (should (eq (mongo-topology-description-type
+                   (alist-get 'new-description (nth 2 ordered)))
+                  'replica-set-no-primary)))))
+
+
 
 (ert-deftest mongo-test-monitor-once-can-use-poll-mode ()
   "serverMonitoringMode=poll should use ordinary hello for monitoring."
