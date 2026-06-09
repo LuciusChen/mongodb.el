@@ -99,9 +99,11 @@ Basic command monitoring events are exposed through =mongo-command-event-hook=
 as alists with =command-started=, =command-succeeded=, and =command-failed=
 types.  Events include the command name, database name, request id, connection
 address, and duration for terminal events; load-balanced command events include
-=service-id=.  Started events expose OP_MSG document sequences as command array
-fields.  Split =mongo-bulk-write= command events share an =operation-id=.
-Sensitive auth and user-management commands are redacted.
+=service-id=.  Commands run through =mongo-pool-command= and pooled cursor
+helpers also include the pool's driver-generated =driver-connection-id=.
+Started events expose OP_MSG document sequences as command array fields.  Split
+=mongo-bulk-write= command events share an =operation-id=.  Sensitive auth and
+user-management commands are redacted.
 
 SDAM heartbeat monitoring events are exposed through =mongo-sdam-event-hook=.
 =mongo-monitor-once= emits paired =server-heartbeat-started= and

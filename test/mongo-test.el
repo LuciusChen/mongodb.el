@@ -2004,6 +2004,51 @@
                      '(("ok" . 1)))))))
 
 
+(ert-deftest mongo-test-command-monitoring-events-include-driver-connection-id ()
+  "Pooled command monitoring events should include the CMAP connection id."
+  (let (events pool conn)
+    (cl-letf (((symbol-function 'mongo-connect)
+               (lambda (params)
+                 (make-mongo-conn :process 'proc
+                                  :closed nil
+                                  :host (plist-get params :host)
+                                  :port (plist-get params :port)
+                                  :database (plist-get params :database)
+                                  :request-id 0
+                                  :max-wire-version 17)))
+              ((symbol-function 'process-live-p)
+               (lambda (_proc) t))
+              ((symbol-function 'process-send-string)
+               (lambda (&rest _args) nil))
+              ((symbol-function 'mongo--recv-message)
+               (lambda (&rest _args)
+                 '(("ok" . 1)))))
+      (let ((mongo-command-event-hook
+             (list (lambda (event)
+                     (push event events)))))
+        (setq pool (mongo-pool-open '(:host "db.example.test"
+                                      :port 27018
+                                      :database "app"
+                                      :max-pool-size 1)))
+        (should (equal (mongo-pool-command
+                        pool "app" '(("ping" . 1)))
+                       '(("ok" . 1))))))
+    (let ((ordered (nreverse events)))
+      (should (equal (mapcar (lambda (event)
+                               (alist-get 'type event))
+                             ordered)
+                     '(command-started command-succeeded)))
+      (dolist (event ordered)
+        (should (equal (alist-get 'connection-id event)
+                       "db.example.test:27018"))
+        (should (= (alist-get 'driver-connection-id event) 1))))
+    (setq conn (mongo--pool-entry-conn (car (mongo-pool-available pool))))
+    (should (= (mongo-conn-pool-connection-id conn) 1))
+    (mongo-pool-disconnect pool)
+    (should (mongo-conn-closed conn))
+    (should-not (mongo-conn-pool-connection-id conn))))
+
+
 
 (ert-deftest mongo-test-command-monitoring-emits-failed-for-server-error ()
   "Command monitoring should treat ok:0 replies as command-failed."

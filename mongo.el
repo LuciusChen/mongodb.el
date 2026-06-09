@@ -102,7 +102,8 @@ Event types currently include `connection-pool-created',
 Each EVENT is an alist with at least `type', `command-name',
 `database-name', `request-id', and `connection-id' entries.  Event types are
 `command-started', `command-succeeded', and `command-failed'.  Bulk write
-events include `operation-id'; load-balanced events include `service-id'."
+events include `operation-id'; load-balanced events include `service-id'.
+Pooled command events include `driver-connection-id'."
   :type 'hook
   :group 'mongo)
 
@@ -355,6 +356,7 @@ UnsatisfiableWriteConcern.")
   transaction-pinned-address
   transaction-pinned-service-id
   transaction-commit-sent
+  pool-connection-id
   closed)
 
 ;;;; Wire transport
@@ -1032,6 +1034,9 @@ document, matching MongoDB command monitoring semantics."
     (when-let* ((server-id (mongo--command-event-server-connection-id conn)))
       (setq fields (append fields
                            (list (cons 'server-connection-id server-id)))))
+    (when-let* ((driver-id (mongo-conn-pool-connection-id conn)))
+      (setq fields (append fields
+                           (list (cons 'driver-connection-id driver-id)))))
     (when-let* ((service-id (and (mongo-conn-load-balanced conn)
                                  (mongo-conn-service-id conn))))
       (setq fields (append fields (list (cons 'service-id service-id)))))
@@ -5801,13 +5806,17 @@ local port-forwarded development deployments without preferring aliases."
                          (mongo-pool-conn-ids pool)
                          :key #'car
                          :test #'eq)))
+  (when (mongo-conn-p conn)
+    (setf (mongo-conn-pool-connection-id conn) connection-id))
   connection-id)
 
 (defun mongo--pool-connection-id (pool conn)
   "Return POOL's id for CONN, or nil."
-  (cdr (cl-assoc conn
-                 (mongo-pool-conn-ids pool)
-                 :test #'eq)))
+  (or (cdr (cl-assoc conn
+                     (mongo-pool-conn-ids pool)
+                     :test #'eq))
+      (and (mongo-conn-p conn)
+           (mongo-conn-pool-connection-id conn))))
 
 (defun mongo--pool-forget-connection-id (pool conn)
   "Forget POOL's id for CONN."
@@ -5815,7 +5824,9 @@ local port-forwarded development deployments without preferring aliases."
         (cl-remove conn
                    (mongo-pool-conn-ids pool)
                    :key #'car
-                   :test #'eq)))
+                   :test #'eq))
+  (when (mongo-conn-p conn)
+    (setf (mongo-conn-pool-connection-id conn) nil)))
 
 (defun mongo--pool-close-connection (pool conn reason &optional connection-id)
   "Close CONN from POOL and emit a connection closed event with REASON."

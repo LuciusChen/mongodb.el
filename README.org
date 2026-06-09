@@ -46,7 +46,7 @@ Implemented areas include:
 - basic command monitoring events via =mongo-command-event-hook=, including
   request id correlation, command duration, OP_MSG document sequence exposure,
   bulkWrite =operation-id= correlation, sensitive command redaction, and
-  load-balanced =serviceId= on command events
+  pooled =driver-connection-id= / load-balanced =serviceId= on command events
 - SDAM heartbeat monitoring events via =mongo-sdam-event-hook=, including
   paired =server-heartbeat-started= / =server-heartbeat-succeeded= /
   =server-heartbeat-failed= events, topology/server opening/closed lifecycle
