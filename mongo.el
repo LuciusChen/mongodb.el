@@ -5704,6 +5704,17 @@ local port-forwarded development deployments without preferring aliases."
   "Return SECONDS as a MongoDB millisecond pool option value."
   (round (* seconds 1000)))
 
+(defun mongo--pool-reason-string (reason)
+  "Return REASON as the CMAP string value."
+  (pcase reason
+    ('connection-error "connectionError")
+    ('pool-closed "poolClosed")
+    ('timeout "timeout")
+    ('stale "stale")
+    ('idle "idle")
+    ('error "error")
+    (_ (symbol-name reason))))
+
 (defun mongo--pool-created-options (pool)
   "Return non-default CMAP pool-created options for POOL."
   (let (options)
@@ -5734,6 +5745,8 @@ local port-forwarded development deployments without preferring aliases."
     (pool checkout-start reason &optional error)
   "Emit POOL checkout failure REASON using CHECKOUT-START."
   (let ((fields (list (cons 'reason reason)
+                      (cons 'reason-string
+                            (mongo--pool-reason-string reason))
                       (cons 'duration-ms
                             (mongo--pool-duration-ms checkout-start)))))
     (when error
@@ -5877,7 +5890,9 @@ local port-forwarded development deployments without preferring aliases."
        pool 'connection-closed
        (cons 'connection conn)
        (cons 'connection-id connection-id)
-       (cons 'reason reason)))
+       (cons 'reason reason)
+       (cons 'reason-string
+             (mongo--pool-reason-string reason))))
     (when conn
       (mongo--pool-forget-connection-id pool conn)
       (unless (and (mongo-conn-p conn)

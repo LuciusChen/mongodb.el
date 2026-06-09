@@ -7347,7 +7347,9 @@
                          '(connection-closed
                            connection-pool-closed)))
           (should (= (alist-get 'connection-id (car ordered)) 1))
-          (should (eq (alist-get 'reason (car ordered)) 'pool-closed)))))))
+          (should (eq (alist-get 'reason (car ordered)) 'pool-closed))
+          (should (equal (alist-get 'reason-string (car ordered))
+                         "poolClosed")))))))
 
 
 (ert-deftest mongo-test-pool-created-event-includes-options ()
@@ -7393,6 +7395,8 @@
                        '(connection-check-out-started
                          connection-check-out-failed)))
         (should (eq (alist-get 'reason (cadr events)) 'timeout))
+        (should (equal (alist-get 'reason-string (cadr events))
+                       "timeout"))
         (should (numberp (alist-get 'duration-ms (cadr events))))
         (mongo-pool-release pool conn)))))
 
@@ -7464,8 +7468,12 @@
           (should (= (alist-get 'connection-id (nth 1 events)) 1))
           (should (= (alist-get 'connection-id (nth 2 events)) 1))
           (should (eq (alist-get 'reason (nth 2 events)) 'error))
+          (should (equal (alist-get 'reason-string (nth 2 events))
+                         "error"))
           (should (eq (alist-get 'reason (nth 3 events))
                       'connection-error))
+          (should (equal (alist-get 'reason-string (nth 3 events))
+                         "connectionError"))
           (should (numberp (alist-get 'duration-ms (nth 3 events))))
           (should (alist-get 'error (nth 3 events))))))))
 
@@ -7685,6 +7693,28 @@
       (should (= created 1))
       (mongo-pool-release pool conn)
       (should (= (length (mongo-pool-available pool)) 1)))))
+
+
+(ert-deftest mongo-test-pool-max-pool-size-zero-is-unbounded ()
+  "MongoDB maxPoolSize=0 should allow the pool to grow without a cap."
+  (let ((created 0)
+        pool conns)
+    (cl-letf (((symbol-function 'mongo-connect)
+               (lambda (_params)
+                 (cl-incf created)
+                 (make-mongo-conn :process
+                                  (intern (format "proc-%d" created)))))
+              ((symbol-function 'process-live-p)
+               (lambda (_proc) t)))
+      (setq pool (mongo-pool-open '(:max-pool-size 0)))
+      (should-not (mongo-pool-max-size pool))
+      (dotimes (_ 3)
+        (push (mongo-pool-checkout pool 0) conns))
+      (should (= created 3))
+      (should (= (mongo--pool-total-size pool) 3))
+      (should (= (length (mongo-pool-in-use pool)) 3))
+      (dolist (conn conns)
+        (mongo-pool-release pool conn)))))
 
 
 

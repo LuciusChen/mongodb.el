@@ -90,7 +90,9 @@ connection-ready, and connection-closed events are exposed through
 increasing =connection-id= values; pool-created events include non-default
 pool options, and URI credentials are not included in event addresses.  Close
 events include =reason= values such as =stale=, =idle=, =error=, and
-=pool-closed=.  Closing a pool immediately closes available connections; any
+=pool-closed=, and checkout-failed / close events also include CMAP string
+=reason-string= values such as =connectionError= and =poolClosed=.  Closing a
+pool immediately closes available connections; any
 checked-out connections remain associated with the pool and are closed with
 =reason= =pool-closed= when released.  Connection-ready, checked-out, and
 checkout-failed events include =duration-ms=.

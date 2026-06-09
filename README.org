@@ -43,7 +43,8 @@ Implemented areas include:
   pooled cursor helpers keep the same checked-out connection for the initial
   cursor command, getMore, and killCursors, including load-balanced cursors;
   basic CMAP-style events are exposed via =mongo-pool-event-hook=, including
-  sanitized pool addresses and non-default pool-created options
+  sanitized pool addresses, non-default pool-created options, Lisp symbol
+  =reason= values, and CMAP string =reason-string= values
 - basic command monitoring events via =mongo-command-event-hook=, including
   request id correlation, command duration, OP_MSG document sequence exposure,
   bulkWrite =operation-id= correlation, sensitive command redaction, and
