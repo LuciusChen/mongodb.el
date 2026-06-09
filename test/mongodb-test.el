@@ -1,4 +1,4 @@
-;;; mongo-test.el --- ERT tests for mongo.el -*- lexical-binding: t; -*-
+;;; mongodb-test.el --- ERT tests for mongodb.el -*- lexical-binding: t; -*-
 
 ;; Copyright (C) 2025-2026 Lucius Chen
 ;; SPDX-License-Identifier: GPL-3.0-or-later
@@ -11,34 +11,34 @@
 
 (require 'cl-lib)
 (require 'ert)
-(require 'mongo)
+(require 'mongodb)
 
 
 
-(ert-deftest mongo-test-bson-roundtrip ()
-  "The standalone mongo protocol layer should encode and decode core BSON."
+(ert-deftest mongodb-test-bson-roundtrip ()
+  "The standalone mongodb protocol layer should encode and decode core BSON."
   (let* ((document `(("name" . "Ann")
                      ("n" . 42)
                      ("score" . 12.5)
                      ("active" . t)
                      ("deleted" . :false)
                      ("missing" . nil)
-                     ("_id" . ,(mongo-object-id
+                     ("_id" . ,(mongodb-object-id
                                 "64f000000000000000000001"))
-                     ("payload" . ,(mongo-binary 0 "abc"))
-                     ("rx" . ,(mongo-regex "^ann" "mi"))
-                     ("ts" . ,(mongo-timestamp 1700000000 7))
-                     ("decimal" . ,(mongo-decimal128 "1.23"))
-                     ("undef" . ,(mongo-undefined))
-                     ("code" . ,(mongo-code "return n"))
-                     ("sym" . ,(mongo-symbol "legacy"))
-                     ("lo" . ,(mongo-min-key))
-                     ("hi" . ,(mongo-max-key))
-                     ("nested" . ,(mongo-document
+                     ("payload" . ,(mongodb-binary 0 "abc"))
+                     ("rx" . ,(mongodb-regex "^ann" "mi"))
+                     ("ts" . ,(mongodb-timestamp 1700000000 7))
+                     ("decimal" . ,(mongodb-decimal128 "1.23"))
+                     ("undef" . ,(mongodb-undefined))
+                     ("code" . ,(mongodb-code "return n"))
+                     ("sym" . ,(mongodb-symbol "legacy"))
+                     ("lo" . ,(mongodb-min-key))
+                     ("hi" . ,(mongodb-max-key))
+                     ("nested" . ,(mongodb-document
                                    '(("ok" . t))))
                      ("tags" . ["a" "b"])))
-         (decoded (mongo--decode-document-from-string
-                   (mongo--encode-document document))))
+         (decoded (mongodb--decode-document-from-string
+                   (mongodb--encode-document document))))
     (should (equal (cdr (assoc "name" decoded)) "Ann"))
     (should (= (cdr (assoc "n" decoded)) 42))
     (should (= (cdr (assoc "score" decoded)) 12.5))
@@ -77,198 +77,198 @@
 
 
 
-(ert-deftest mongo-test-public-caller-helpers ()
+(ert-deftest mongodb-test-public-caller-helpers ()
   "Public caller helper APIs should cover adapter needs."
-  (should (mongo-document-value-p '(("x" . 1))))
-  (should (equal (mongo-document-elements
-                  (mongo-document '(("x" . 1))))
+  (should (mongodb-document-value-p '(("x" . 1))))
+  (should (equal (mongodb-document-elements
+                  (mongodb-document '(("x" . 1))))
                  '(("x" . 1))))
-  (should (equal (mongo-byte-string "abc") "abc"))
-  (should (equal (mongo-bytes-to-hex (unibyte-string 0 15 255))
+  (should (equal (mongodb-byte-string "abc") "abc"))
+  (should (equal (mongodb-bytes-to-hex (unibyte-string 0 15 255))
                  "000fff"))
-  (should (mongo-response-ok-p '(("ok" . 1))))
-  (should (equal (mongo-extended-json-to-bson-value
+  (should (mongodb-response-ok-p '(("ok" . 1))))
+  (should (equal (mongodb-extended-json-to-bson-value
                   '(("$timestamp" . (("t" . 1) ("i" . 2)))))
-                 (mongo-timestamp 1 2))))
+                 (mongodb-timestamp 1 2))))
 
 
 
-(ert-deftest mongo-test-new-object-id-uses-bson-layout ()
+(ert-deftest mongodb-test-new-object-id-uses-bson-layout ()
   "Generated ObjectIds should use timestamp, random bytes, and counter."
-  (let ((mongo--object-id-random (unibyte-string 1 2 3 4 5))
-        (mongo--object-id-counter 1))
-    (should (equal (mongo-object-id-hex
-                    (mongo-new-object-id
+  (let ((mongodb--object-id-random (unibyte-string 1 2 3 4 5))
+        (mongodb--object-id-counter 1))
+    (should (equal (mongodb-object-id-hex
+                    (mongodb-new-object-id
                      (seconds-to-time 1700000000)))
                    "6553f1000102030405000001"))
-    (should (equal (mongo-object-id-hex
-                    (mongo-new-object-id
+    (should (equal (mongodb-object-id-hex
+                    (mongodb-new-object-id
                      (seconds-to-time 1700000000)))
                    "6553f1000102030405000002"))))
 
 
 
-(ert-deftest mongo-test-bson-double-encodes-ieee754 ()
+(ert-deftest mongodb-test-bson-double-encodes-ieee754 ()
   "MongoDB BSON double values should use little-endian IEEE-754 binary64."
   (should (equal
-           (mongo--bytes-to-hex
-            (mongo--encode-document '(("x" . 1.5))))
+           (mongodb--bytes-to-hex
+            (mongodb--encode-document '(("x" . 1.5))))
            "10000000017800000000000000f83f00"))
   (should (equal
-           (mongo--bytes-to-hex
-            (mongo--encode-document '(("x" . -2.25))))
+           (mongodb--bytes-to-hex
+            (mongodb--encode-document '(("x" . -2.25))))
            "1000000001780000000000000002c000"))
   (should (equal
-           (mongo--bytes-to-hex
-            (mongo--encode-document '(("x" . -0.0))))
+           (mongodb--bytes-to-hex
+            (mongodb--encode-document '(("x" . -0.0))))
            "10000000017800000000000000008000")))
 
 
 
-(ert-deftest mongo-test-bson-datetime-encodes-millis ()
+(ert-deftest mongodb-test-bson-datetime-encodes-millis ()
   "MongoDB BSON datetime values should encode as little-endian epoch millis."
   (should (equal
-           (mongo--bytes-to-hex
-            (mongo--encode-document
-             (list (cons "x" (mongo-datetime 1704164645678)))))
+           (mongodb--bytes-to-hex
+            (mongodb--encode-document
+             (list (cons "x" (mongodb-datetime 1704164645678)))))
            "100000000978002edb20c88c01000000"))
   (should (equal
            (cdr (assoc "x"
-                       (mongo--decode-document-from-string
-                        (mongo--encode-document
+                       (mongodb--decode-document-from-string
+                        (mongodb--encode-document
                          (list (cons "x"
-                                     (mongo-datetime 1704164645678)))))))
+                                     (mongodb-datetime 1704164645678)))))))
            '(("$date" . 1704164645678)))))
 
 
 
-(ert-deftest mongo-test-bson-timestamp-encodes-increment-and-seconds ()
+(ert-deftest mongodb-test-bson-timestamp-encodes-increment-and-seconds ()
   "MongoDB BSON timestamp values should encode increment first, then seconds."
   (should (equal
-           (mongo--bytes-to-hex
-            (mongo--encode-document
-             (list (cons "x" (mongo-timestamp 1700000000 7)))))
+           (mongodb--bytes-to-hex
+            (mongodb--encode-document
+             (list (cons "x" (mongodb-timestamp 1700000000 7)))))
            "100000001178000700000000f1536500"))
   (should (equal
            (cdr (assoc "x"
-                       (mongo--decode-document-from-string
-                        (mongo--encode-document
+                       (mongodb--decode-document-from-string
+                        (mongodb--encode-document
                          (list (cons "x"
-                                     (mongo-timestamp 1700000000 7)))))))
+                                     (mongodb-timestamp 1700000000 7)))))))
            '(("$timestamp" . (("t" . 1700000000)
                               ("i" . 7))))))
   (should-error
-   (mongo--encode-document
-    (list (cons "x" (mongo-timestamp -1 0))))
-   :type 'mongo-error))
+   (mongodb--encode-document
+    (list (cons "x" (mongodb-timestamp -1 0))))
+   :type 'mongodb-error))
 
 
 
-(ert-deftest mongo-test-bson-int64-wrapper-encodes-long ()
+(ert-deftest mongodb-test-bson-int64-wrapper-encodes-long ()
   "MongoDB BSON int64 wrapper should force long encoding for small integers."
   (should (equal
-           (mongo--bytes-to-hex
-            (mongo--encode-document
-             (list (cons "x" (mongo-int64 7)))))
+           (mongodb--bytes-to-hex
+            (mongodb--encode-document
+             (list (cons "x" (mongodb-int64 7)))))
            "10000000127800070000000000000000"))
   (should-error
-   (mongo--encode-document
-    (list (cons "x" (mongo-int64 (expt 2 63)))))
-   :type 'mongo-error))
+   (mongodb--encode-document
+    (list (cons "x" (mongodb-int64 (expt 2 63)))))
+   :type 'mongodb-error))
 
 
 
-(ert-deftest mongo-test-bson-int32-wrapper-encodes-int ()
+(ert-deftest mongodb-test-bson-int32-wrapper-encodes-int ()
   "MongoDB BSON int32 wrapper should force int encoding and validate range."
   (should (equal
-           (mongo--bytes-to-hex
-            (mongo--encode-document
-             (list (cons "x" (mongo-int32 7)))))
+           (mongodb--bytes-to-hex
+            (mongodb--encode-document
+             (list (cons "x" (mongodb-int32 7)))))
            "0c0000001078000700000000"))
   (should-error
-   (mongo--encode-document
-    (list (cons "x" (mongo-int32 (1+ mongo--int32-max)))))
-   :type 'mongo-error))
+   (mongodb--encode-document
+    (list (cons "x" (mongodb-int32 (1+ mongodb--int32-max)))))
+   :type 'mongodb-error))
 
 
 
-(ert-deftest mongo-test-bson-decimal128-encodes-native-bytes ()
+(ert-deftest mongodb-test-bson-decimal128-encodes-native-bytes ()
   "MongoDB BSON Decimal128 values should use the native type 0x13 payload."
   (should (equal
-           (mongo--bytes-to-hex
-            (mongo--encode-document
-             (list (cons "x" (mongo-decimal128 "1.23")))))
+           (mongodb--bytes-to-hex
+            (mongodb--encode-document
+             (list (cons "x" (mongodb-decimal128 "1.23")))))
            "180000001378007b000000000000000000000000003c3000"))
   (should (equal
            (cdr (assoc "x"
-                       (mongo--decode-document-from-string
-                        (mongo--encode-document
-                         (list (cons "x" (mongo-decimal128 "12.3400")))))))
+                       (mongodb--decode-document-from-string
+                        (mongodb--encode-document
+                         (list (cons "x" (mongodb-decimal128 "12.3400")))))))
            '(("$numberDecimal" . "12.3400"))))
   (should (equal
            (cdr (assoc "x"
-                       (mongo--decode-document-from-string
-                        (mongo--encode-document
-                         (list (cons "x" (mongo-decimal128 "NaN")))))))
+                       (mongodb--decode-document-from-string
+                        (mongodb--encode-document
+                         (list (cons "x" (mongodb-decimal128 "NaN")))))))
            '(("$numberDecimal" . "NaN"))))
   (should (equal
            (cdr (assoc "x"
-                       (mongo--decode-document-from-string
-                        (mongo--encode-document
-                         (list (cons "x" (mongo-decimal128 "-Infinity")))))))
+                       (mongodb--decode-document-from-string
+                        (mongodb--encode-document
+                         (list (cons "x" (mongodb-decimal128 "-Infinity")))))))
            '(("$numberDecimal" . "-Infinity"))))
   (should-error
-   (mongo--encode-document
-    (list (cons "x" (mongo-decimal128
+   (mongodb--encode-document
+    (list (cons "x" (mongodb-decimal128
                      "1.2345678901234567890123456789012345"))))
-   :type 'mongo-error))
+   :type 'mongodb-error))
 
 
 
-(ert-deftest mongo-test-bson-legacy-types-encode-decode ()
+(ert-deftest mongodb-test-bson-legacy-types-encode-decode ()
   "MongoDB BSON legacy compatibility types should not break result decoding."
   (should (equal
-           (mongo--bytes-to-hex
-            (mongo--encode-document
-             (list (cons "x" (mongo-undefined)))))
+           (mongodb--bytes-to-hex
+            (mongodb--encode-document
+             (list (cons "x" (mongodb-undefined)))))
            "0800000006780000"))
   (should (equal
-           (mongo--bytes-to-hex
-            (mongo--encode-document
-             (list (cons "x" (mongo-code "return 1")))))
+           (mongodb--bytes-to-hex
+            (mongodb--encode-document
+             (list (cons "x" (mongodb-code "return 1")))))
            "150000000d78000900000072657475726e20310000"))
   (should (equal
-           (mongo--bytes-to-hex
-            (mongo--encode-document
-             (list (cons "x" (mongo-code
+           (mongodb--bytes-to-hex
+            (mongodb--encode-document
+             (list (cons "x" (mongodb-code
                               "return x"
-                              (mongo-document '(("x" . 1))))))))
+                              (mongodb-document '(("x" . 1))))))))
            (concat
             "250000000f78001d0000000900000072657475726e207800"
             "0c000000107800010000000000")))
   (should (equal
-           (mongo--bytes-to-hex
-            (mongo--encode-document
-             (list (cons "x" (mongo-symbol "abc")))))
+           (mongodb--bytes-to-hex
+            (mongodb--encode-document
+             (list (cons "x" (mongodb-symbol "abc")))))
            "100000000e7800040000006162630000"))
   (should (equal
-           (mongo--bytes-to-hex
-            (mongo--encode-document
-             (list (cons "x" (mongo-db-pointer
+           (mongodb--bytes-to-hex
+            (mongodb--encode-document
+             (list (cons "x" (mongodb-db-pointer
                               "users"
                               "64f000000000000000000001")))))
            (concat
             "1e0000000c780006000000757365727300"
             "64f00000000000000000000100")))
   (let* ((document
-          `(("undef" . ,(mongo-undefined))
-            ("code" . ,(mongo-code "return x" (mongo-document '(("x" . 1)))))
-            ("sym" . ,(mongo-symbol "abc"))
-            ("ptr" . ,(mongo-db-pointer
+          `(("undef" . ,(mongodb-undefined))
+            ("code" . ,(mongodb-code "return x" (mongodb-document '(("x" . 1)))))
+            ("sym" . ,(mongodb-symbol "abc"))
+            ("ptr" . ,(mongodb-db-pointer
                        "users"
-                       (mongo-object-id "64f000000000000000000001")))))
-         (decoded (mongo--decode-document-from-string
-                   (mongo--encode-document document))))
+                       (mongodb-object-id "64f000000000000000000001")))))
+         (decoded (mongodb--decode-document-from-string
+                   (mongodb--encode-document document))))
     (should (equal (cdr (assoc "undef" decoded))
                    '(("$undefined" . t))))
     (should (equal (cdr (assoc "code" decoded))
@@ -283,90 +283,90 @@
 
 
 
-(ert-deftest mongo-test-bson-binary-constructors-encode-subtypes ()
+(ert-deftest mongodb-test-bson-binary-constructors-encode-subtypes ()
   "MongoDB BSON binary helpers should encode modern UUID and old binary."
-  (let ((uuid (mongo-uuid "00112233-4455-6677-8899-aabbccddeeff")))
-    (should (mongo-binary-p uuid))
-    (should (= (mongo-binary-subtype uuid) 4))
-    (should (equal (mongo--bytes-to-hex (mongo-binary-data uuid))
+  (let ((uuid (mongodb-uuid "00112233-4455-6677-8899-aabbccddeeff")))
+    (should (mongodb-binary-p uuid))
+    (should (= (mongodb-binary-subtype uuid) 4))
+    (should (equal (mongodb--bytes-to-hex (mongodb-binary-data uuid))
                    "00112233445566778899aabbccddeeff"))
     (should (equal
-             (mongo--bytes-to-hex
-              (mongo--encode-document
+             (mongodb--bytes-to-hex
+              (mongodb--encode-document
                (list (cons "x" uuid))))
              "1d000000057800100000000400112233445566778899aabbccddeeff00")))
   (should (equal
-           (mongo--bytes-to-hex
-            (mongo--encode-document
-             (list (cons "x" (mongo-binary 2 "abc")))))
+           (mongodb--bytes-to-hex
+            (mongodb--encode-document
+             (list (cons "x" (mongodb-binary 2 "abc")))))
            "1400000005780007000000020300000061626300"))
   (should (equal
            (cdr (assoc "x"
-                       (mongo--decode-document-from-string
-                        (mongo--encode-document
-                         (list (cons "x" (mongo-binary 2 "abc")))))))
+                       (mongodb--decode-document-from-string
+                        (mongodb--encode-document
+                         (list (cons "x" (mongodb-binary 2 "abc")))))))
            '(("$binary" . (("subType" . "02")
                            ("bytes" . "YWJj"))))))
   (should-error
-   (mongo-uuid "not-a-uuid")
-   :type 'mongo-error))
+   (mongodb-uuid "not-a-uuid")
+   :type 'mongodb-error))
 
 
 
-(ert-deftest mongo-test-bson-regex-encodes-type-11 ()
+(ert-deftest mongodb-test-bson-regex-encodes-type-11 ()
   "MongoDB BSON regex values should encode as type 0x0B with sorted options."
   (should (equal
-           (mongo--bytes-to-hex
-            (mongo--encode-document
-             (list (cons "x" (mongo-regex "^ann" "mi")))))
+           (mongodb--bytes-to-hex
+            (mongodb--encode-document
+             (list (cons "x" (mongodb-regex "^ann" "mi")))))
            "100000000b78005e616e6e00696d0000")))
 
 
 
-(ert-deftest mongo-test-bson-min-max-key-encode-as-boundary-types ()
+(ert-deftest mongodb-test-bson-min-max-key-encode-as-boundary-types ()
   "MongoDB BSON MinKey and MaxKey should encode as boundary type markers."
   (should (equal
-           (mongo--bytes-to-hex
-            (mongo--encode-document
-             (list (cons "x" (mongo-min-key)))))
+           (mongodb--bytes-to-hex
+            (mongodb--encode-document
+             (list (cons "x" (mongodb-min-key)))))
            "08000000ff780000"))
   (should (equal
-           (mongo--bytes-to-hex
-            (mongo--encode-document
-             (list (cons "x" (mongo-max-key)))))
+           (mongodb--bytes-to-hex
+            (mongodb--encode-document
+             (list (cons "x" (mongodb-max-key)))))
            "080000007f780000"))
   (should (equal
            (cdr (assoc "x"
-                       (mongo--decode-document-from-string
-                        (mongo--encode-document
-                         (list (cons "x" (mongo-min-key)))))))
+                       (mongodb--decode-document-from-string
+                        (mongodb--encode-document
+                         (list (cons "x" (mongodb-min-key)))))))
            '(("$minKey" . 1))))
   (should (equal
            (cdr (assoc "x"
-                       (mongo--decode-document-from-string
-                        (mongo--encode-document
-                         (list (cons "x" (mongo-max-key)))))))
+                       (mongodb--decode-document-from-string
+                        (mongodb--encode-document
+                         (list (cons "x" (mongodb-max-key)))))))
            '(("$maxKey" . 1)))))
 
 
 
-(ert-deftest mongo-test-find-includes-cursor-options ()
+(ert-deftest mongodb-test-find-includes-cursor-options ()
   "MongoDB find command should include supported cursor option fields."
-  (let ((filter (mongo-document '(("active" . t))))
-        (projection (mongo-document '(("name" . 1))))
-        (sort (mongo-document '(("createdAt" . -1))))
-        (hint (mongo-document '(("active" . 1)
+  (let ((filter (mongodb-document '(("active" . t))))
+        (projection (mongodb-document '(("name" . 1))))
+        (sort (mongodb-document '(("createdAt" . -1))))
+        (hint (mongodb-document '(("active" . 1)
                                 ("createdAt" . -1))))
-        (max (mongo-document '(("createdAt" . 999))))
-        (min (mongo-document '(("createdAt" . 1))))
-        (let-doc (mongo-document '(("cutoff" . 7))))
-        (collation (mongo-document '(("locale" . "en"))))
+        (max (mongodb-document '(("createdAt" . 999))))
+        (min (mongodb-document '(("createdAt" . 1))))
+        (let-doc (mongodb-document '(("cutoff" . 7))))
+        (collation (mongodb-document '(("locale" . "en"))))
         captured)
-    (cl-letf (((symbol-function 'mongo-command)
+    (cl-letf (((symbol-function 'mongodb-command)
                (lambda (conn database command &optional _timeout)
                  (setq captured (list conn database command))
                  '(("cursor" . (("firstBatch" . [])))))))
-      (mongo-find
+      (mongodb-find
        'wire "app" "users" filter projection 10 5
        `(("sort" . ,sort)
          ("hint" . ,hint)
@@ -413,10 +413,10 @@
 
 
 
-(ert-deftest mongo-test-find-passes-getmore-cursor-options ()
+(ert-deftest mongodb-test-find-passes-getmore-cursor-options ()
   "MongoDB find should use batchSize and maxAwaitTimeMS on getMore."
   (let ((calls 0))
-    (cl-letf (((symbol-function 'mongo-command)
+    (cl-letf (((symbol-function 'mongodb-command)
                (lambda (_conn database command &optional _timeout)
                  (setq calls (1+ calls))
                  (pcase calls
@@ -442,7 +442,7 @@
                                    ("nextBatch" . ((("n" . 2))))))))
                    (_
                     (ert-fail "unexpected extra MongoDB command"))))))
-      (should (equal (mongo-find
+      (should (equal (mongodb-find
                       'wire "app" "users" nil nil nil nil
                      '(("batchSize" . 3)
                         ("tailable" . t)
@@ -453,10 +453,10 @@
 
 
 
-(ert-deftest mongo-test-find-stops-awaitable-cursor-on-empty-batch ()
+(ert-deftest mongodb-test-find-stops-awaitable-cursor-on-empty-batch ()
   "Awaitable tailable cursors should not loop forever on empty getMore batches."
   (let ((calls 0))
-    (cl-letf (((symbol-function 'mongo-command)
+    (cl-letf (((symbol-function 'mongodb-command)
                (lambda (_conn database command &optional _timeout)
                  (setq calls (1+ calls))
                  (pcase calls
@@ -485,7 +485,7 @@
                       ("cursorsKilled" . [42])))
                    (_
                     (ert-fail "unexpected extra MongoDB command"))))))
-      (should (equal (mongo-find
+      (should (equal (mongodb-find
                       'wire "app" "events" nil nil nil nil
                       '(("batchSize" . 2)
                         ("tailable" . t)
@@ -496,15 +496,15 @@
 
 
 
-(ert-deftest mongo-test-count-distinct-and-index-commands ()
+(ert-deftest mongodb-test-count-distinct-and-index-commands ()
   "MongoDB collection helper commands should build expected command shapes."
-  (let ((filter (mongo-document '(("active" . t))))
-        (keys (mongo-document '(("active" . 1)
+  (let ((filter (mongodb-document '(("active" . t))))
+        (keys (mongodb-document '(("active" . 1)
                                 ("createdAt" . -1))))
-        (collection-options (mongo-document '(("capped" . t)
+        (collection-options (mongodb-document '(("capped" . t)
                                               ("size" . 4096))))
         commands)
-    (cl-letf (((symbol-function 'mongo-command)
+    (cl-letf (((symbol-function 'mongodb-command)
                (lambda (_conn database command &optional _timeout)
                  (push (list database command) commands)
                  (pcase (car command)
@@ -516,22 +516,22 @@
                     '(("cursor" . (("firstBatch" . ((("name" . "_id_"))))
                                    ("id" . 0)))))
                    (_ '(("ok" . 1)))))))
-      (should (= (mongo-count-documents
+      (should (= (mongodb-count-documents
                   'wire "app" "users" filter
                   '(("limit" . 10)))
                  7))
-      (should (equal (mongo-distinct
+      (should (equal (mongodb-distinct
                       'wire "app" "users" "name" filter)
                      '("a" "b")))
-      (should (equal (mongo-list-indexes 'wire "app" "users")
+      (should (equal (mongodb-list-indexes 'wire "app" "users")
                      '((("name" . "_id_")))))
-      (mongo-create-collection
+      (mongodb-create-collection
        'wire "app" "events" collection-options)
-      (mongo-create-index
+      (mongodb-create-index
        'wire "app" "users" keys
        '(("name" . "active_created")
          ("unique" . t)))
-      (mongo-drop-index 'wire "app" "users" "active_created"))
+      (mongodb-drop-index 'wire "app" "users" "active_created"))
     (setq commands (nreverse commands))
     (let ((count-command (cadr (nth 0 commands)))
           (distinct-command (cadr (nth 1 commands)))
@@ -549,7 +549,7 @@
                        ("query" . ,filter))))
       (should (equal (cdr (assoc "listIndexes" list-indexes-command))
                      "users"))
-      (should (mongo-document-p
+      (should (mongodb-document-p
                (cdr (assoc "cursor" list-indexes-command))))
       (should (equal create-collection-command
                      '(("create" . "events")
@@ -568,17 +568,17 @@
 
 
 
-(ert-deftest mongo-test-aggregate-includes-command-options ()
+(ert-deftest mongodb-test-aggregate-includes-command-options ()
   "MongoDB aggregate should include supported command option fields."
   (let ((pipeline [(("$match" . (("active" . t))))])
-        (collation (mongo-document '(("locale" . "en"))))
-        (let-doc (mongo-document '(("cutoff" . 7))))
+        (collation (mongodb-document '(("locale" . "en"))))
+        (let-doc (mongodb-document '(("cutoff" . 7))))
         captured)
-    (cl-letf (((symbol-function 'mongo-command)
+    (cl-letf (((symbol-function 'mongodb-command)
                (lambda (conn database command &optional _timeout)
                  (setq captured (list conn database command))
                  '(("cursor" . (("firstBatch" . [])))))))
-      (mongo-aggregate
+      (mongodb-aggregate
        'wire "app" "users" pipeline
        `(("allowDiskUse" . t)
          ("batchSize" . 25)
@@ -592,8 +592,8 @@
       (should (equal (cdr (assoc "aggregate" command)) "users"))
       (should (eq (cdr (assoc "pipeline" command)) pipeline))
       (let ((cursor (cdr (assoc "cursor" command))))
-        (should (mongo-document-p cursor))
-        (should (equal (mongo-document-pairs cursor)
+        (should (mongodb-document-p cursor))
+        (should (equal (mongodb-document-pairs cursor)
                        '(("batchSize" . 25)))))
       (should-not (assoc "batchSize" command))
       (should (eq (cdr (assoc "allowDiskUse" command)) t))
@@ -604,12 +604,12 @@
 
 
 
-(ert-deftest mongo-test-aggregate-database-uses-command-cursor ()
+(ert-deftest mongodb-test-aggregate-database-uses-command-cursor ()
   "Database-level aggregate should use the command cursor namespace for getMore."
   (let ((pipeline [(("$documents" . [((("n" . 1)))]))])
         (calls 0)
         commands)
-    (cl-letf (((symbol-function 'mongo-command)
+    (cl-letf (((symbol-function 'mongodb-command)
                (lambda (_conn database command &optional _timeout)
                  (push (list database command) commands)
                  (setq calls (1+ calls))
@@ -632,7 +632,7 @@
                                    ("nextBatch" . ((("n" . 2))))))))
                    (_
                     (ert-fail "unexpected extra MongoDB command"))))))
-      (should (equal (mongo-aggregate-database
+      (should (equal (mongodb-aggregate-database
                       'wire "app" pipeline
                       '(("comment" . "db-agg")
                         ("batchSize" . 25)))
@@ -643,19 +643,19 @@
       (should (equal (cdr (assoc "comment" aggregate-command))
                      "db-agg"))
       (let ((cursor (cdr (assoc "cursor" aggregate-command))))
-        (should (mongo-document-p cursor))
-        (should (equal (mongo-document-pairs cursor)
+        (should (mongodb-document-p cursor))
+        (should (equal (mongodb-document-pairs cursor)
                        '(("batchSize" . 25))))))))
 
 
 
-(ert-deftest mongo-test-watch-command-maps-change-stream-options ()
+(ert-deftest mongodb-test-watch-command-maps-change-stream-options ()
   "MongoDB watch should map options to $changeStream, cursor, and command fields."
-  (let* ((resume (mongo-document '(("_data" . "token"))))
-         (collation (mongo-document '(("locale" . "en"))))
+  (let* ((resume (mongodb-document '(("_data" . "token"))))
+         (collation (mongodb-document '(("locale" . "en"))))
          (pipeline [(("$match" . (("operationType" . "insert"))))])
          (command
-          (mongo-watch-command
+          (mongodb-watch-command
            "users" pipeline
            `(("fullDocument" . "updateLookup")
              ("resumeAfter" . ,resume)
@@ -668,25 +668,25 @@
          (change-stream-stage (aref watch-pipeline 0))
          (change-stream-options
           (cdr (assoc "$changeStream"
-                      (mongo-document-pairs change-stream-stage))))
+                      (mongodb-document-pairs change-stream-stage))))
          (cursor (cdr (assoc "cursor" command))))
     (should (equal (cdr (assoc "aggregate" command)) "users"))
     (should (= (length watch-pipeline) 2))
-    (should (mongo-document-p change-stream-stage))
-    (should (mongo-document-p change-stream-options))
+    (should (mongodb-document-p change-stream-stage))
+    (should (mongodb-document-p change-stream-options))
     (should (equal (cdr (assoc "fullDocument"
-                               (mongo-document-pairs change-stream-options)))
+                               (mongodb-document-pairs change-stream-options)))
                    "updateLookup"))
     (should (eq (cdr (assoc "resumeAfter"
-                            (mongo-document-pairs change-stream-options)))
+                            (mongodb-document-pairs change-stream-options)))
                 resume))
     (should (eq (cdr (assoc "showExpandedEvents"
-                            (mongo-document-pairs change-stream-options)))
+                            (mongodb-document-pairs change-stream-options)))
                 t))
     (should (eq (aref watch-pipeline 1)
                 (aref pipeline 0)))
-    (should (mongo-document-p cursor))
-    (should (equal (mongo-document-pairs cursor)
+    (should (mongodb-document-p cursor))
+    (should (equal (mongodb-document-pairs cursor)
                    '(("batchSize" . 5))))
     (should (eq (cdr (assoc "collation" command)) collation))
     (should (equal (cdr (assoc "comment" command)) "watch"))
@@ -695,10 +695,10 @@
 
 
 
-(ert-deftest mongo-test-watch-stops-on-empty-batch ()
+(ert-deftest mongodb-test-watch-stops-on-empty-batch ()
   "MongoDB watch should close the cursor after the first empty await batch."
   (let ((calls 0))
-    (cl-letf (((symbol-function 'mongo-command)
+    (cl-letf (((symbol-function 'mongodb-command)
                (lambda (_conn database command &optional _timeout)
                  (setq calls (1+ calls))
                  (pcase calls
@@ -725,7 +725,7 @@
                     '(("ok" . 1)))
                    (_
                     (ert-fail "unexpected extra MongoDB command"))))))
-      (should (equal (mongo-watch
+      (should (equal (mongodb-watch
                       'wire "app" "users" []
                       '(("batchSize" . 2)
                         ("maxAwaitTimeMS" . 25)))
@@ -734,19 +734,19 @@
 
 
 
-(ert-deftest mongo-test-explain-wraps-command ()
+(ert-deftest mongodb-test-explain-wraps-command ()
   "MongoDB explain should wrap command documents and normalize verbosity."
   (let (captured)
-    (cl-letf (((symbol-function 'mongo-command)
+    (cl-letf (((symbol-function 'mongodb-command)
                (lambda (conn database command &optional _timeout)
                  (setq captured (list conn database command))
                  '(("ok" . 1)
                    ("queryPlanner" . (("namespace" . "app.users")))))))
-      (mongo-explain
+      (mongodb-explain
        'wire "app"
-       (mongo-find-command
+       (mongodb-find-command
         "users"
-        (mongo-document '(("active" . t))))
+        (mongodb-document '(("active" . t))))
        t))
     (pcase-let ((`(,conn ,database ,command) captured))
       (should (eq conn 'wire))
@@ -754,27 +754,27 @@
       (should (equal (cdr (assoc "verbosity" command))
                      "allPlansExecution"))
       (let ((explained (cdr (assoc "explain" command))))
-        (should (mongo-document-p explained))
-        (should (equal (mongo-document-pairs explained)
+        (should (mongodb-document-p explained))
+        (should (equal (mongodb-document-pairs explained)
                        `(("find" . "users")
-                         ("filter" . ,(mongo-document
+                         ("filter" . ,(mongodb-document
                                         '(("active" . t))))
                          ("batchSize" . 1000))))))))
 
 
 
-(ert-deftest mongo-test-insert-delete-use-document-sequences ()
+(ert-deftest mongodb-test-insert-delete-use-document-sequences ()
   "MongoDB insert/delete helpers should put batch specs in OP_MSG sequences."
-  (let ((first (mongo-document '(("_id" . "a"))))
-        (second (mongo-document '(("_id" . "b"))))
-        (filter (mongo-document '(("active" . :false))))
+  (let ((first (mongodb-document '(("_id" . "a"))))
+        (second (mongodb-document '(("_id" . "b"))))
+        (filter (mongodb-document '(("active" . :false))))
         calls)
-    (cl-letf (((symbol-function 'mongo-command)
+    (cl-letf (((symbol-function 'mongodb-command)
                (lambda (_conn database command &optional _timeout sequences)
                  (push (list database command sequences) calls)
                  '(("ok" . 1)))))
-      (mongo-insert 'wire "app" "users" (vector first second) :false)
-      (mongo-delete 'wire "app" "users" filter 1))
+      (mongodb-insert 'wire "app" "users" (vector first second) :false)
+      (mongodb-delete 'wire "app" "users" filter 1))
     (setq calls (nreverse calls))
     (pcase-let* ((`(,insert-db ,insert-command ,insert-sequences)
                   (nth 0 calls))
@@ -800,48 +800,48 @@
 
 
 
-(ert-deftest mongo-test-insert-generates-missing-document-ids ()
+(ert-deftest mongodb-test-insert-generates-missing-document-ids ()
   "MongoDB insert helper should generate `_id' for documents missing one."
-  (let ((missing-id (mongo-document '(("name" . "Ann"))))
-        (existing-id (mongo-document '(("_id" . "known")
+  (let ((missing-id (mongodb-document '(("name" . "Ann"))))
+        (existing-id (mongodb-document '(("_id" . "known")
                                        ("name" . "Bob"))))
         captured)
-    (cl-letf (((symbol-function 'mongo-new-object-id)
+    (cl-letf (((symbol-function 'mongodb-new-object-id)
                (lambda (&optional _time)
-                 (mongo-object-id "64f000000000000000000001")))
-              ((symbol-function 'mongo-command)
+                 (mongodb-object-id "64f000000000000000000001")))
+              ((symbol-function 'mongodb-command)
                (lambda (_conn _database _command &optional _timeout sequences)
                  (setq captured sequences)
                  '(("ok" . 1)))))
-      (mongo-insert 'wire "app" "users" (vector missing-id existing-id)))
+      (mongodb-insert 'wire "app" "users" (vector missing-id existing-id)))
     (let* ((docs (cdr (assoc "documents" captured)))
            (generated (aref docs 0)))
-      (should (mongo-document-p generated))
+      (should (mongodb-document-p generated))
       (should-not (eq generated missing-id))
-      (should (equal (cdr (assoc "_id" (mongo-document-pairs generated)))
-                     (mongo-object-id "64f000000000000000000001")))
-      (should (equal (cdr (assoc "name" (mongo-document-pairs generated)))
+      (should (equal (cdr (assoc "_id" (mongodb-document-pairs generated)))
+                     (mongodb-object-id "64f000000000000000000001")))
+      (should (equal (cdr (assoc "name" (mongodb-document-pairs generated)))
                      "Ann"))
       (should (eq (aref docs 1) existing-id)))))
 
 
 
-(ert-deftest mongo-test-insert-splits-at-max-write-batch-size ()
+(ert-deftest mongodb-test-insert-splits-at-max-write-batch-size ()
   "MongoDB insert helper should split batches at hello maxWriteBatchSize."
-  (let* ((conn (make-mongo-conn :max-write-batch-size 2))
-         (docs (vector (mongo-document '(("_id" . "a")))
-                       (mongo-document '(("_id" . "b")))
-                       (mongo-document '(("_id" . "c")))
-                       (mongo-document '(("_id" . "d")))
-                       (mongo-document '(("_id" . "e")))))
+  (let* ((conn (make-mongodb-conn :max-write-batch-size 2))
+         (docs (vector (mongodb-document '(("_id" . "a")))
+                       (mongodb-document '(("_id" . "b")))
+                       (mongodb-document '(("_id" . "c")))
+                       (mongodb-document '(("_id" . "d")))
+                       (mongodb-document '(("_id" . "e")))))
          batches
          commands)
-    (cl-letf (((symbol-function 'mongo-command)
+    (cl-letf (((symbol-function 'mongodb-command)
                (lambda (_conn _database command &optional _timeout sequences)
                  (push command commands)
                  (push (cdr (assoc "documents" sequences)) batches)
                  '(("ok" . 1)))))
-      (mongo-insert conn "app" "users" docs))
+      (mongodb-insert conn "app" "users" docs))
     (setq batches (nreverse batches)
           commands (nreverse commands))
     (should (= (length batches) 3))
@@ -849,7 +849,7 @@
     (should (equal (mapcar (lambda (batch)
                              (mapcar (lambda (doc)
                                        (cdr (assoc "_id"
-                                                   (mongo-document-pairs doc))))
+                                                   (mongodb-document-pairs doc))))
                                      (append batch nil)))
                            batches)
                    '(("a" "b") ("c" "d") ("e"))))
@@ -863,81 +863,81 @@
 
 
 
-(ert-deftest mongo-test-insert-splits-at-max-message-size ()
+(ert-deftest mongodb-test-insert-splits-at-max-message-size ()
   "MongoDB insert helper should split batches before maxMessageSizeBytes."
   (let* ((command '(("insert" . "users")
                     ("ordered" . t)))
-         (docs (vector (mongo-document '(("_id" . "a")
+         (docs (vector (mongodb-document '(("_id" . "a")
                                          ("payload" . "aaaaaaaaaa")))
-                       (mongo-document '(("_id" . "b")
+                       (mongodb-document '(("_id" . "b")
                                          ("payload" . "bbbbbbbbbb")))
-                       (mongo-document '(("_id" . "c")
+                       (mongodb-document '(("_id" . "c")
                                          ("payload" . "cccccccccc")))))
-         (base-conn (make-mongo-conn :max-write-batch-size 100
+         (base-conn (make-mongodb-conn :max-write-batch-size 100
                                      :max-bson-object-size 1000))
-         (first-size (length (mongo--encode-document (aref docs 0))))
-         (second-size (length (mongo--encode-document (aref docs 1))))
+         (first-size (length (mongodb--encode-document (aref docs 0))))
+         (second-size (length (mongodb--encode-document (aref docs 1))))
          (message-overhead
-          (+ (length (mongo--make-op-msg
+          (+ (length (mongodb--make-op-msg
                       1
-                      (mongo--command-for-size-estimate
+                      (mongodb--command-for-size-estimate
                        base-conn "app" command)
                       nil nil nil))
-             (mongo--document-sequence-overhead-bytes "documents")
-             mongo--write-batch-message-safety-bytes))
-         (conn (make-mongo-conn
+             (mongodb--document-sequence-overhead-bytes "documents")
+             mongodb--write-batch-message-safety-bytes))
+         (conn (make-mongodb-conn
                 :max-write-batch-size 100
                 :max-bson-object-size 1000
                 :max-message-size-bytes
                 (+ message-overhead first-size second-size -1)))
          batches)
-    (cl-letf (((symbol-function 'mongo-command)
+    (cl-letf (((symbol-function 'mongodb-command)
                (lambda (_conn _database _command &optional _timeout sequences)
                  (push (cdr (assoc "documents" sequences)) batches)
                  '(("ok" . 1)))))
-      (mongo-insert conn "app" "users" docs))
+      (mongodb-insert conn "app" "users" docs))
     (setq batches (nreverse batches))
     (should (= (length batches) 3))
     (should (equal (mapcar #'length batches) '(1 1 1)))
     (should (equal (mapcar (lambda (batch)
                              (cdr (assoc "_id"
-                                         (mongo-document-pairs
+                                         (mongodb-document-pairs
                                           (aref batch 0)))))
                            batches)
                    '("a" "b" "c")))))
 
 
 
-(ert-deftest mongo-test-insert-rejects-too-large-document ()
+(ert-deftest mongodb-test-insert-rejects-too-large-document ()
   "MongoDB insert helper should reject documents above maxBsonObjectSize."
-  (let* ((doc (mongo-document '(("_id" . "a")
+  (let* ((doc (mongodb-document '(("_id" . "a")
                                 ("payload" . "aaaaaaaaaa"))))
-         (conn (make-mongo-conn
+         (conn (make-mongodb-conn
                 :max-write-batch-size 100
                 :max-bson-object-size
-                (1- (length (mongo--encode-document doc)))
+                (1- (length (mongodb--encode-document doc)))
                 :max-message-size-bytes 48000000)))
-    (cl-letf (((symbol-function 'mongo-command)
+    (cl-letf (((symbol-function 'mongodb-command)
                (lambda (&rest _args)
                  (ert-fail "oversized insert document should not be sent"))))
       (should-error
-       (mongo-insert conn "app" "users" (vector doc))
-       :type 'mongo-error))))
+       (mongodb-insert conn "app" "users" (vector doc))
+       :type 'mongodb-error))))
 
 
 
-(ert-deftest mongo-test-update-includes-update-options ()
+(ert-deftest mongodb-test-update-includes-update-options ()
   "MongoDB update command should include q/u/multi and update options."
-  (let ((filter (mongo-document '(("active" . t))))
-        (update (mongo-document '(("$set" . (("seen" . t))))))
-        (collation (mongo-document '(("locale" . "en"))))
+  (let ((filter (mongodb-document '(("active" . t))))
+        (update (mongodb-document '(("$set" . (("seen" . t))))))
+        (collation (mongodb-document '(("locale" . "en"))))
         captured)
-    (cl-letf (((symbol-function 'mongo-command)
+    (cl-letf (((symbol-function 'mongodb-command)
                (lambda (conn database command &optional _timeout sequences)
                  (setq captured (list conn database command sequences))
                  '(("ok" . 1)
                    ("matchedCount" . 1)))))
-      (mongo-update
+      (mongodb-update
        'wire "app" "users" filter update t
        `(("upsert" . t)
          ("collation" . ,collation)
@@ -958,20 +958,20 @@
 
 
 
-(ert-deftest mongo-test-find-and-modify-maps-options ()
+(ert-deftest mongodb-test-find-and-modify-maps-options ()
   "MongoDB findAndModify command should map shell-style options."
-  (let ((filter (mongo-document '(("_id" . "a"))))
-        (update (mongo-document '(("$set" . (("seen" . t))))))
-        (projection (mongo-document '(("_id" . 1)
+  (let ((filter (mongodb-document '(("_id" . "a"))))
+        (update (mongodb-document '(("$set" . (("seen" . t))))))
+        (projection (mongodb-document '(("_id" . 1)
                                       ("seen" . 1))))
-        (sort (mongo-document '(("createdAt" . -1))))
+        (sort (mongodb-document '(("createdAt" . -1))))
         captured)
-    (cl-letf (((symbol-function 'mongo-command)
+    (cl-letf (((symbol-function 'mongodb-command)
                (lambda (conn database command &optional _timeout)
                  (setq captured (list conn database command))
                  '(("ok" . 1)
                    ("value" . nil)))))
-      (mongo-find-and-modify
+      (mongodb-find-and-modify
        'wire "app" "users" filter update nil
        `(("projection" . ,projection)
          ("sort" . ,sort)
@@ -990,158 +990,158 @@
 
 
 
-(ert-deftest mongo-test-pbkdf2-sha256-vector ()
+(ert-deftest mongodb-test-pbkdf2-sha256-vector ()
   "The SCRAM PBKDF2 implementation should match published SHA-256 vectors."
   (should
    (equal
-    (mongo--bytes-to-hex
-     (mongo--pbkdf2-hmac-sha256 "password" "salt" 1))
+    (mongodb--bytes-to-hex
+     (mongodb--pbkdf2-hmac-sha256 "password" "salt" 1))
     "120fb6cffcf8b32c43e7225256c4f837a86548c92ccc35480805987cb70be17b"))
   (should
    (equal
-    (mongo--bytes-to-hex
-     (mongo--pbkdf2-hmac-sha256 "password" "salt" 2))
+    (mongodb--bytes-to-hex
+     (mongodb--pbkdf2-hmac-sha256 "password" "salt" 2))
     "ae4d0c95af6b46d32d0adff928f06dd02a303f8ef3c251dfd6e2d85a95474c43")))
 
 
 
-(ert-deftest mongo-test-pbkdf2-sha1-vector ()
+(ert-deftest mongodb-test-pbkdf2-sha1-vector ()
   "The SCRAM PBKDF2 implementation should match published SHA-1 vectors."
   (should
    (equal
-    (mongo--bytes-to-hex
-     (mongo--pbkdf2-hmac-sha1 "password" "salt" 1))
+    (mongodb--bytes-to-hex
+     (mongodb--pbkdf2-hmac-sha1 "password" "salt" 1))
     "0c60c80f961f0e71f3a9b524af6012062fe037a6"))
   (should
    (equal
-    (mongo--bytes-to-hex
-     (mongo--pbkdf2-hmac-sha1 "password" "salt" 2))
+    (mongodb--bytes-to-hex
+     (mongodb--pbkdf2-hmac-sha1 "password" "salt" 2))
     "ea6c014dc72d6f8ccd1ed92ace1d41f0d8de8957")))
 
 
 
-(ert-deftest mongo-test-crc32c-vector ()
+(ert-deftest mongodb-test-crc32c-vector ()
   "MongoDB OP_MSG CRC-32C should match the Castagnoli test vector."
-  (should (= (mongo--crc32c "123456789") #xe3069283)))
+  (should (= (mongodb--crc32c "123456789") #xe3069283)))
 
 
 
-(ert-deftest mongo-test-op-msg-roundtrip-body ()
-  "The standalone mongo protocol layer should frame OP_MSG bodies."
+(ert-deftest mongodb-test-op-msg-roundtrip-body ()
+  "The standalone mongodb protocol layer should frame OP_MSG bodies."
   (let* ((body '(("ping" . 1) ("$db" . "admin")))
-         (message (mongo--make-op-msg 7 body)))
-    (should (equal (mongo--decode-op-msg message) body))))
+         (message (mongodb--make-op-msg 7 body)))
+    (should (equal (mongodb--decode-op-msg message) body))))
 
 
 
-(ert-deftest mongo-test-op-msg-frame-preserves-metadata ()
+(ert-deftest mongodb-test-op-msg-frame-preserves-metadata ()
   "OP_MSG frame decoding should preserve wire header metadata."
   (let* ((body '(("ok" . 1)))
-         (message (mongo--make-op-msg 7 body nil nil nil 42))
-         (frame (mongo--decode-message-frame message)))
-    (should (= (mongo--decoded-message-request-id frame) 7))
-    (should (= (mongo--decoded-message-response-to frame) 42))
-    (should (= (mongo--decoded-message-opcode frame) mongo--op-msg))
-    (should (= (mongo--decoded-message-flags frame) 0))
-    (should (equal (mongo--decoded-message-document frame) body))))
+         (message (mongodb--make-op-msg 7 body nil nil nil 42))
+         (frame (mongodb--decode-message-frame message)))
+    (should (= (mongodb--decoded-message-request-id frame) 7))
+    (should (= (mongodb--decoded-message-response-to frame) 42))
+    (should (= (mongodb--decoded-message-opcode frame) mongodb--op-msg))
+    (should (= (mongodb--decoded-message-flags frame) 0))
+    (should (equal (mongodb--decoded-message-document frame) body))))
 
 
 
-(ert-deftest mongo-test-op-msg-encodes-document-sequence ()
+(ert-deftest mongodb-test-op-msg-encodes-document-sequence ()
   "OP_MSG requests should encode kind 1 document sequence sections."
   (let* ((body '(("insert" . "users") ("$db" . "app")))
          (first '(("_id" . "a")))
          (second '(("_id" . "b")))
          (message
-          (mongo--make-op-msg
+          (mongodb--make-op-msg
            7 body nil nil
            `(("documents" . ,(vector first second)))))
-         (reader (make-mongo--reader :data message :pos 0)))
-    (should (= (mongo--read-int32 reader) (length message)))
-    (should (= (mongo--read-int32 reader) 7))
-    (should (= (mongo--read-int32 reader) 0))
-    (should (= (mongo--read-int32 reader) mongo--op-msg))
-    (should (= (mongo--read-int32 reader) 0))
-    (should (= (mongo--read-byte reader) 0))
-    (should (equal (mongo--decode-document reader) body))
-    (should (= (mongo--read-byte reader) 1))
-    (let* ((section-start (mongo--reader-pos reader))
-           (section-size (mongo--read-int32 reader))
+         (reader (make-mongodb--reader :data message :pos 0)))
+    (should (= (mongodb--read-int32 reader) (length message)))
+    (should (= (mongodb--read-int32 reader) 7))
+    (should (= (mongodb--read-int32 reader) 0))
+    (should (= (mongodb--read-int32 reader) mongodb--op-msg))
+    (should (= (mongodb--read-int32 reader) 0))
+    (should (= (mongodb--read-byte reader) 0))
+    (should (equal (mongodb--decode-document reader) body))
+    (should (= (mongodb--read-byte reader) 1))
+    (let* ((section-start (mongodb--reader-pos reader))
+           (section-size (mongodb--read-int32 reader))
            (section-end (+ section-start section-size)))
-      (should (equal (mongo--read-cstring reader) "documents"))
-      (should (equal (mongo--decode-document reader) first))
-      (should (equal (mongo--decode-document reader) second))
-      (should (= (mongo--reader-pos reader) section-end))
+      (should (equal (mongodb--read-cstring reader) "documents"))
+      (should (equal (mongodb--decode-document reader) first))
+      (should (equal (mongodb--decode-document reader) second))
+      (should (= (mongodb--reader-pos reader) section-end))
       (should (= section-end (length message))))))
 
 
 
-(ert-deftest mongo-test-op-msg-validates-checksum-trailer ()
+(ert-deftest mongodb-test-op-msg-validates-checksum-trailer ()
   "The OP_MSG decoder should validate CRC-32C checksum trailers."
   (let* ((body '(("ok" . 1)))
-         (message (mongo--make-op-msg 7 body nil t)))
-    (should (equal (mongo--decode-op-msg message) body))))
+         (message (mongodb--make-op-msg 7 body nil t)))
+    (should (equal (mongodb--decode-op-msg message) body))))
 
 
 
-(ert-deftest mongo-test-op-msg-rejects-bad-checksum ()
+(ert-deftest mongodb-test-op-msg-rejects-bad-checksum ()
   "The OP_MSG decoder should reject mismatched CRC-32C checksum trailers."
   (let* ((body '(("ok" . 1)))
-         (message (mongo--make-op-msg 7 body nil #x01020304)))
-    (should-error (mongo--decode-op-msg message) :type 'mongo-error)))
+         (message (mongodb--make-op-msg 7 body nil #x01020304)))
+    (should-error (mongodb--decode-op-msg message) :type 'mongodb-error)))
 
 
 
-(ert-deftest mongo-test-op-msg-rejects-unknown-required-flag ()
+(ert-deftest mongodb-test-op-msg-rejects-unknown-required-flag ()
   "The OP_MSG decoder should reject unknown required flag bits."
   (let* ((body '(("ok" . 1)))
-         (message (mongo--make-op-msg 7 body #x4)))
-    (should-error (mongo--decode-op-msg message) :type 'mongo-error)))
+         (message (mongodb--make-op-msg 7 body #x4)))
+    (should-error (mongodb--decode-op-msg message) :type 'mongodb-error)))
 
 
 
-(ert-deftest mongo-test-op-msg-ignores-optional-flag ()
+(ert-deftest mongodb-test-op-msg-ignores-optional-flag ()
   "The OP_MSG decoder should ignore optional high flag bits."
   (let* ((body '(("ok" . 1)))
-         (message (mongo--make-op-msg 7 body #x10000)))
-    (should (equal (mongo--decode-op-msg message) body))))
+         (message (mongodb--make-op-msg 7 body #x10000)))
+    (should (equal (mongodb--decode-op-msg message) body))))
 
 
 
-(ert-deftest mongo-test-op-msg-rejects-unexpected-more-to-come ()
+(ert-deftest mongodb-test-op-msg-rejects-unexpected-more-to-come ()
   "The OP_MSG decoder should reject moreToCome without exhaustAllowed."
   (let* ((body '(("ok" . 1)))
-         (message (mongo--make-op-msg
-                   7 body mongo--op-msg-more-to-come)))
-    (should-error (mongo--decode-op-msg message) :type 'mongo-error)))
+         (message (mongodb--make-op-msg
+                   7 body mongodb--op-msg-more-to-come)))
+    (should-error (mongodb--decode-op-msg message) :type 'mongodb-error)))
 
 
 
-(ert-deftest mongo-test-op-msg-allows-requested-more-to-come ()
+(ert-deftest mongodb-test-op-msg-allows-requested-more-to-come ()
   "The OP_MSG frame decoder should allow moreToCome when explicitly requested."
   (let* ((body '(("ok" . 1)))
-         (message (mongo--make-op-msg
-                   7 body mongo--op-msg-more-to-come))
-         (frame (mongo--decode-op-msg-frame message t)))
-    (should (= (logand (mongo--decoded-message-flags frame)
-                       mongo--op-msg-more-to-come)
-               mongo--op-msg-more-to-come))
-    (should (equal (mongo--decoded-message-document frame) body))))
+         (message (mongodb--make-op-msg
+                   7 body mongodb--op-msg-more-to-come))
+         (frame (mongodb--decode-op-msg-frame message t)))
+    (should (= (logand (mongodb--decoded-message-flags frame)
+                       mongodb--op-msg-more-to-come)
+               mongodb--op-msg-more-to-come))
+    (should (equal (mongodb--decoded-message-document frame) body))))
 
 
 
-(ert-deftest mongo-test-response-to-validation ()
+(ert-deftest mongodb-test-response-to-validation ()
   "MongoDB wire replies should match the request id they answer."
   (let* ((body '(("ok" . 1)))
-         (frame (mongo--decode-op-msg-frame
-                 (mongo--make-op-msg 7 body nil nil nil 42))))
-    (should-not (mongo--validate-response-to frame 42))
-    (should-error (mongo--validate-response-to frame 41)
-                  :type 'mongo-error)))
+         (frame (mongodb--decode-op-msg-frame
+                 (mongodb--make-op-msg 7 body nil nil nil 42))))
+    (should-not (mongodb--validate-response-to frame 42))
+    (should-error (mongodb--validate-response-to frame 41)
+                  :type 'mongodb-error)))
 
 
 
-(ert-deftest mongo-test-op-compressed-zlib-decodes ()
+(ert-deftest mongodb-test-op-compressed-zlib-decodes ()
   "The OP_COMPRESSED decoder should unwrap zlib-compressed OP_MSG replies."
   (unless (and (fboundp 'zlib-available-p)
                (zlib-available-p))
@@ -1149,221 +1149,221 @@
   (let ((message
          (base64-decode-string
           "LQAAAAgAAAAHAAAA3AcAAN0HAAASAAAAAnicY2AAAl4gFsjPZmAEcQAHtQD5")))
-    (should (equal (mongo--decode-message message)
+    (should (equal (mongodb--decode-message message)
                    '(("ok" . 1))))))
 
 
 
-(ert-deftest mongo-test-op-compressed-zlib-encodes-request ()
+(ert-deftest mongodb-test-op-compressed-zlib-encodes-request ()
   "The OP_COMPRESSED encoder should wrap OP_MSG request bodies."
   (unless (and (fboundp 'zlib-available-p)
                (zlib-available-p))
     (ert-skip "Emacs zlib support is unavailable"))
   (let* ((body '(("find" . "users") ("$db" . "app")))
-         (message (mongo--make-op-msg 9 body))
-         (compressed (mongo--make-op-compressed message "zlib"))
-         (reader (make-mongo--reader :data compressed :pos 0)))
-    (should (= (mongo--read-int32 reader) (length compressed)))
-    (should (= (mongo--read-int32 reader) 9))
-    (should (= (mongo--read-int32 reader) 0))
-    (should (= (mongo--read-int32 reader) mongo--op-compressed))
-    (should (= (mongo--read-int32 reader) mongo--op-msg))
-    (should (= (mongo--read-int32 reader) (- (length message) 16)))
-    (should (= (mongo--read-byte reader) mongo--compressor-zlib))
-    (should (equal (mongo--decode-message compressed) body))))
+         (message (mongodb--make-op-msg 9 body))
+         (compressed (mongodb--make-op-compressed message "zlib"))
+         (reader (make-mongodb--reader :data compressed :pos 0)))
+    (should (= (mongodb--read-int32 reader) (length compressed)))
+    (should (= (mongodb--read-int32 reader) 9))
+    (should (= (mongodb--read-int32 reader) 0))
+    (should (= (mongodb--read-int32 reader) mongodb--op-compressed))
+    (should (= (mongodb--read-int32 reader) mongodb--op-msg))
+    (should (= (mongodb--read-int32 reader) (- (length message) 16)))
+    (should (= (mongodb--read-byte reader) mongodb--compressor-zlib))
+    (should (equal (mongodb--decode-message compressed) body))))
 
 
 
-(ert-deftest mongo-test-snappy-roundtrip ()
-  "Native mongo.el should encode and decode Snappy block data."
+(ert-deftest mongodb-test-snappy-roundtrip ()
+  "Native mongodb.el should encode and decode Snappy block data."
   (let ((data (make-string 300 ?a)))
-    (should (equal (mongo--snappy-decompress
-                    (mongo--snappy-compress data))
+    (should (equal (mongodb--snappy-decompress
+                    (mongodb--snappy-compress data))
                    data)))
   ;; Uncompressed length 9, literal "abc", COPY_2 length 6 offset 3.
-  (should (equal (mongo--snappy-decompress
+  (should (equal (mongodb--snappy-decompress
                   (concat (unibyte-string 9 #x08)
                           "abc"
                           (unibyte-string #x16 #x03 #x00)))
                  "abcabcabc"))
   (should-error
-   (mongo--snappy-decompress
+   (mongodb--snappy-decompress
     (concat (unibyte-string 5 #x08) "abc"))
-   :type 'mongo-error))
+   :type 'mongodb-error))
 
 
 
-(ert-deftest mongo-test-op-compressed-snappy-encodes-request ()
+(ert-deftest mongodb-test-op-compressed-snappy-encodes-request ()
   "The OP_COMPRESSED encoder should wrap OP_MSG request bodies with snappy."
   (let* ((body '(("find" . "users") ("$db" . "app")))
-         (message (mongo--make-op-msg 9 body))
-         (compressed (mongo--make-op-compressed message "snappy"))
-         (reader (make-mongo--reader :data compressed :pos 0)))
-    (should (= (mongo--read-int32 reader) (length compressed)))
-    (should (= (mongo--read-int32 reader) 9))
-    (should (= (mongo--read-int32 reader) 0))
-    (should (= (mongo--read-int32 reader) mongo--op-compressed))
-    (should (= (mongo--read-int32 reader) mongo--op-msg))
-    (should (= (mongo--read-int32 reader) (- (length message) 16)))
-    (should (= (mongo--read-byte reader) mongo--compressor-snappy))
-    (should (equal (mongo--decode-message compressed) body))))
+         (message (mongodb--make-op-msg 9 body))
+         (compressed (mongodb--make-op-compressed message "snappy"))
+         (reader (make-mongodb--reader :data compressed :pos 0)))
+    (should (= (mongodb--read-int32 reader) (length compressed)))
+    (should (= (mongodb--read-int32 reader) 9))
+    (should (= (mongodb--read-int32 reader) 0))
+    (should (= (mongodb--read-int32 reader) mongodb--op-compressed))
+    (should (= (mongodb--read-int32 reader) mongodb--op-msg))
+    (should (= (mongodb--read-int32 reader) (- (length message) 16)))
+    (should (= (mongodb--read-byte reader) mongodb--compressor-snappy))
+    (should (equal (mongodb--decode-message compressed) body))))
 
 
 
-(ert-deftest mongo-test-zstd-roundtrip ()
-  "Native mongo.el should encode and decode zstd frame data when zstd exists."
-  (unless (mongo--zstd-available-p)
+(ert-deftest mongodb-test-zstd-roundtrip ()
+  "Native mongodb.el should encode and decode zstd frame data when zstd exists."
+  (unless (mongodb--zstd-available-p)
     (ert-skip "zstd executable is unavailable"))
   (let ((data (concat "abc" (make-string 300 ?a))))
-    (should (equal (mongo--zstd-decompress
-                    (mongo--zstd-compress data))
+    (should (equal (mongodb--zstd-decompress
+                    (mongodb--zstd-compress data))
                    data))))
 
 
 
-(ert-deftest mongo-test-op-compressed-zstd-encodes-request ()
+(ert-deftest mongodb-test-op-compressed-zstd-encodes-request ()
   "The OP_COMPRESSED encoder should wrap OP_MSG request bodies with zstd."
-  (unless (mongo--zstd-available-p)
+  (unless (mongodb--zstd-available-p)
     (ert-skip "zstd executable is unavailable"))
   (let* ((body '(("find" . "users") ("$db" . "app")))
-         (message (mongo--make-op-msg 9 body))
-         (compressed (mongo--make-op-compressed message "zstd"))
-         (reader (make-mongo--reader :data compressed :pos 0)))
-    (should (= (mongo--read-int32 reader) (length compressed)))
-    (should (= (mongo--read-int32 reader) 9))
-    (should (= (mongo--read-int32 reader) 0))
-    (should (= (mongo--read-int32 reader) mongo--op-compressed))
-    (should (= (mongo--read-int32 reader) mongo--op-msg))
-    (should (= (mongo--read-int32 reader) (- (length message) 16)))
-    (should (= (mongo--read-byte reader) mongo--compressor-zstd))
-    (should (equal (mongo--decode-message compressed) body))))
+         (message (mongodb--make-op-msg 9 body))
+         (compressed (mongodb--make-op-compressed message "zstd"))
+         (reader (make-mongodb--reader :data compressed :pos 0)))
+    (should (= (mongodb--read-int32 reader) (length compressed)))
+    (should (= (mongodb--read-int32 reader) 9))
+    (should (= (mongodb--read-int32 reader) 0))
+    (should (= (mongodb--read-int32 reader) mongodb--op-compressed))
+    (should (= (mongodb--read-int32 reader) mongodb--op-msg))
+    (should (= (mongodb--read-int32 reader) (- (length message) 16)))
+    (should (= (mongodb--read-byte reader) mongodb--compressor-zstd))
+    (should (equal (mongodb--decode-message compressed) body))))
 
 
 
-(ert-deftest mongo-test-op-compressed-preserves-response-metadata ()
+(ert-deftest mongodb-test-op-compressed-preserves-response-metadata ()
   "OP_COMPRESSED frame decoding should preserve responseTo metadata."
   (let* ((body '(("ok" . 1)))
-         (message (mongo--make-op-msg 9 body nil nil nil 8))
-         (compressed (mongo--make-op-compressed message "noop"))
-         (frame (mongo--decode-message-frame compressed)))
-    (should (= (mongo--decoded-message-request-id frame) 9))
-    (should (= (mongo--decoded-message-response-to frame) 8))
-    (should (equal (mongo--decoded-message-document frame) body))))
+         (message (mongodb--make-op-msg 9 body nil nil nil 8))
+         (compressed (mongodb--make-op-compressed message "noop"))
+         (frame (mongodb--decode-message-frame compressed)))
+    (should (= (mongodb--decoded-message-request-id frame) 9))
+    (should (= (mongodb--decoded-message-response-to frame) 8))
+    (should (equal (mongodb--decoded-message-document frame) body))))
 
 
 
-(ert-deftest mongo-test-send-document-compresses-negotiated-zlib ()
+(ert-deftest mongodb-test-send-document-compresses-negotiated-zlib ()
   "Normal OP_MSG commands should use zlib OP_COMPRESSED after negotiation."
   (unless (and (fboundp 'zlib-available-p)
                (zlib-available-p))
     (ert-skip "Emacs zlib support is unavailable"))
-  (let ((conn (make-mongo-conn :process 'proc
+  (let ((conn (make-mongodb-conn :process 'proc
                                :request-id 0
                                :compressors '("zlib")))
         sent)
     (cl-letf (((symbol-function 'process-send-string)
                (lambda (_proc data)
                  (setq sent data))))
-      (should (= (mongo--send-document
+      (should (= (mongodb--send-document
                   conn
                   '(("ping" . 1) ("$db" . "admin")))
                  1)))
-    (let ((reader (make-mongo--reader :data sent :pos 12)))
-      (should (= (mongo--read-int32 reader) mongo--op-compressed)))
-    (should (equal (mongo--decode-message sent)
+    (let ((reader (make-mongodb--reader :data sent :pos 12)))
+      (should (= (mongodb--read-int32 reader) mongodb--op-compressed)))
+    (should (equal (mongodb--decode-message sent)
                    '(("ping" . 1) ("$db" . "admin"))))))
 
 
 
-(ert-deftest mongo-test-send-document-compresses-negotiated-snappy ()
+(ert-deftest mongodb-test-send-document-compresses-negotiated-snappy ()
   "Normal OP_MSG commands should use snappy OP_COMPRESSED after negotiation."
-  (let ((conn (make-mongo-conn :process 'proc
+  (let ((conn (make-mongodb-conn :process 'proc
                                :request-id 0
                                :compressors '("snappy")))
         sent)
     (cl-letf (((symbol-function 'process-send-string)
                (lambda (_proc data)
                  (setq sent data))))
-      (should (= (mongo--send-document
+      (should (= (mongodb--send-document
                   conn
                   '(("ping" . 1) ("$db" . "admin")))
                  1)))
-    (let ((reader (make-mongo--reader :data sent :pos 12)))
-      (should (= (mongo--read-int32 reader) mongo--op-compressed)))
-    (should (equal (mongo--decode-message sent)
+    (let ((reader (make-mongodb--reader :data sent :pos 12)))
+      (should (= (mongodb--read-int32 reader) mongodb--op-compressed)))
+    (should (equal (mongodb--decode-message sent)
                    '(("ping" . 1) ("$db" . "admin"))))))
 
 
 
-(ert-deftest mongo-test-send-document-compresses-negotiated-zstd ()
+(ert-deftest mongodb-test-send-document-compresses-negotiated-zstd ()
   "Normal OP_MSG commands should use zstd OP_COMPRESSED after negotiation."
-  (unless (mongo--zstd-available-p)
+  (unless (mongodb--zstd-available-p)
     (ert-skip "zstd executable is unavailable"))
-  (let ((conn (make-mongo-conn :process 'proc
+  (let ((conn (make-mongodb-conn :process 'proc
                                :request-id 0
                                :compressors '("zstd")))
         sent)
     (cl-letf (((symbol-function 'process-send-string)
                (lambda (_proc data)
                  (setq sent data))))
-      (should (= (mongo--send-document
+      (should (= (mongodb--send-document
                   conn
                   '(("ping" . 1) ("$db" . "admin")))
                  1)))
-    (let ((reader (make-mongo--reader :data sent :pos 12)))
-      (should (= (mongo--read-int32 reader) mongo--op-compressed)))
-    (should (equal (mongo--decode-message sent)
+    (let ((reader (make-mongodb--reader :data sent :pos 12)))
+      (should (= (mongodb--read-int32 reader) mongodb--op-compressed)))
+    (should (equal (mongodb--decode-message sent)
                    '(("ping" . 1) ("$db" . "admin"))))))
 
 
 
-(ert-deftest mongo-test-send-document-with-flags-sets-exhaust-allowed ()
+(ert-deftest mongodb-test-send-document-with-flags-sets-exhaust-allowed ()
   "OP_MSG send helpers should be able to set the exhaustAllowed flag."
-  (let ((conn (make-mongo-conn :process 'proc
+  (let ((conn (make-mongodb-conn :process 'proc
                                :request-id 0))
         sent)
     (cl-letf (((symbol-function 'process-send-string)
                (lambda (_proc data)
                  (setq sent data))))
-      (should (= (mongo--send-document-with-flags
+      (should (= (mongodb--send-document-with-flags
                   conn
                   '(("hello" . 1) ("$db" . "admin"))
                   nil
-                  mongo--op-msg-exhaust-allowed)
+                  mongodb--op-msg-exhaust-allowed)
                  1)))
-    (let ((frame (mongo--decode-message-frame sent t)))
-      (should (= (logand (mongo--decoded-message-flags frame)
-                         mongo--op-msg-exhaust-allowed)
-                 mongo--op-msg-exhaust-allowed))
-      (should (equal (mongo--decoded-message-document frame)
+    (let ((frame (mongodb--decode-message-frame sent t)))
+      (should (= (logand (mongodb--decoded-message-flags frame)
+                         mongodb--op-msg-exhaust-allowed)
+                 mongodb--op-msg-exhaust-allowed))
+      (should (equal (mongodb--decoded-message-document frame)
                      '(("hello" . 1) ("$db" . "admin")))))))
 
 
 
-(ert-deftest mongo-test-send-document-leaves-auth-uncompressed ()
+(ert-deftest mongodb-test-send-document-leaves-auth-uncompressed ()
   "Auth and handshake commands should not be wrapped in OP_COMPRESSED."
-  (let ((conn (make-mongo-conn :process 'proc
+  (let ((conn (make-mongodb-conn :process 'proc
                                :request-id 0
                                :compressors '("zlib")))
         sent)
     (cl-letf (((symbol-function 'process-send-string)
                (lambda (_proc data)
                  (setq sent data))))
-      (mongo--send-document
+      (mongodb--send-document
        conn
        '(("saslStart" . 1)
          ("mechanism" . "SCRAM-SHA-256")
          ("$db" . "admin"))))
-    (let ((reader (make-mongo--reader :data sent :pos 12)))
-      (should (= (mongo--read-int32 reader) mongo--op-msg)))))
+    (let ((reader (make-mongodb--reader :data sent :pos 12)))
+      (should (= (mongodb--read-int32 reader) mongodb--op-msg)))))
 
 
 
-(ert-deftest mongo-test-send-document-validates-op-msg-size ()
+(ert-deftest mongodb-test-send-document-validates-op-msg-size ()
   "Low-level OP_MSG sends should enforce size limits before writing."
   (let* ((document '(("hello" . 1) ("$db" . "admin")))
-         (message-size (length (mongo--make-op-msg 1 document)))
-         (conn (make-mongo-conn :process 'proc
+         (message-size (length (mongodb--make-op-msg 1 document)))
+         (conn (make-mongodb-conn :process 'proc
                                 :request-id 0
                                 :max-bson-object-size 1000
                                 :max-message-size-bytes
@@ -1372,17 +1372,17 @@
                (lambda (&rest _args)
                  (ert-fail "oversized OP_MSG should not be sent"))))
       (should-error
-       (mongo--send-document conn document)
-       :type 'mongo-error))
-    (should (= (mongo-conn-request-id conn) 0))))
+       (mongodb--send-document conn document)
+       :type 'mongodb-error))
+    (should (= (mongodb-conn-request-id conn) 0))))
 
 
 
-(ert-deftest mongo-test-recv-message-uses-connection-socket-timeout ()
+(ert-deftest mongodb-test-recv-message-uses-connection-socket-timeout ()
   "OP_MSG receive should use connection socket timeout by default."
-  (let* ((buffer (generate-new-buffer " *mongo-test*"))
-         (message (mongo--make-op-msg 7 '(("ok" . 1))))
-         (conn (make-mongo-conn :buffer buffer
+  (let* ((buffer (generate-new-buffer " *mongodb-test*"))
+         (message (mongodb--make-op-msg 7 '(("ok" . 1))))
+         (conn (make-mongodb-conn :buffer buffer
                                 :process 'proc
                                 :socket-timeout 1.5))
          timeouts)
@@ -1391,21 +1391,21 @@
           (with-current-buffer buffer
             (set-buffer-multibyte nil)
             (insert message))
-          (cl-letf (((symbol-function 'mongo--wait-for-bytes)
+          (cl-letf (((symbol-function 'mongodb--wait-for-bytes)
                      (lambda (_conn _count timeout)
                        (push timeout timeouts))))
-            (should (equal (mongo--recv-message conn)
+            (should (equal (mongodb--recv-message conn)
                            '(("ok" . 1)))))
           (should (equal (nreverse timeouts) '(1.5 1.5))))
       (kill-buffer buffer))))
 
 
 
-(ert-deftest mongo-test-recv-message-validates-response-to ()
+(ert-deftest mongodb-test-recv-message-validates-response-to ()
   "OP_MSG receive should reject replies for a different request id."
-  (let* ((buffer (generate-new-buffer " *mongo-test*"))
-         (message (mongo--make-op-msg 7 '(("ok" . 1)) nil nil nil 41))
-         (conn (make-mongo-conn :buffer buffer
+  (let* ((buffer (generate-new-buffer " *mongodb-test*"))
+         (message (mongodb--make-op-msg 7 '(("ok" . 1)) nil nil nil 41))
+         (conn (make-mongodb-conn :buffer buffer
                                 :process 'proc
                                 :socket-timeout 1.5)))
     (unwind-protect
@@ -1413,29 +1413,29 @@
           (with-current-buffer buffer
             (set-buffer-multibyte nil)
             (insert message))
-          (cl-letf (((symbol-function 'mongo--wait-for-bytes)
+          (cl-letf (((symbol-function 'mongodb--wait-for-bytes)
                      (lambda (&rest _args) nil)))
-            (should-error (mongo--recv-message conn nil 42)
-                          :type 'mongo-error)))
+            (should-error (mongodb--recv-message conn nil 42)
+                          :type 'mongodb-error)))
       (kill-buffer buffer))))
 
 
 
-(ert-deftest mongo-test-recv-handshake-validates-response-to ()
+(ert-deftest mongodb-test-recv-handshake-validates-response-to ()
   "Legacy handshake receive should reject replies for a different request id."
-  (let* ((buffer (generate-new-buffer " *mongo-test*"))
+  (let* ((buffer (generate-new-buffer " *mongodb-test*"))
          (document '(("ok" . 1)))
-         (body (concat (mongo--pack-int32 0)
-                       (mongo--pack-int64 0)
-                       (mongo--pack-int32 0)
-                       (mongo--pack-int32 1)
-                       (mongo--encode-document document)))
-         (message (concat (mongo--pack-int32 (+ 16 (length body)))
-                          (mongo--pack-int32 7)
-                          (mongo--pack-int32 41)
-                          (mongo--pack-int32 mongo--op-reply)
+         (body (concat (mongodb--pack-int32 0)
+                       (mongodb--pack-int64 0)
+                       (mongodb--pack-int32 0)
+                       (mongodb--pack-int32 1)
+                       (mongodb--encode-document document)))
+         (message (concat (mongodb--pack-int32 (+ 16 (length body)))
+                          (mongodb--pack-int32 7)
+                          (mongodb--pack-int32 41)
+                          (mongodb--pack-int32 mongodb--op-reply)
                           body))
-         (conn (make-mongo-conn :buffer buffer
+         (conn (make-mongodb-conn :buffer buffer
                                 :process 'proc
                                 :socket-timeout 1.5)))
     (unwind-protect
@@ -1443,24 +1443,24 @@
           (with-current-buffer buffer
             (set-buffer-multibyte nil)
             (insert message))
-          (cl-letf (((symbol-function 'mongo--wait-for-bytes)
+          (cl-letf (((symbol-function 'mongodb--wait-for-bytes)
                      (lambda (&rest _args) nil)))
-            (should-error (mongo--recv-handshake-message conn nil 42)
-                          :type 'mongo-error)))
+            (should-error (mongodb--recv-handshake-message conn nil 42)
+                          :type 'mongodb-error)))
       (kill-buffer buffer))))
 
 
 
-(ert-deftest mongo-test-handshake-command-includes-client-metadata ()
+(ert-deftest mongodb-test-handshake-command-includes-client-metadata ()
   "The MongoDB initial handshake should include driver and OS metadata."
-  (let* ((command (mongo--initial-handshake-command))
+  (let* ((command (mongodb--initial-handshake-command))
          (client (cdr (assoc "client" command)))
          (driver (cdr (assoc "driver" client)))
          (os (cdr (assoc "os" client))))
     (should (equal (cdr (assoc "isMaster" command)) 1))
     (should (eq (cdr (assoc "helloOk" command)) t))
     (should-not (assoc "hello" command))
-    (should (equal (cdr (assoc "name" driver)) "mongo.el"))
+    (should (equal (cdr (assoc "name" driver)) "mongodb.el"))
     (should (stringp (cdr (assoc "version" driver))))
     (should (stringp (cdr (assoc "type" os))))
     (should-not (assoc "saslSupportedMechs" command))
@@ -1469,9 +1469,9 @@
 
 
 
-(ert-deftest mongo-test-handshake-command-includes-app-name ()
+(ert-deftest mongodb-test-handshake-command-includes-app-name ()
   "The MongoDB initial handshake should include configured appName metadata."
-  (let* ((command (mongo--initial-handshake-command
+  (let* ((command (mongodb--initial-handshake-command
                    nil nil nil nil nil "Clutch"))
          (client (cdr (assoc "client" command)))
          (application (cdr (assoc "application" client))))
@@ -1479,33 +1479,33 @@
 
 
 
-(ert-deftest mongo-test-handshake-app-name-validates-byte-limit ()
+(ert-deftest mongodb-test-handshake-app-name-validates-byte-limit ()
   "MongoDB appName metadata should enforce the 128 UTF-8 byte limit."
-  (should (equal (mongo--params-app-name
+  (should (equal (mongodb--params-app-name
                   '(:app-name "Clutch"))
                  "Clutch"))
-  (should (equal (mongo--params-app-name
+  (should (equal (mongodb--params-app-name
                   '(:url "mongodb://127.0.0.1/app?appName=Clutch%20Native"))
                  "Clutch Native"))
-  (should-error (mongo--params-app-name
+  (should-error (mongodb--params-app-name
                  `(:app-name ,(make-string 129 ?a)))
-                :type 'mongo-error))
+                :type 'mongodb-error))
 
 
 
-(ert-deftest mongo-test-handshake-command-uses-hello-for-stable-api ()
+(ert-deftest mongodb-test-handshake-command-uses-hello-for-stable-api ()
   "Stable API handshakes should use modern hello instead of legacy hello."
-  (let* ((api (mongo--params-server-api '(:server-api "1")))
-         (command (mongo--initial-handshake-command nil nil api)))
+  (let* ((api (mongodb--params-server-api '(:server-api "1")))
+         (command (mongodb--initial-handshake-command nil nil api)))
     (should (equal (cdr (assoc "hello" command)) 1))
     (should-not (assoc "isMaster" command))
     (should-not (assoc "helloOk" command))))
 
 
 
-(ert-deftest mongo-test-handshake-command-uses-hello-for-load-balanced ()
+(ert-deftest mongodb-test-handshake-command-uses-hello-for-load-balanced ()
   "Load-balanced handshakes should use modern hello with loadBalanced=true."
-  (let ((command (mongo--initial-handshake-command nil nil nil t)))
+  (let ((command (mongodb--initial-handshake-command nil nil nil t)))
     (should (equal (cdr (assoc "hello" command)) 1))
     (should (eq (cdr (assoc "loadBalanced" command)) t))
     (should-not (assoc "isMaster" command))
@@ -1513,38 +1513,38 @@
 
 
 
-(ert-deftest mongo-test-handshake-command-negotiates-compression ()
+(ert-deftest mongodb-test-handshake-command-negotiates-compression ()
   "The MongoDB initial handshake should request wire compression when configured."
-  (let ((command (mongo--initial-handshake-command nil '("zlib"))))
+  (let ((command (mongodb--initial-handshake-command nil '("zlib"))))
     (should (equal (cdr (assoc "compression" command))
                    ["zlib"]))))
 
 
 
-(ert-deftest mongo-test-handshake-command-negotiates-scram ()
+(ert-deftest mongodb-test-handshake-command-negotiates-scram ()
   "The MongoDB initial handshake should request supported mechanisms for auth."
-  (let* ((credential (make-mongo--credential
+  (let* ((credential (make-mongodb--credential
                       :username "reporter"
                       :password "secret"
                       :source "admin"))
-         (command (mongo--initial-handshake-command credential)))
+         (command (mongodb--initial-handshake-command credential)))
     (should (equal (cdr (assoc "saslSupportedMechs" command))
                    "admin.reporter"))))
 
 
 
-(ert-deftest mongo-test-handshake-command-speculative-scram ()
+(ert-deftest mongodb-test-handshake-command-speculative-scram ()
   "The MongoDB initial handshake should include speculative SCRAM auth."
-  (let* ((credential (make-mongo--credential
+  (let* ((credential (make-mongodb--credential
                       :username "user"
                       :password "pencil"
                       :source "admin"))
          command speculative)
-    (cl-letf (((symbol-function 'mongo--scram-client-nonce)
+    (cl-letf (((symbol-function 'mongodb--scram-client-nonce)
                (lambda () "clientnonce")))
-      (let ((state (mongo--speculative-auth-state credential)))
+      (let ((state (mongodb--speculative-auth-state credential)))
         (setq command
-              (mongo--initial-handshake-command
+              (mongodb--initial-handshake-command
                credential nil nil nil state))))
     (setq speculative (cdr (assoc "speculativeAuthenticate" command)))
     (should (equal (cdr (assoc "saslSupportedMechs" command))
@@ -1555,24 +1555,24 @@
     (should (equal (cdr (assoc "options" speculative))
                    '(("skipEmptyExchange" . t))))
     (should (equal
-             (mongo--scram-payload-string
+             (mongodb--scram-payload-string
 	             (cdr (assoc "payload" speculative)))
 	            "n,,n=user,r=clientnonce"))))
 
 
 
-(ert-deftest mongo-test-handshake-command-speculative-default-auth ()
+(ert-deftest mongodb-test-handshake-command-speculative-default-auth ()
   "authMechanism=DEFAULT should use SCRAM-SHA-256 for speculative auth."
-  (let* ((credential (make-mongo--credential
+  (let* ((credential (make-mongodb--credential
                       :username "user"
                       :password "pencil"
                       :source "admin"
                       :mechanism "DEFAULT"))
          state command speculative)
-    (cl-letf (((symbol-function 'mongo--scram-client-nonce)
+    (cl-letf (((symbol-function 'mongodb--scram-client-nonce)
                (lambda () "clientnonce")))
-      (setq state (mongo--speculative-auth-state credential)
-            command (mongo--initial-handshake-command
+      (setq state (mongodb--speculative-auth-state credential)
+            command (mongodb--initial-handshake-command
                      credential nil nil nil state)))
     (setq speculative (cdr (assoc "speculativeAuthenticate" command)))
     (should (equal (plist-get state :mechanism) "SCRAM-SHA-256"))
@@ -1581,13 +1581,13 @@
 
 
 
-(ert-deftest mongo-test-command-with-db-adds-stable-api-fields ()
+(ert-deftest mongodb-test-command-with-db-adds-stable-api-fields ()
   "MongoDB Stable API fields should be added to every command."
-  (let ((api (mongo--params-server-api
+  (let ((api (mongodb--params-server-api
               '(:server-api "1"
                 :api-strict nil
                 :api-deprecation-errors t))))
-    (should (equal (mongo--command-with-db
+    (should (equal (mongodb--command-with-db
                     '(("ping" . 1))
                     "admin"
                     api)
@@ -1599,10 +1599,10 @@
 
 
 
-(ert-deftest mongo-test-command-with-db-adds-session-id ()
+(ert-deftest mongodb-test-command-with-db-adds-session-id ()
   "MongoDB commands should include lsid when logical sessions are active."
-  (let ((session-id `(("id" . ,(mongo-binary 4 "abcdefghijklmnop")))))
-    (should (equal (mongo--command-with-db
+  (let ((session-id `(("id" . ,(mongodb-binary 4 "abcdefghijklmnop")))))
+    (should (equal (mongodb--command-with-db
                     '(("ping" . 1))
                     "admin"
                     nil
@@ -1610,7 +1610,7 @@
                    `(("ping" . 1)
                      ("$db" . "admin")
                      ("lsid" . ,session-id))))
-    (should (equal (mongo--command-with-db
+    (should (equal (mongodb--command-with-db
                     '(("endSessions" . []))
                     "admin"
                     nil
@@ -1620,20 +1620,20 @@
 
 
 
-(ert-deftest mongo-test-command-with-db-adds-read-preference ()
+(ert-deftest mongodb-test-command-with-db-adds-read-preference ()
   "MongoDB read commands should include OP_MSG $readPreference when configured."
   (let ((read-preference
-         (mongo--params-read-preference
+         (mongodb--params-read-preference
           '(:read-preference secondary-preferred
             :max-staleness-seconds 120
             :read-preference-tags ((("dc" . "ny")))))))
-    (let ((read-command (mongo--command-with-db
+    (let ((read-command (mongodb--command-with-db
                          '(("find" . "users"))
                          "app"
                          nil
                          nil
                          read-preference))
-          (write-command (mongo--command-with-db
+          (write-command (mongodb--command-with-db
                           '(("insert" . "users")
                             ("documents" . []))
                           "app"
@@ -1654,9 +1654,9 @@
 
 
 
-(ert-deftest mongo-test-command-adds-single-secondary-read-preference ()
+(ert-deftest mongodb-test-command-adds-single-secondary-read-preference ()
   "Single topology reads from a replica-set secondary should use primaryPreferred."
-  (let* ((conn (make-mongo-conn
+  (let* ((conn (make-mongodb-conn
                 :host "seed-a"
                 :port 27018
                 :database "app"
@@ -1669,39 +1669,39 @@
                   ("setName" . "rs0")
                   ("secondary" . t)))
          captured)
-    (setf (mongo-conn-topology conn)
-          (mongo--topology-description-from-hello conn hello))
+    (setf (mongodb-conn-topology conn)
+          (mongodb--topology-description-from-hello conn hello))
     (cl-letf (((symbol-function 'process-live-p)
                (lambda (_proc) t))
-              ((symbol-function 'mongo--send-document)
+              ((symbol-function 'mongodb--send-document)
                (lambda (_conn document &optional _sequences)
                  (push document captured)
                  42))
-              ((symbol-function 'mongo--recv-message)
+              ((symbol-function 'mongodb--recv-message)
                (lambda (&rest _args)
                  '(("ok" . 1)))))
-      (mongo-command conn "app" '(("find" . "users")))
+      (mongodb-command conn "app" '(("find" . "users")))
       (should (equal (cdr (assoc "$readPreference" (car captured)))
                      '(("mode" . "primaryPreferred"))))
-      (setf (mongo-conn-read-preference conn)
-            (mongo--params-read-preference
+      (setf (mongodb-conn-read-preference conn)
+            (mongodb--params-read-preference
              '(:read-preference secondary)))
-      (mongo-command conn "app" '(("find" . "users")))
+      (mongodb-command conn "app" '(("find" . "users")))
       (should (equal (cdr (assoc "$readPreference" (car captured)))
                      '(("mode" . "secondary")))))))
 
 
 
-(ert-deftest mongo-test-command-with-db-adds-read-write-concern ()
+(ert-deftest mongodb-test-command-with-db-adds-read-write-concern ()
   "MongoDB commands should include readConcern/writeConcern by operation kind."
   (let ((read-concern
-         (mongo--params-read-concern '(:read-concern-level majority)))
+         (mongodb--params-read-concern '(:read-concern-level majority)))
         (write-concern
-         (mongo--params-write-concern
+         (mongodb--params-write-concern
           '(:w majority
             :w-timeout-ms 5000
             :journal t))))
-    (should (equal (mongo--command-with-db
+    (should (equal (mongodb--command-with-db
                     '(("find" . "users"))
                     "app"
                     nil
@@ -1712,7 +1712,7 @@
                    '(("find" . "users")
                      ("$db" . "app")
                      ("readConcern" . (("level" . "majority"))))))
-    (should (equal (mongo--command-with-db
+    (should (equal (mongodb--command-with-db
                     '(("insert" . "users")
                       ("documents" . []))
                     "app"
@@ -1729,10 +1729,10 @@
                        ("wtimeout" . 5000)
                        ("j" . t)))))))
   (let ((read-concern
-         (mongo--params-read-concern '(:read-concern-level majority)))
+         (mongodb--params-read-concern '(:read-concern-level majority)))
         (write-concern
-         (mongo--params-write-concern '(:w 2))))
-    (should (equal (mongo--command-with-db
+         (mongodb--params-write-concern '(:w 2))))
+    (should (equal (mongodb--command-with-db
                     '(("find" . "users")
                       ("readConcern" . (("level" . "local"))))
                     "app"
@@ -1747,13 +1747,13 @@
 
 
 
-(ert-deftest mongo-test-generic-command-does-not-inherit-read-write-concern ()
+(ert-deftest mongodb-test-generic-command-does-not-inherit-read-write-concern ()
   "Generic command execution should not apply connection read/write concern."
   (let* ((read-concern
-          (mongo--params-read-concern '(:read-concern-level majority)))
+          (mongodb--params-read-concern '(:read-concern-level majority)))
          (write-concern
-          (mongo--params-write-concern '(:w majority :journal t)))
-         (conn (make-mongo-conn :host "seed-a"
+          (mongodb--params-write-concern '(:w majority :journal t)))
+         (conn (make-mongodb-conn :host "seed-a"
                                 :port 27017
                                 :database "app"
                                 :process 'proc
@@ -1766,19 +1766,19 @@
                   ("setName" . "rs0")
                   ("isWritablePrimary" . t)))
          sent)
-    (setf (mongo-conn-topology conn)
-          (mongo--topology-description-from-hello conn hello))
+    (setf (mongodb-conn-topology conn)
+          (mongodb--topology-description-from-hello conn hello))
     (cl-letf (((symbol-function 'process-live-p)
                (lambda (_proc) t))
-              ((symbol-function 'mongo--send-document)
+              ((symbol-function 'mongodb--send-document)
                (lambda (_conn document &optional _sequences)
                  (push document sent)
                  1))
-              ((symbol-function 'mongo--recv-message)
+              ((symbol-function 'mongodb--recv-message)
                (lambda (&rest _args)
                  '(("ok" . 1)))))
-      (mongo-command conn "app" '(("find" . "users")))
-      (mongo-command conn "app" '(("insert" . "users")
+      (mongodb-command conn "app" '(("find" . "users")))
+      (mongodb-command conn "app" '(("insert" . "users")
                                   ("documents" . []))))
     (setq sent (nreverse sent))
     (should-not (assoc "readConcern" (nth 0 sent)))
@@ -1786,13 +1786,13 @@
 
 
 
-(ert-deftest mongo-test-operation-helpers-inherit-read-write-concern ()
+(ert-deftest mongodb-test-operation-helpers-inherit-read-write-concern ()
   "Typed helper operations should apply connection read/write concern."
   (let* ((read-concern
-          (mongo--params-read-concern '(:read-concern-level majority)))
+          (mongodb--params-read-concern '(:read-concern-level majority)))
          (write-concern
-          (mongo--params-write-concern '(:w majority :journal t)))
-         (conn (make-mongo-conn :host "seed-a"
+          (mongodb--params-write-concern '(:w majority :journal t)))
+         (conn (make-mongodb-conn :host "seed-a"
                                 :port 27017
                                 :database "app"
                                 :process 'proc
@@ -1805,15 +1805,15 @@
                   ("setName" . "rs0")
                   ("isWritablePrimary" . t)))
          sent)
-    (setf (mongo-conn-topology conn)
-          (mongo--topology-description-from-hello conn hello))
+    (setf (mongodb-conn-topology conn)
+          (mongodb--topology-description-from-hello conn hello))
     (cl-letf (((symbol-function 'process-live-p)
                (lambda (_proc) t))
-              ((symbol-function 'mongo--send-document)
+              ((symbol-function 'mongodb--send-document)
                (lambda (_conn document &optional _sequences)
                  (push document sent)
                  1))
-              ((symbol-function 'mongo--recv-message)
+              ((symbol-function 'mongodb--recv-message)
                (lambda (&rest _args)
                  (if (equal (caar (car sent)) "find")
                      '(("ok" . 1)
@@ -1821,9 +1821,9 @@
                         (("id" . 0)
                          ("firstBatch" . []))))
                    '(("ok" . 1))))))
-      (mongo-find conn "app" "users")
-      (mongo-insert conn "app" "users"
-                    (vector (mongo-document '(("name" . "Ann"))))))
+      (mongodb-find conn "app" "users")
+      (mongodb-insert conn "app" "users"
+                    (vector (mongodb-document '(("name" . "Ann"))))))
     (setq sent (nreverse sent))
     (should (equal (cdr (assoc "readConcern" (nth 0 sent)))
                    '(("level" . "majority"))))
@@ -1832,20 +1832,20 @@
 
 
 
-(ert-deftest mongo-test-command-with-db-adds-transaction-fields ()
+(ert-deftest mongodb-test-command-with-db-adds-transaction-fields ()
   "MongoDB transaction commands should use transaction metadata only."
-  (let* ((session-id `(("id" . ,(mongo-binary 4 "abcdefghijklmnop"))))
+  (let* ((session-id `(("id" . ,(mongodb-binary 4 "abcdefghijklmnop"))))
          (read-preference
-          (mongo--params-read-preference
+          (mongodb--params-read-preference
            '(:read-preference secondary)))
          (read-concern
-          (mongo--params-read-concern '(:read-concern-level majority)))
+          (mongodb--params-read-concern '(:read-concern-level majority)))
          (write-concern
-          (mongo--params-write-concern '(:w majority)))
+          (mongodb--params-write-concern '(:w majority)))
          (transaction-read-concern
-          (mongo--params-read-concern '(:read-concern-level snapshot)))
-         (txn-number (mongo-int64 7)))
-    (should (equal (mongo--command-with-db
+          (mongodb--params-read-concern '(:read-concern-level snapshot)))
+         (txn-number (mongodb-int64 7)))
+    (should (equal (mongodb--command-with-db
                     '(("find" . "users"))
                     "app"
                     nil
@@ -1863,7 +1863,7 @@
                      ("autocommit" . :false)
                      ("startTransaction" . t)
                      ("readConcern" . (("level" . "snapshot"))))))
-    (should (equal (mongo--command-with-db
+    (should (equal (mongodb--command-with-db
                     '(("insert" . "users"))
                     "app"
                     nil
@@ -1882,17 +1882,17 @@
 
 
 
-(ert-deftest mongo-test-command-with-db-skips-session-for-hello ()
+(ert-deftest mongodb-test-command-with-db-skips-session-for-hello ()
   "MongoDB hello commands should not carry an implicit lsid."
-  (let ((session-id `(("id" . ,(mongo-binary 4 "abcdefghijklmnop")))))
-    (should (equal (mongo--command-with-db
+  (let ((session-id `(("id" . ,(mongodb-binary 4 "abcdefghijklmnop")))))
+    (should (equal (mongodb--command-with-db
                     '(("hello" . 1))
                     "admin"
                     nil
                     session-id)
                    '(("hello" . 1)
                      ("$db" . "admin"))))
-    (should (equal (mongo--command-with-db
+    (should (equal (mongodb--command-with-db
                     '(("isMaster" . 1))
                     "admin"
                     nil
@@ -1902,7 +1902,7 @@
 
 
 
-(defun mongo-test--cluster-time (seconds increment)
+(defun mongodb-test--cluster-time (seconds increment)
   "Return a decoded MongoDB $clusterTime fixture."
   `(("clusterTime" .
      (("$timestamp" .
@@ -1917,29 +1917,29 @@
 
 
 
-(ert-deftest mongo-test-command-with-db-adds-cluster-time ()
+(ert-deftest mongodb-test-command-with-db-adds-cluster-time ()
   "MongoDB non-SDAM commands should gossip the highest seen $clusterTime."
-  (let* ((cluster-time (mongo-test--cluster-time 1700000000 7))
-         (command (mongo--command-with-db
+  (let* ((cluster-time (mongodb-test--cluster-time 1700000000 7))
+         (command (mongodb--command-with-db
                    '(("ping" . 1))
                    "admin"
                    nil nil nil nil nil nil nil nil
                    cluster-time))
          (sent-cluster-time (cdr (assoc "$clusterTime" command)))
-         (sent-pairs (mongo-document-pairs sent-cluster-time))
+         (sent-pairs (mongodb-document-pairs sent-cluster-time))
          (sent-timestamp (cdr (assoc "clusterTime" sent-pairs)))
          (sent-signature (cdr (assoc "signature" sent-pairs)))
          (sent-hash (cdr (assoc "hash"
-                                (mongo-document-pairs sent-signature)))))
-    (should (mongo-document-p sent-cluster-time))
-    (should (mongo-timestamp-p sent-timestamp))
-    (should (= (mongo-timestamp-seconds sent-timestamp) 1700000000))
-    (should (= (mongo-timestamp-increment sent-timestamp) 7))
-    (should (mongo-document-p sent-signature))
-    (should (mongo-binary-p sent-hash))
-    (should (= (mongo-binary-subtype sent-hash) 0))
-    (should (equal (mongo-binary-data sent-hash) "abc"))
-    (should (equal (mongo--command-with-db
+                                (mongodb-document-pairs sent-signature)))))
+    (should (mongodb-document-p sent-cluster-time))
+    (should (mongodb-timestamp-p sent-timestamp))
+    (should (= (mongodb-timestamp-seconds sent-timestamp) 1700000000))
+    (should (= (mongodb-timestamp-increment sent-timestamp) 7))
+    (should (mongodb-document-p sent-signature))
+    (should (mongodb-binary-p sent-hash))
+    (should (= (mongodb-binary-subtype sent-hash) 0))
+    (should (equal (mongodb-binary-data sent-hash) "abc"))
+    (should (equal (mongodb--command-with-db
                     '(("hello" . 1))
                     "admin"
                     nil nil nil nil nil nil nil nil
@@ -1949,104 +1949,104 @@
 
 
 
-(ert-deftest mongo-test-advances-cluster-time-from-response ()
+(ert-deftest mongodb-test-advances-cluster-time-from-response ()
   "MongoDB responses should advance, but not regress, tracked cluster time."
-  (let* ((conn (make-mongo-conn :max-wire-version 17))
-         (low (mongo-test--cluster-time 100 9))
+  (let* ((conn (make-mongodb-conn :max-wire-version 17))
+         (low (mongodb-test--cluster-time 100 9))
          (same-time-higher-increment
-          (mongo-test--cluster-time 100 10))
-         (high (mongo-test--cluster-time 101 0)))
-    (mongo--advance-cluster-time-from-response
+          (mongodb-test--cluster-time 100 10))
+         (high (mongodb-test--cluster-time 101 0)))
+    (mongodb--advance-cluster-time-from-response
      conn
      '(("find" . "users"))
      `(("ok" . 1)
        ("$clusterTime" . ,low)))
-    (should (equal (mongo-conn-cluster-time conn) low))
-    (should (equal (mongo-conn-session-cluster-time conn) low))
-    (mongo--advance-cluster-time-from-response
+    (should (equal (mongodb-conn-cluster-time conn) low))
+    (should (equal (mongodb-conn-session-cluster-time conn) low))
+    (mongodb--advance-cluster-time-from-response
      conn
      '(("find" . "users"))
      `(("ok" . 1)
        ("$clusterTime" . ,same-time-higher-increment)))
-    (should (equal (mongo-conn-cluster-time conn)
+    (should (equal (mongodb-conn-cluster-time conn)
                    same-time-higher-increment))
-    (mongo--advance-cluster-time-from-response
+    (mongodb--advance-cluster-time-from-response
      conn
      '(("find" . "users"))
      `(("ok" . 1)
        ("$clusterTime" . ,high)))
-    (should (equal (mongo-conn-cluster-time conn) high))
-    (mongo--advance-cluster-time-from-response
+    (should (equal (mongodb-conn-cluster-time conn) high))
+    (mongodb--advance-cluster-time-from-response
      conn
      '(("find" . "users"))
      `(("ok" . 1)
        ("$clusterTime" . ,low)))
-    (should (equal (mongo-conn-cluster-time conn) high))
-    (mongo--advance-cluster-time-from-response
+    (should (equal (mongodb-conn-cluster-time conn) high))
+    (mongodb--advance-cluster-time-from-response
      conn
      '(("hello" . 1))
      `(("ok" . 1)
-       ("$clusterTime" . ,(mongo-test--cluster-time 102 0))))
-    (should (equal (mongo-conn-cluster-time conn) high))))
+       ("$clusterTime" . ,(mongodb-test--cluster-time 102 0))))
+    (should (equal (mongodb-conn-cluster-time conn) high))))
 
 
 
-(ert-deftest mongo-test-command-gossips-cluster-time ()
+(ert-deftest mongodb-test-command-gossips-cluster-time ()
   "MongoDB command execution should include tracked $clusterTime on the wire."
-  (let* ((cluster-time (mongo-test--cluster-time 1700000000 7))
-         (conn (make-mongo-conn :closed nil
+  (let* ((cluster-time (mongodb-test--cluster-time 1700000000 7))
+         (conn (make-mongodb-conn :closed nil
                                 :max-wire-version 17
                                 :cluster-time cluster-time))
          captured)
-    (cl-letf (((symbol-function 'mongo-live-p)
+    (cl-letf (((symbol-function 'mongodb-live-p)
                (lambda (_conn) t))
-              ((symbol-function 'mongo--send-document)
+              ((symbol-function 'mongodb--send-document)
                (lambda (_conn document &optional _sequences)
                  (setq captured document)))
-              ((symbol-function 'mongo--recv-message)
+              ((symbol-function 'mongodb--recv-message)
                (lambda (&rest _args)
                  '(("ok" . 1)))))
-      (mongo-command conn "admin" '(("ping" . 1))))
+      (mongodb-command conn "admin" '(("ping" . 1))))
     (should (assoc "$clusterTime" captured))
     (let* ((sent-cluster-time (cdr (assoc "$clusterTime" captured)))
            (sent-timestamp
             (cdr (assoc "clusterTime"
-                        (mongo-document-pairs sent-cluster-time)))))
-      (should (mongo-timestamp-p sent-timestamp))
-      (should (= (mongo-timestamp-seconds sent-timestamp) 1700000000))
-      (should (= (mongo-timestamp-increment sent-timestamp) 7)))))
+                        (mongodb-document-pairs sent-cluster-time)))))
+      (should (mongodb-timestamp-p sent-timestamp))
+      (should (= (mongodb-timestamp-seconds sent-timestamp) 1700000000))
+      (should (= (mongodb-timestamp-increment sent-timestamp) 7)))))
 
 
 
-(ert-deftest mongo-test-command-receives-matching-response-id ()
+(ert-deftest mongodb-test-command-receives-matching-response-id ()
   "MongoDB command execution should receive the reply for its request id."
-  (let ((conn (make-mongo-conn :process 'proc
+  (let ((conn (make-mongodb-conn :process 'proc
                                :closed nil
                                :database "app"
                                :max-wire-version 17))
         expected-response-to)
-    (cl-letf (((symbol-function 'mongo-live-p)
+    (cl-letf (((symbol-function 'mongodb-live-p)
                (lambda (_conn) t))
-              ((symbol-function 'mongo--ensure-writable-server)
+              ((symbol-function 'mongodb--ensure-writable-server)
                (lambda (&rest _args) nil))
-              ((symbol-function 'mongo--ensure-readable-server)
+              ((symbol-function 'mongodb--ensure-readable-server)
                (lambda (&rest _args) nil))
-              ((symbol-function 'mongo--send-document)
+              ((symbol-function 'mongodb--send-document)
                (lambda (&rest _args) 73))
-              ((symbol-function 'mongo--recv-message)
+              ((symbol-function 'mongodb--recv-message)
                (lambda (_conn _timeout response-to &optional _allow-more)
                  (setq expected-response-to response-to)
                  '(("ok" . 1)))))
-      (should (equal (mongo-command conn "app" '(("ping" . 1)))
+      (should (equal (mongodb-command conn "app" '(("ping" . 1)))
 	                     '(("ok" . 1)))))
     (should (= expected-response-to 73))))
 
 
 
-(ert-deftest mongo-test-command-monitoring-events-include-service-id ()
+(ert-deftest mongodb-test-command-monitoring-events-include-service-id ()
   "Command monitoring events should include load-balanced serviceId."
   (let* ((service-id '(("$oid" . "64f0000000000000000000aa")))
-         (conn (make-mongo-conn :process 'proc
+         (conn (make-mongodb-conn :process 'proc
                                 :closed nil
                                 :host "lb.example.test"
                                 :port 27017
@@ -2061,13 +2061,13 @@
                (lambda (_proc) t))
               ((symbol-function 'process-send-string)
                (lambda (&rest _args) nil))
-              ((symbol-function 'mongo--recv-message)
+              ((symbol-function 'mongodb--recv-message)
                (lambda (&rest _args)
                  '(("ok" . 1)))))
-      (let ((mongo-command-event-hook
+      (let ((mongodb-command-event-hook
              (list (lambda (event)
                      (push event events)))))
-        (should (equal (mongo-command conn "app" '(("ping" . 1)))
+        (should (equal (mongodb-command conn "app" '(("ping" . 1)))
                        '(("ok" . 1))))))
     (let ((ordered (nreverse events)))
       (should (equal (mapcar (lambda (event)
@@ -2089,12 +2089,12 @@
                      '(("ok" . 1)))))))
 
 
-(ert-deftest mongo-test-command-monitoring-events-include-driver-connection-id ()
+(ert-deftest mongodb-test-command-monitoring-events-include-driver-connection-id ()
   "Pooled command monitoring events should include the CMAP connection id."
   (let (events pool conn)
-    (cl-letf (((symbol-function 'mongo-connect)
+    (cl-letf (((symbol-function 'mongodb-connect)
                (lambda (params)
-                 (make-mongo-conn :process 'proc
+                 (make-mongodb-conn :process 'proc
                                   :closed nil
                                   :host (plist-get params :host)
                                   :port (plist-get params :port)
@@ -2105,17 +2105,17 @@
                (lambda (_proc) t))
               ((symbol-function 'process-send-string)
                (lambda (&rest _args) nil))
-              ((symbol-function 'mongo--recv-message)
+              ((symbol-function 'mongodb--recv-message)
                (lambda (&rest _args)
                  '(("ok" . 1)))))
-      (let ((mongo-command-event-hook
+      (let ((mongodb-command-event-hook
              (list (lambda (event)
                      (push event events)))))
-        (setq pool (mongo-pool-open '(:host "db.example.test"
+        (setq pool (mongodb-pool-open '(:host "db.example.test"
                                       :port 27018
                                       :database "app"
                                       :max-pool-size 1)))
-        (should (equal (mongo-pool-command
+        (should (equal (mongodb-pool-command
                         pool "app" '(("ping" . 1)))
                        '(("ok" . 1))))))
     (let ((ordered (nreverse events)))
@@ -2127,17 +2127,17 @@
         (should (equal (alist-get 'connection-id event)
                        "db.example.test:27018"))
         (should (= (alist-get 'driver-connection-id event) 1))))
-    (setq conn (mongo--pool-entry-conn (car (mongo-pool-available pool))))
-    (should (= (mongo-conn-pool-connection-id conn) 1))
-    (mongo-pool-disconnect pool)
-    (should (mongo-conn-closed conn))
-    (should-not (mongo-conn-pool-connection-id conn))))
+    (setq conn (mongodb--pool-entry-conn (car (mongodb-pool-available pool))))
+    (should (= (mongodb-conn-pool-connection-id conn) 1))
+    (mongodb-pool-disconnect pool)
+    (should (mongodb-conn-closed conn))
+    (should-not (mongodb-conn-pool-connection-id conn))))
 
 
 
-(ert-deftest mongo-test-command-monitoring-emits-failed-for-server-error ()
+(ert-deftest mongodb-test-command-monitoring-emits-failed-for-server-error ()
   "Command monitoring should treat ok:0 replies as command-failed."
-  (let ((conn (make-mongo-conn :process 'proc
+  (let ((conn (make-mongodb-conn :process 'proc
                                :closed nil
                                :host "db.example.test"
                                :port 27017
@@ -2149,17 +2149,17 @@
                (lambda (_proc) t))
               ((symbol-function 'process-send-string)
                (lambda (&rest _args) nil))
-              ((symbol-function 'mongo--recv-message)
+              ((symbol-function 'mongodb--recv-message)
                (lambda (&rest _args)
                  '(("ok" . 0)
                    ("errmsg" . "bad command")
                    ("code" . 123)))))
-      (let ((mongo-command-event-hook
+      (let ((mongodb-command-event-hook
              (list (lambda (event)
                      (push event events)))))
         (should-error
-         (mongo-command conn "app" '(("ping" . 1)))
-         :type 'mongo-error)))
+         (mongodb-command conn "app" '(("ping" . 1)))
+         :type 'mongodb-error)))
     (let ((ordered (nreverse events)))
       (should (equal (mapcar (lambda (event)
                                (alist-get 'type event))
@@ -2174,9 +2174,9 @@
 
 
 
-(ert-deftest mongo-test-command-monitoring-redacts-sensitive-commands ()
+(ert-deftest mongodb-test-command-monitoring-redacts-sensitive-commands ()
   "Command monitoring should redact sensitive command documents and replies."
-  (let ((conn (make-mongo-conn :process 'proc
+  (let ((conn (make-mongodb-conn :process 'proc
                                :closed nil
                                :host "db.example.test"
                                :port 27017
@@ -2188,14 +2188,14 @@
                (lambda (_proc) t))
               ((symbol-function 'process-send-string)
                (lambda (&rest _args) nil))
-              ((symbol-function 'mongo--recv-message)
+              ((symbol-function 'mongodb--recv-message)
                (lambda (&rest _args)
                  '(("ok" . 1)
                    ("payload" . "secret")))))
-      (let ((mongo-command-event-hook
+      (let ((mongodb-command-event-hook
              (list (lambda (event)
                      (push event events)))))
-        (mongo-command
+        (mongodb-command
          conn "admin"
          '(("saslStart" . 1)
            ("mechanism" . "SCRAM-SHA-256")
@@ -2211,9 +2211,9 @@
       (should-not (alist-get 'reply (cadr ordered))))))
 
 
-(ert-deftest mongo-test-command-monitoring-redacts-sensitive-failure ()
+(ert-deftest mongodb-test-command-monitoring-redacts-sensitive-failure ()
   "Sensitive command failures should retain only allowed server error fields."
-  (let ((conn (make-mongo-conn :process 'proc
+  (let ((conn (make-mongodb-conn :process 'proc
                                :closed nil
                                :host "db.example.test"
                                :port 27017
@@ -2225,7 +2225,7 @@
                (lambda (_proc) t))
               ((symbol-function 'process-send-string)
                (lambda (&rest _args) nil))
-              ((symbol-function 'mongo--recv-message)
+              ((symbol-function 'mongodb--recv-message)
                (lambda (&rest _args)
                  '(("ok" . 0)
                    ("errmsg" . "secret failure")
@@ -2233,16 +2233,16 @@
                    ("codeName" . "AuthenticationFailed")
                    ("errorLabels" . ["TransientTransactionError"])
                    ("payload" . "secret")))))
-      (let ((mongo-command-event-hook
+      (let ((mongodb-command-event-hook
              (list (lambda (event)
                      (push event events)))))
         (should-error
-         (mongo-command
+         (mongodb-command
           conn "admin"
           '(("saslStart" . 1)
             ("mechanism" . "SCRAM-SHA-256")
             ("payload" . "secret")))
-         :type 'mongo-error)))
+         :type 'mongodb-error)))
     (let ((ordered (nreverse events)))
       (should (equal (mapcar (lambda (event)
                                (alist-get 'type event))
@@ -2257,9 +2257,9 @@
 
 
 
-(ert-deftest mongo-test-command-monitoring-started-merges-sequences ()
+(ert-deftest mongodb-test-command-monitoring-started-merges-sequences ()
   "Command-started events should expose OP_MSG sequences as array fields."
-  (let ((conn (make-mongo-conn :process 'proc
+  (let ((conn (make-mongodb-conn :process 'proc
                                :closed nil
                                :host "db.example.test"
                                :port 27017
@@ -2272,15 +2272,15 @@
                (lambda (_proc) t))
               ((symbol-function 'process-send-string)
                (lambda (&rest _args) nil))
-              ((symbol-function 'mongo--ensure-writable-server)
+              ((symbol-function 'mongodb--ensure-writable-server)
                (lambda (&rest _args) nil))
-              ((symbol-function 'mongo--recv-message)
+              ((symbol-function 'mongodb--recv-message)
                (lambda (&rest _args)
                  '(("ok" . 1)))))
-      (let ((mongo-command-event-hook
+      (let ((mongodb-command-event-hook
              (list (lambda (event)
                      (push event events)))))
-        (mongo-command
+        (mongodb-command
          conn "app"
          '(("insert" . "users"))
          nil
@@ -2290,9 +2290,9 @@
 
 
 
-(ert-deftest mongo-test-command-monitoring-bulk-write-operation-id ()
+(ert-deftest mongodb-test-command-monitoring-bulk-write-operation-id ()
   "Split bulkWrite command events should share one operation-id."
-  (let ((conn (make-mongo-conn :process 'proc
+  (let ((conn (make-mongodb-conn :process 'proc
                                :closed nil
                                :host "db.example.test"
                                :port 27017
@@ -2300,7 +2300,7 @@
                                :request-id 0
                                :max-wire-version 17
                                :max-write-batch-size 2))
-        (mongo--next-command-operation-id 0)
+        (mongodb--next-command-operation-id 0)
         events
         responses)
     (setq responses
@@ -2322,17 +2322,17 @@
                (lambda (_proc) t))
               ((symbol-function 'process-send-string)
                (lambda (&rest _args) nil))
-              ((symbol-function 'mongo--ensure-writable-server)
+              ((symbol-function 'mongodb--ensure-writable-server)
                (lambda (&rest _args) nil))
-              ((symbol-function 'mongo--recv-message)
+              ((symbol-function 'mongodb--recv-message)
                (lambda (&rest _args)
                  (pop responses))))
-      (let ((mongo-command-event-hook
+      (let ((mongodb-command-event-hook
              (list (lambda (event)
                      (push event events)))))
         (should
          (equal
-          (mongo-bulk-write
+          (mongodb-bulk-write
            conn
            '((("insert" . "app.users")
               ("document" . (("name" . "Ann"))))
@@ -2372,9 +2372,9 @@
 
 
 
-(ert-deftest mongo-test-monitor-heartbeat-suppresses-command-events ()
+(ert-deftest mongodb-test-monitor-heartbeat-suppresses-command-events ()
   "Internal monitor heartbeats should not publish command monitoring events."
-  (let ((conn (make-mongo-conn :process 'proc
+  (let ((conn (make-mongodb-conn :process 'proc
                                :closed nil
                                :host "db.example.test"
                                :port 27017
@@ -2387,54 +2387,54 @@
                (lambda (_proc) t))
               ((symbol-function 'process-send-string)
                (lambda (&rest _args) nil))
-              ((symbol-function 'mongo--recv-message)
+              ((symbol-function 'mongodb--recv-message)
                (lambda (&rest _args)
                  '(("ok" . 1)
                    ("maxWireVersion" . 17)))))
-      (let ((mongo-command-event-hook
+      (let ((mongodb-command-event-hook
              (list (lambda (event)
                      (push event events)))))
-        (should (equal (mongo-monitor-once conn 250 3)
+        (should (equal (mongodb-monitor-once conn 250 3)
                        '(("ok" . 1)
                          ("maxWireVersion" . 17))))))
     (should-not events)))
 
 
 
-(ert-deftest mongo-test-command-uses-operation-timeout ()
+(ert-deftest mongodb-test-command-uses-operation-timeout ()
   "MongoDB commands should default to timeoutMS when no call timeout is given."
-  (let ((conn (make-mongo-conn :operation-timeout 2.5
+  (let ((conn (make-mongodb-conn :operation-timeout 2.5
                                :socket-timeout 9))
         captured-timeout)
-    (cl-letf (((symbol-function 'mongo--send-command-and-receive)
+    (cl-letf (((symbol-function 'mongodb--send-command-and-receive)
                (lambda (_conn _database _command timeout _sequences
                               _txn-number)
                  (setq captured-timeout timeout)
                  '(("ok" . 1)))))
-      (should (equal (mongo-command conn "app" '(("ping" . 1)))
+      (should (equal (mongodb-command conn "app" '(("ping" . 1)))
                      '(("ok" . 1)))))
     (should (= captured-timeout 2.5))))
 
 
 
-(ert-deftest mongo-test-command-timeout-overrides-operation-timeout ()
+(ert-deftest mongodb-test-command-timeout-overrides-operation-timeout ()
   "Per-call MongoDB command timeouts should override timeoutMS."
-  (let ((conn (make-mongo-conn :operation-timeout 2.5
+  (let ((conn (make-mongodb-conn :operation-timeout 2.5
                                :socket-timeout 9))
         captured-timeout)
-    (cl-letf (((symbol-function 'mongo--send-command-and-receive)
+    (cl-letf (((symbol-function 'mongodb--send-command-and-receive)
                (lambda (_conn _database _command timeout _sequences
                               _txn-number)
                  (setq captured-timeout timeout)
                  '(("ok" . 1)))))
-      (should (equal (mongo-command conn "app" '(("ping" . 1)) 1.25)
+      (should (equal (mongodb-command conn "app" '(("ping" . 1)) 1.25)
                      '(("ok" . 1)))))
     (should (= captured-timeout 1.25))))
 
 
-(ert-deftest mongo-test-operation-unacknowledged-write-uses-more-to-come ()
+(ert-deftest mongodb-test-operation-unacknowledged-write-uses-more-to-come ()
   "Unacknowledged helper writes should use OP_MSG moreToCome and skip receiving."
-  (let ((conn (make-mongo-conn
+  (let ((conn (make-mongodb-conn
                :process 'proc
                :closed nil
                :host "db.example.test"
@@ -2443,37 +2443,37 @@
                :request-id 0
                :max-wire-version 17
                :write-concern
-               (make-mongo--write-concern :pairs '(("w" . 0)))))
+               (make-mongodb--write-concern :pairs '(("w" . 0)))))
         events sent recv-called)
     (cl-letf (((symbol-function 'process-live-p)
                (lambda (_proc) t))
               ((symbol-function 'process-send-string)
                (lambda (_proc message)
                  (setq sent message)))
-              ((symbol-function 'mongo--recv-message)
+              ((symbol-function 'mongodb--recv-message)
                (lambda (&rest _args)
                  (setq recv-called t)
                  '(("ok" . 1))))
-              ((symbol-function 'mongo--ensure-writable-server)
+              ((symbol-function 'mongodb--ensure-writable-server)
                (lambda (&rest _args) nil))
-              ((symbol-function 'mongo--ensure-readable-server)
+              ((symbol-function 'mongodb--ensure-readable-server)
                (lambda (&rest _args) nil)))
-      (let ((mongo-command-event-hook
+      (let ((mongodb-command-event-hook
              (list (lambda (event)
                      (push event events)))))
         (should (equal
-                 (mongo-insert
+                 (mongodb-insert
                   conn "app" "users"
-                  (vector (mongo-document '(("name" . "Ann")))))
+                  (vector (mongodb-document '(("name" . "Ann")))))
                  '(("ok" . 1))))))
     (should sent)
     (should-not recv-called)
-    (let ((frame (mongo--decode-message-frame sent t)))
-      (should (= (logand (mongo--decoded-message-flags frame)
-                         mongo--op-msg-more-to-come)
-                 mongo--op-msg-more-to-come))
+    (let ((frame (mongodb--decode-message-frame sent t)))
+      (should (= (logand (mongodb--decoded-message-flags frame)
+                         mongodb--op-msg-more-to-come)
+                 mongodb--op-msg-more-to-come))
       (should (equal (cdr (assoc "writeConcern"
-                                 (mongo--decoded-message-document frame)))
+                                 (mongodb--decoded-message-document frame)))
                      '(("w" . 0)))))
     (let ((ordered (nreverse events)))
       (should (equal (mapcar (lambda (event)
@@ -2486,9 +2486,9 @@
                      '(("ok" . 1)))))))
 
 
-(ert-deftest mongo-test-generic-command-ignores-inherited-w0 ()
+(ert-deftest mongodb-test-generic-command-ignores-inherited-w0 ()
   "Generic commands should not treat inherited w:0 as unacknowledged."
-  (let ((conn (make-mongo-conn
+  (let ((conn (make-mongodb-conn
                :process 'proc
                :closed nil
                :host "db.example.test"
@@ -2497,40 +2497,40 @@
                :request-id 0
                :max-wire-version 17
                :write-concern
-               (make-mongo--write-concern :pairs '(("w" . 0)))))
+               (make-mongodb--write-concern :pairs '(("w" . 0)))))
         sent recv-response-to)
     (cl-letf (((symbol-function 'process-live-p)
                (lambda (_proc) t))
               ((symbol-function 'process-send-string)
                (lambda (_proc message)
                  (setq sent message)))
-              ((symbol-function 'mongo--recv-message)
+              ((symbol-function 'mongodb--recv-message)
                (lambda (_conn _timeout response-to &optional _allow-more)
                  (setq recv-response-to response-to)
                  '(("ok" . 1))))
-              ((symbol-function 'mongo--ensure-writable-server)
+              ((symbol-function 'mongodb--ensure-writable-server)
                (lambda (&rest _args) nil))
-              ((symbol-function 'mongo--ensure-readable-server)
+              ((symbol-function 'mongodb--ensure-readable-server)
                (lambda (&rest _args) nil)))
       (should (equal
-               (mongo-command
+               (mongodb-command
                 conn "app"
                 '(("insert" . "users")
                   ("documents" . [(("name" . "Ann"))])))
                '(("ok" . 1)))))
     (should sent)
-    (let ((frame (mongo--decode-message-frame sent)))
-      (should (= (logand (mongo--decoded-message-flags frame)
-                         mongo--op-msg-more-to-come)
+    (let ((frame (mongodb--decode-message-frame sent)))
+      (should (= (logand (mongodb--decoded-message-flags frame)
+                         mongodb--op-msg-more-to-come)
                  0))
       (should-not (assoc "writeConcern"
-                         (mongo--decoded-message-document frame))))
+                         (mongodb--decoded-message-document frame))))
     (should (= recv-response-to 1))))
 
 
-(ert-deftest mongo-test-operation-journaled-w0-write-is-acknowledged ()
+(ert-deftest mongodb-test-operation-journaled-w0-write-is-acknowledged ()
   "Helper writes with w:0 and j:true should wait for the server reply."
-  (let ((conn (make-mongo-conn
+  (let ((conn (make-mongodb-conn
                :process 'proc
                :closed nil
                :host "db.example.test"
@@ -2539,80 +2539,80 @@
                :request-id 0
                :max-wire-version 17
                :write-concern
-               (make-mongo--write-concern :pairs '(("w" . 0) ("j" . t)))))
+               (make-mongodb--write-concern :pairs '(("w" . 0) ("j" . t)))))
         sent recv-response-to)
     (cl-letf (((symbol-function 'process-live-p)
                (lambda (_proc) t))
               ((symbol-function 'process-send-string)
                (lambda (_proc message)
                  (setq sent message)))
-              ((symbol-function 'mongo--recv-message)
+              ((symbol-function 'mongodb--recv-message)
                (lambda (_conn _timeout response-to &optional _allow-more)
                  (setq recv-response-to response-to)
                  '(("ok" . 1))))
-              ((symbol-function 'mongo--ensure-writable-server)
+              ((symbol-function 'mongodb--ensure-writable-server)
                (lambda (&rest _args) nil))
-              ((symbol-function 'mongo--ensure-readable-server)
+              ((symbol-function 'mongodb--ensure-readable-server)
                (lambda (&rest _args) nil)))
       (should (equal
-               (mongo-insert
+               (mongodb-insert
                 conn "app" "users"
-                (vector (mongo-document '(("name" . "Ann")))))
+                (vector (mongodb-document '(("name" . "Ann")))))
                '(("ok" . 1)))))
     (should sent)
-    (let ((frame (mongo--decode-message-frame sent)))
-      (should (= (logand (mongo--decoded-message-flags frame)
-                         mongo--op-msg-more-to-come)
+    (let ((frame (mongodb--decode-message-frame sent)))
+      (should (= (logand (mongodb--decoded-message-flags frame)
+                         mongodb--op-msg-more-to-come)
                  0))
       (should (equal (cdr (assoc "writeConcern"
-                                 (mongo--decoded-message-document frame)))
+                                 (mongodb--decoded-message-document frame)))
                      '(("w" . 0) ("j" . t)))))
     (should (= recv-response-to 1))))
 
 
 
-(ert-deftest mongo-test-command-exhaust-consumes-more-to-come ()
+(ert-deftest mongodb-test-command-exhaust-consumes-more-to-come ()
   "MongoDB exhaust commands should drain frames until moreToCome is clear."
-  (let ((conn (make-mongo-conn :process 'proc
+  (let ((conn (make-mongodb-conn :process 'proc
                                :closed nil
                                :database "app"
                                :max-wire-version 17))
         (frames
          (list
-          (make-mongo--decoded-message
+          (make-mongodb--decoded-message
            :request-id 90
            :response-to 73
-           :opcode mongo--op-msg
-           :flags mongo--op-msg-more-to-come
+           :opcode mongodb--op-msg
+           :flags mongodb--op-msg-more-to-come
            :document '(("ok" . 1) ("n" . 1)))
-          (make-mongo--decoded-message
+          (make-mongodb--decoded-message
            :request-id 91
            :response-to 73
-           :opcode mongo--op-msg
+           :opcode mongodb--op-msg
            :flags 0
            :document '(("ok" . 1) ("n" . 2)))))
         captured
         recv-args)
-    (cl-letf (((symbol-function 'mongo-live-p)
+    (cl-letf (((symbol-function 'mongodb-live-p)
                (lambda (_conn) t))
-              ((symbol-function 'mongo--ensure-writable-server)
+              ((symbol-function 'mongodb--ensure-writable-server)
                (lambda (&rest _args) nil))
-              ((symbol-function 'mongo--ensure-readable-server)
+              ((symbol-function 'mongodb--ensure-readable-server)
                (lambda (&rest _args) nil))
-              ((symbol-function 'mongo--send-document-with-flags)
+              ((symbol-function 'mongodb--send-document-with-flags)
                (lambda (_conn document sequences flags)
                  (setq captured
                        (list :document document
                              :sequences sequences
                              :flags flags))
                  73))
-              ((symbol-function 'mongo--recv-message-frame)
+              ((symbol-function 'mongodb--recv-message-frame)
                (lambda (_conn timeout response-to allow-more-to-come)
                  (push (list timeout response-to allow-more-to-come)
                        recv-args)
                  (pop frames))))
       (should (equal
-               (mongo-command-exhaust
+               (mongodb-command-exhaust
                 conn "app" '(("hello" . 1)) 2)
                '((("ok" . 1) ("n" . 1))
                  (("ok" . 1) ("n" . 2))))))
@@ -2622,138 +2622,138 @@
                      ("$db" . "app"))))
     (should-not (plist-get captured :sequences))
     (should (= (plist-get captured :flags)
-               mongo--op-msg-exhaust-allowed))
+               mongodb--op-msg-exhaust-allowed))
     (should (equal (nreverse recv-args)
                    '((2 73 t)
                      (2 73 t))))))
 
 
 
-(ert-deftest mongo-test-command-exhaust-uses-operation-timeout ()
+(ert-deftest mongodb-test-command-exhaust-uses-operation-timeout ()
   "MongoDB exhaust commands should default to timeoutMS."
-  (let ((conn (make-mongo-conn :operation-timeout 2.5
+  (let ((conn (make-mongodb-conn :operation-timeout 2.5
                                :socket-timeout 9))
         captured-timeout)
-    (cl-letf (((symbol-function 'mongo--send-command-exhaust-and-receive)
+    (cl-letf (((symbol-function 'mongodb--send-command-exhaust-and-receive)
                (lambda (_conn _database _command timeout _sequences)
                  (setq captured-timeout timeout)
                  (list '(("ok" . 1))))))
-      (should (equal (mongo-command-exhaust conn "app" '(("hello" . 1)))
+      (should (equal (mongodb-command-exhaust conn "app" '(("hello" . 1)))
                      (list '(("ok" . 1))))))
     (should (= captured-timeout 2.5))))
 
 
 
-(ert-deftest mongo-test-command-exhaust-requires-op-msg-wire-version ()
+(ert-deftest mongodb-test-command-exhaust-requires-op-msg-wire-version ()
   "MongoDB exhaust commands should reject pre-OP_MSG servers."
-  (let ((conn (make-mongo-conn :process 'proc
+  (let ((conn (make-mongodb-conn :process 'proc
                                :closed nil
                                :database "app"
                                :max-wire-version 5)))
-    (cl-letf (((symbol-function 'mongo-live-p)
+    (cl-letf (((symbol-function 'mongodb-live-p)
                (lambda (_conn) t)))
       (should-error
-       (mongo-command-exhaust conn "app" '(("hello" . 1)))
-       :type 'mongo-error))))
+       (mongodb-command-exhaust conn "app" '(("hello" . 1)))
+       :type 'mongodb-error))))
 
 
 
-(ert-deftest mongo-test-session-cluster-time-can-advance-locally ()
+(ert-deftest mongodb-test-session-cluster-time-can-advance-locally ()
   "MongoDB session cluster time can advance without changing client time."
-  (let* ((client-time (mongo-test--cluster-time 100 0))
-         (session-time (mongo-test--cluster-time 101 0))
-         (conn (make-mongo-conn :max-wire-version 17
+  (let* ((client-time (mongodb-test--cluster-time 100 0))
+         (session-time (mongodb-test--cluster-time 101 0))
+         (conn (make-mongodb-conn :max-wire-version 17
                                 :cluster-time client-time)))
-    (mongo-advance-cluster-time conn session-time)
-    (should (equal (mongo-conn-cluster-time conn) client-time))
-    (should (equal (mongo-conn-session-cluster-time conn) session-time))
-    (should (equal (mongo--cluster-time-to-send conn) session-time))
-    (setf (mongo-conn-max-wire-version conn) 5)
-    (should-not (mongo--cluster-time-to-send conn))))
+    (mongodb-advance-cluster-time conn session-time)
+    (should (equal (mongodb-conn-cluster-time conn) client-time))
+    (should (equal (mongodb-conn-session-cluster-time conn) session-time))
+    (should (equal (mongodb--cluster-time-to-send conn) session-time))
+    (setf (mongodb-conn-max-wire-version conn) 5)
+    (should-not (mongodb--cluster-time-to-send conn))))
 
 
 
-(ert-deftest mongo-test-apply-hello-limits ()
+(ert-deftest mongodb-test-apply-hello-limits ()
   "MongoDB hello size and write batch limits should be cached on connections."
-  (let ((conn (make-mongo-conn)))
-    (mongo--apply-hello-limits
+  (let ((conn (make-mongodb-conn)))
+    (mongodb--apply-hello-limits
      conn
      '(("ok" . 1)))
-    (should (= (mongo-conn-max-bson-object-size conn)
-               mongo--default-max-bson-object-size))
-    (should (= (mongo-conn-max-message-size-bytes conn)
-               mongo--default-max-message-size-bytes))
-    (should (= (mongo-conn-max-write-batch-size conn)
-               mongo--default-max-write-batch-size))
-    (mongo--apply-hello-limits
+    (should (= (mongodb-conn-max-bson-object-size conn)
+               mongodb--default-max-bson-object-size))
+    (should (= (mongodb-conn-max-message-size-bytes conn)
+               mongodb--default-max-message-size-bytes))
+    (should (= (mongodb-conn-max-write-batch-size conn)
+               mongodb--default-max-write-batch-size))
+    (mongodb--apply-hello-limits
      conn
      '(("ok" . 1)
        ("maxBsonObjectSize" . 1024)
        ("maxMessageSizeBytes" . 8192)
        ("maxWriteBatchSize" . 50)))
-    (should (= (mongo-conn-max-bson-object-size conn) 1024))
-    (should (= (mongo-conn-max-message-size-bytes conn) 8192))
-    (should (= (mongo-conn-max-write-batch-size conn) 50))
+    (should (= (mongodb-conn-max-bson-object-size conn) 1024))
+    (should (= (mongodb-conn-max-message-size-bytes conn) 8192))
+    (should (= (mongodb-conn-max-write-batch-size conn) 50))
     (should-error
-     (mongo--apply-hello-limits
+     (mongodb--apply-hello-limits
       conn
       '(("ok" . 1)
         ("maxWriteBatchSize" . 0)))
-     :type 'mongo-error)))
+     :type 'mongodb-error)))
 
 
 
-(ert-deftest mongo-test-session-id-is-uuid-v4-binary ()
+(ert-deftest mongodb-test-session-id-is-uuid-v4-binary ()
   "Locally generated MongoDB session IDs should use UUID subtype 4."
-  (let* ((session-id (mongo--make-session-id))
+  (let* ((session-id (mongodb--make-session-id))
          (id (cdr (assoc "id" session-id)))
-         (bytes (mongo-binary-data id)))
-    (should (= (mongo-binary-subtype id) 4))
+         (bytes (mongodb-binary-data id)))
+    (should (= (mongodb-binary-subtype id) 4))
     (should (= (length bytes) 16))
     (should (= (logand (aref bytes 6) #xf0) #x40))
     (should (= (logand (aref bytes 8) #xc0) #x80))))
 
 
 
-(ert-deftest mongo-test-initialize-session-from-hello ()
+(ert-deftest mongodb-test-initialize-session-from-hello ()
   "MongoDB should enable implicit sessions when hello reports support."
-  (let ((conn (make-mongo-conn :closed nil)))
-    (mongo--initialize-session
+  (let ((conn (make-mongodb-conn :closed nil)))
+    (mongodb--initialize-session
      conn
      '(("ok" . 1)
        ("logicalSessionTimeoutMinutes" . 30)))
-    (should (mongo-conn-session-id conn))
-    (let ((id (cdr (assoc "id" (mongo-conn-session-id conn)))))
-      (should (mongo-binary-p id))
-      (should (= (mongo-binary-subtype id) 4)))))
+    (should (mongodb-conn-session-id conn))
+    (let ((id (cdr (assoc "id" (mongodb-conn-session-id conn)))))
+      (should (mongodb-binary-p id))
+      (should (= (mongodb-binary-subtype id) 4)))))
 
 
-(ert-deftest mongo-test-initialize-session-for-load-balanced ()
+(ert-deftest mongodb-test-initialize-session-for-load-balanced ()
   "Load-balanced connections should support sessions without timeout metadata."
-  (let ((conn (make-mongo-conn :closed nil
+  (let ((conn (make-mongodb-conn :closed nil
                                :load-balanced t)))
-    (mongo--initialize-session
+    (mongodb--initialize-session
      conn
      '(("ok" . 1)
        ("serviceId" . (("$oid" . "64f0000000000000000000aa")))))
-    (should (mongo-conn-session-id conn))
-    (let ((id (cdr (assoc "id" (mongo-conn-session-id conn)))))
-      (should (mongo-binary-p id))
-      (should (= (mongo-binary-subtype id) 4)))))
+    (should (mongodb-conn-session-id conn))
+    (let ((id (cdr (assoc "id" (mongodb-conn-session-id conn)))))
+      (should (mongodb-binary-p id))
+      (should (= (mongodb-binary-subtype id) 4)))))
 
 
 
-(ert-deftest mongo-test-disconnect-ends-session ()
+(ert-deftest mongodb-test-disconnect-ends-session ()
   "MongoDB disconnect should end an open logical session."
-  (let* ((session-id `(("id" . ,(mongo-binary 4 "abcdefghijklmnop"))))
-         (conn (make-mongo-conn :session-id session-id
+  (let* ((session-id `(("id" . ,(mongodb-binary 4 "abcdefghijklmnop"))))
+         (conn (make-mongodb-conn :session-id session-id
                                 :closed nil
                                 :monitor-timer 'fake-monitor-timer))
          captured-command
          cancelled)
-    (cl-letf (((symbol-function 'mongo-live-p)
+    (cl-letf (((symbol-function 'mongodb-live-p)
                (lambda (_conn) t))
-              ((symbol-function 'mongo-command)
+              ((symbol-function 'mongodb-command)
                (lambda (_conn database command &optional _timeout)
                  (should (equal database "admin"))
                  (setq captured-command command)
@@ -2762,50 +2762,50 @@
                (lambda (timer)
                  (push timer cancelled)
                  '(("ok" . 1)))))
-      (mongo-disconnect conn))
+      (mongodb-disconnect conn))
     (should (equal captured-command
                    `(("endSessions" . [,session-id]))))
     (should (equal cancelled '(fake-monitor-timer)))
-    (should-not (mongo-conn-monitor-timer conn))
-    (should-not (mongo-conn-session-id conn))
-    (should (mongo-conn-closed conn))))
+    (should-not (mongodb-conn-monitor-timer conn))
+    (should-not (mongodb-conn-session-id conn))
+    (should (mongodb-conn-closed conn))))
 
 
 
-(ert-deftest mongo-test-disconnect-aborts-active-transaction ()
+(ert-deftest mongodb-test-disconnect-aborts-active-transaction ()
   "MongoDB disconnect should abort an active transaction before ending a session."
-  (let* ((session-id `(("id" . ,(mongo-binary 4 "abcdefghijklmnop"))))
-         (conn (make-mongo-conn :session-id session-id
+  (let* ((session-id `(("id" . ,(mongodb-binary 4 "abcdefghijklmnop"))))
+         (conn (make-mongodb-conn :session-id session-id
                                 :transaction-state 'in-progress
                                 :closed nil))
          commands
          aborted)
-    (cl-letf (((symbol-function 'mongo-live-p)
+    (cl-letf (((symbol-function 'mongodb-live-p)
                (lambda (_conn) t))
-              ((symbol-function 'mongo-abort-transaction)
+              ((symbol-function 'mongodb-abort-transaction)
                (lambda (abort-conn)
                  (should (eq abort-conn conn))
                  (setq aborted t)
-                 (mongo--clear-transaction abort-conn)
+                 (mongodb--clear-transaction abort-conn)
                  '(("ok" . 1))))
-              ((symbol-function 'mongo-command)
+              ((symbol-function 'mongodb-command)
                (lambda (_conn database command &optional _timeout)
                  (push (list database command) commands)
                  '(("ok" . 1)))))
-      (mongo-disconnect conn))
+      (mongodb-disconnect conn))
     (should aborted)
     (should (equal (nreverse commands)
                    `(("admin" (("endSessions" . [,session-id]))))))
-    (should-not (mongo-conn-transaction-state conn))
-    (should-not (mongo-conn-session-id conn))
-    (should (mongo-conn-closed conn))))
+    (should-not (mongodb-conn-transaction-state conn))
+    (should-not (mongodb-conn-session-id conn))
+    (should (mongodb-conn-closed conn))))
 
 
 
-(ert-deftest mongo-test-cursor-results-fetches-next-batches ()
+(ert-deftest mongodb-test-cursor-results-fetches-next-batches ()
   "MongoDB cursor helpers should drain getMore batches."
   (let (commands)
-    (cl-letf (((symbol-function 'mongo-command)
+    (cl-letf (((symbol-function 'mongodb-command)
                (lambda (_conn database command &optional _timeout)
                  (push (list database command) commands)
                  (cond
@@ -2821,7 +2821,7 @@
                     (format "unexpected command: %S" command)))))))
       (should
        (equal
-        (mongo--cursor-results
+        (mongodb--cursor-results
          'conn "app" "users"
          '(("cursor" . (("id" . 42)
                         ("firstBatch" . ((("n" . 1)))))))
@@ -2832,14 +2832,14 @@
 
 
 
-(ert-deftest mongo-test-cursor-results-kills-on-getmore-error ()
+(ert-deftest mongodb-test-cursor-results-kills-on-getmore-error ()
   "MongoDB cursor helpers should clean up open cursors on getMore errors."
   (let (killed-command)
-    (cl-letf (((symbol-function 'mongo-command)
+    (cl-letf (((symbol-function 'mongodb-command)
                (lambda (_conn _database command &optional _timeout)
                  (cond
                   ((assoc "getMore" command)
-                   (signal 'mongo-error (list "getMore failed")))
+                   (signal 'mongodb-error (list "getMore failed")))
                   ((assoc "killCursors" command)
                    (setq killed-command command)
                    '(("ok" . 1)))
@@ -2847,408 +2847,408 @@
                    (ert-fail
                     (format "unexpected command: %S" command)))))))
       (should-error
-       (mongo--cursor-results
+       (mongodb--cursor-results
         'conn "app" "users"
         '(("cursor" . (("id" . 42)
                        ("firstBatch" . ((("n" . 1)))))))
         "firstBatch")
-       :type 'mongo-error)
+       :type 'mongodb-error)
       (should (equal killed-command
                      '(("killCursors" . "users")
                        ("cursors" . [42])))))))
 
 
 
-(ert-deftest mongo-test-params-credential-parses-uri-auth ()
-  "Native mongo.el should parse MongoDB URI credentials for SCRAM auth."
+(ert-deftest mongodb-test-params-credential-parses-uri-auth ()
+  "Native mongodb.el should parse MongoDB URI credentials for SCRAM auth."
   (let ((credential
-         (mongo--params-credential
+         (mongodb--params-credential
           '(:url "mongodb://reporter:s%20p@127.0.0.1:27018/app?authSource=admin&authMechanism=SCRAM-SHA-256"))))
-    (should (equal (mongo--credential-username credential) "reporter"))
-    (should (equal (mongo--credential-password credential) "s p"))
-	    (should (equal (mongo--credential-source credential) "admin"))
-	    (should (equal (mongo--credential-mechanism credential)
+    (should (equal (mongodb--credential-username credential) "reporter"))
+    (should (equal (mongodb--credential-password credential) "s p"))
+	    (should (equal (mongodb--credential-source credential) "admin"))
+	    (should (equal (mongodb--credential-mechanism credential)
 	                   "SCRAM-SHA-256"))))
 
 
 
-(ert-deftest mongo-test-params-credential-parses-default-auth ()
-  "Native mongo.el should accept authMechanism=DEFAULT from MongoDB URIs."
+(ert-deftest mongodb-test-params-credential-parses-default-auth ()
+  "Native mongodb.el should accept authMechanism=DEFAULT from MongoDB URIs."
   (let ((credential
-         (mongo--params-credential
+         (mongodb--params-credential
           '(:url "mongodb://reporter:secret@127.0.0.1/app?authMechanism=DEFAULT"))))
-    (should (equal (mongo--credential-username credential) "reporter"))
-    (should (equal (mongo--credential-password credential) "secret"))
-    (should (equal (mongo--credential-mechanism credential) "DEFAULT"))))
+    (should (equal (mongodb--credential-username credential) "reporter"))
+    (should (equal (mongodb--credential-password credential) "secret"))
+    (should (equal (mongodb--credential-mechanism credential) "DEFAULT"))))
 
 
 
-(ert-deftest mongo-test-params-credential-parses-x509-auth ()
-  "Native mongo.el should parse MONGODB-X509 credentials without a password."
+(ert-deftest mongodb-test-params-credential-parses-x509-auth ()
+  "Native mongodb.el should parse MONGODB-X509 credentials without a password."
   (let ((credential
-         (mongo--params-credential
+         (mongodb--params-credential
           '(:url "mongodb://127.0.0.1/app?authMechanism=MONGODB-X509&tls=true"))))
-    (should-not (mongo--credential-username credential))
-    (should-not (mongo--credential-password credential))
-    (should (equal (mongo--credential-source credential) "$external"))
-    (should (equal (mongo--credential-mechanism credential)
+    (should-not (mongodb--credential-username credential))
+    (should-not (mongodb--credential-password credential))
+    (should (equal (mongodb--credential-source credential) "$external"))
+    (should (equal (mongodb--credential-mechanism credential)
                    "MONGODB-X509")))
   (let ((credential
-         (mongo--params-credential
+         (mongodb--params-credential
           '(:url "mongodb://CN%3Dclient@127.0.0.1/app?authMechanism=MONGODB-X509&authSource=%24external&tls=true"))))
-    (should (equal (mongo--credential-username credential) "CN=client"))
-    (should-not (mongo--credential-password credential))
-    (should (equal (mongo--credential-source credential) "$external"))))
+    (should (equal (mongodb--credential-username credential) "CN=client"))
+    (should-not (mongodb--credential-password credential))
+    (should (equal (mongodb--credential-source credential) "$external"))))
 
 
 
-(ert-deftest mongo-test-params-credential-validates-x509-auth ()
-  "Native mongo.el should enforce MONGODB-X509 credential constraints."
+(ert-deftest mongodb-test-params-credential-validates-x509-auth ()
+  "Native mongodb.el should enforce MONGODB-X509 credential constraints."
   (should-error
-   (mongo--params-credential
+   (mongodb--params-credential
     '(:url "mongodb://user:secret@127.0.0.1/app?authMechanism=MONGODB-X509&tls=true"))
-   :type 'mongo-error)
+   :type 'mongodb-error)
   (should-error
-   (mongo--params-credential
+   (mongodb--params-credential
     '(:url "mongodb://127.0.0.1/app?authMechanism=MONGODB-X509&authSource=admin&tls=true"))
-   :type 'mongo-error)
+   :type 'mongodb-error)
   (should-error
-   (mongo--params-credential
+   (mongodb--params-credential
     '(:url "mongodb://127.0.0.1/app?authMechanism=MONGODB-X509"))
-   :type 'mongo-error))
+   :type 'mongodb-error))
 
 
 
-(ert-deftest mongo-test-params-credential-parses-plain-auth ()
-  "Native mongo.el should parse PLAIN SASL credentials."
+(ert-deftest mongodb-test-params-credential-parses-plain-auth ()
+  "Native mongodb.el should parse PLAIN SASL credentials."
   (let ((credential
-         (mongo--params-credential
+         (mongodb--params-credential
           '(:url "mongodb://ldap:secret@127.0.0.1/app?authMechanism=PLAIN"))))
-    (should (equal (mongo--credential-username credential) "ldap"))
-    (should (equal (mongo--credential-password credential) "secret"))
-    (should (equal (mongo--credential-source credential) "$external"))
-    (should (equal (mongo--credential-mechanism credential) "PLAIN"))))
+    (should (equal (mongodb--credential-username credential) "ldap"))
+    (should (equal (mongodb--credential-password credential) "secret"))
+    (should (equal (mongodb--credential-source credential) "$external"))
+    (should (equal (mongodb--credential-mechanism credential) "PLAIN"))))
 
 
 
-(ert-deftest mongo-test-params-credential-validates-plain-auth ()
-  "Native mongo.el should enforce PLAIN SASL credential constraints."
+(ert-deftest mongodb-test-params-credential-validates-plain-auth ()
+  "Native mongodb.el should enforce PLAIN SASL credential constraints."
   (should-error
-   (mongo--params-credential
+   (mongodb--params-credential
     '(:url "mongodb://ldap:secret@127.0.0.1/app?authMechanism=PLAIN&authSource=admin"))
-   :type 'mongo-error)
+   :type 'mongodb-error)
   (should-error
-   (mongo--params-credential
+   (mongodb--params-credential
     '(:url "mongodb://ldap@127.0.0.1/app?authMechanism=PLAIN"))
-   :type 'mongo-error))
+   :type 'mongodb-error))
 
 
 
-(ert-deftest mongo-test-params-credential-parses-aws-auth ()
-  "Native mongo.el should parse MONGODB-AWS credentials and properties."
+(ert-deftest mongodb-test-params-credential-parses-aws-auth ()
+  "Native mongodb.el should parse MONGODB-AWS credentials and properties."
   (let ((credential
-         (mongo--params-credential
+         (mongodb--params-credential
           '(:url "mongodb://AKID:SECRET@cluster.example.net/app?authMechanism=MONGODB-AWS&authMechanismProperties=AWS_SESSION_TOKEN:SESSION"))))
-    (should (equal (mongo--credential-username credential) "AKID"))
-    (should (equal (mongo--credential-password credential) "SECRET"))
-    (should (equal (mongo--credential-source credential) "$external"))
-    (should (equal (mongo--credential-mechanism credential) "MONGODB-AWS"))
-    (should (equal (mongo--mechanism-property
-                    (mongo--credential-mechanism-properties credential)
+    (should (equal (mongodb--credential-username credential) "AKID"))
+    (should (equal (mongodb--credential-password credential) "SECRET"))
+    (should (equal (mongodb--credential-source credential) "$external"))
+    (should (equal (mongodb--credential-mechanism credential) "MONGODB-AWS"))
+    (should (equal (mongodb--mechanism-property
+                    (mongodb--credential-mechanism-properties credential)
                     "AWS_SESSION_TOKEN")
                    "SESSION")))
   (let ((credential
-         (mongo--params-credential
+         (mongodb--params-credential
           '(:url "mongodb://cluster.example.net/app?authMechanism=MONGODB-AWS"
             :auth-mechanism-properties (:aws-session-token "SESSION")))))
-    (should-not (mongo--credential-username credential))
-    (should-not (mongo--credential-password credential))
-    (should (equal (mongo--credential-source credential) "$external"))
-    (should (equal (mongo--mechanism-property
-                    (mongo--credential-mechanism-properties credential)
+    (should-not (mongodb--credential-username credential))
+    (should-not (mongodb--credential-password credential))
+    (should (equal (mongodb--credential-source credential) "$external"))
+    (should (equal (mongodb--mechanism-property
+                    (mongodb--credential-mechanism-properties credential)
                     :aws-session-token)
                    "SESSION")))
   (let ((credential
-         (mongo--params-credential
+         (mongodb--params-credential
           '(:url "mongodb://cluster.example.net/app?authMechanism=MONGODB-AWS"
             :aws-credential-provider ignore))))
-    (should (eq (mongo--credential-aws-credential-provider credential)
+    (should (eq (mongodb--credential-aws-credential-provider credential)
                 'ignore))))
 
 
 
-(ert-deftest mongo-test-params-credential-validates-aws-auth ()
-  "Native mongo.el should enforce MONGODB-AWS credential constraints."
+(ert-deftest mongodb-test-params-credential-validates-aws-auth ()
+  "Native mongodb.el should enforce MONGODB-AWS credential constraints."
   (should-error
-   (mongo--params-credential
+   (mongodb--params-credential
     '(:url "mongodb://AKID:SECRET@cluster.example.net/app?authMechanism=MONGODB-AWS&authSource=admin"))
-   :type 'mongo-error)
+   :type 'mongodb-error)
   (should-error
-   (mongo--params-credential
+   (mongodb--params-credential
     '(:url "mongodb://AKID@cluster.example.net/app?authMechanism=MONGODB-AWS"))
-   :type 'mongo-error)
+   :type 'mongodb-error)
   (should-error
-   (mongo--params-credential
+   (mongodb--params-credential
     '(:url "mongodb://AKID:SECRET@cluster.example.net/app?authMechanism=MONGODB-AWS&authMechanismProperties=SERVICE_NAME:mongodb"))
-   :type 'mongo-error)
+   :type 'mongodb-error)
   (should-error
-   (mongo--params-credential
+   (mongodb--params-credential
     '(:url "mongodb://AKID:SECRET@cluster.example.net/app?authMechanism=SCRAM-SHA-256&authMechanismProperties=AWS_SESSION_TOKEN:SESSION"))
-   :type 'mongo-error))
+   :type 'mongodb-error))
 
 
 
-(ert-deftest mongo-test-params-credential-parses-oidc-auth ()
-  "Native mongo.el should parse MONGODB-OIDC credentials and token sources."
+(ert-deftest mongodb-test-params-credential-parses-oidc-auth ()
+  "Native mongodb.el should parse MONGODB-OIDC credentials and token sources."
   (let ((credential
-         (mongo--params-credential
+         (mongodb--params-credential
           '(:url "mongodb://principal@cluster.example.net/app?authMechanism=MONGODB-OIDC"
             :oidc-token "jwt-token"))))
-    (should (equal (mongo--credential-username credential) "principal"))
-    (should-not (mongo--credential-password credential))
-    (should (equal (mongo--credential-source credential) "$external"))
-    (should (equal (mongo--credential-mechanism credential) "MONGODB-OIDC"))
-    (should (equal (mongo--credential-oidc-token credential) "jwt-token")))
+    (should (equal (mongodb--credential-username credential) "principal"))
+    (should-not (mongodb--credential-password credential))
+    (should (equal (mongodb--credential-source credential) "$external"))
+    (should (equal (mongodb--credential-mechanism credential) "MONGODB-OIDC"))
+    (should (equal (mongodb--credential-oidc-token credential) "jwt-token")))
   (let ((credential
-         (mongo--params-credential
+         (mongodb--params-credential
           '(:url "mongodb://cluster.example.net/app?authMechanism=MONGODB-OIDC&authMechanismProperties=ENVIRONMENT:k8s"
             :oidc-token-file "/tmp/token"
             :oidc-refresh-token "refresh"))))
-    (should-not (mongo--credential-username credential))
-    (should (equal (mongo--credential-source credential) "$external"))
-    (should (equal (mongo--mechanism-property
-                    (mongo--credential-mechanism-properties credential)
+    (should-not (mongodb--credential-username credential))
+    (should (equal (mongodb--credential-source credential) "$external"))
+    (should (equal (mongodb--mechanism-property
+                    (mongodb--credential-mechanism-properties credential)
                     "ENVIRONMENT")
                    "k8s"))
-    (should (equal (mongo--credential-oidc-token-file credential)
+    (should (equal (mongodb--credential-oidc-token-file credential)
                    "/tmp/token"))
-    (should (equal (mongo--credential-oidc-refresh-token credential)
+    (should (equal (mongodb--credential-oidc-refresh-token credential)
                    "refresh")))
   (let ((credential
-         (mongo--params-credential
+         (mongodb--params-credential
           '(:url "mongodb://client-id@cluster.example.net/app?authMechanism=MONGODB-OIDC&authMechanismProperties=ENVIRONMENT:azure,TOKEN_RESOURCE:api%3A%2F%2Fclient"))))
-    (should (equal (mongo--credential-username credential) "client-id"))
-    (should (equal (mongo--mechanism-property
-                    (mongo--credential-mechanism-properties credential)
+    (should (equal (mongodb--credential-username credential) "client-id"))
+    (should (equal (mongodb--mechanism-property
+                    (mongodb--credential-mechanism-properties credential)
                     "ENVIRONMENT")
                    "azure"))
-    (should (equal (mongo--mechanism-property
-                    (mongo--credential-mechanism-properties credential)
+    (should (equal (mongodb--mechanism-property
+                    (mongodb--credential-mechanism-properties credential)
                     "TOKEN_RESOURCE")
                    "api://client")))
   (let ((credential
-         (mongo--params-credential
+         (mongodb--params-credential
           '(:url "mongodb://principal@cluster.example.net/app?authMechanism=MONGODB-OIDC"
             :oidc-human-callback ignore
             :oidc-allowed-hosts ("*.example.net" "localhost")))))
-    (should (eq (mongo--credential-oidc-human-callback credential)
+    (should (eq (mongodb--credential-oidc-human-callback credential)
                 'ignore))
-    (should (equal (mongo--credential-oidc-allowed-hosts credential)
+    (should (equal (mongodb--credential-oidc-allowed-hosts credential)
                    '("*.example.net" "localhost")))))
 
 
 
-(ert-deftest mongo-test-params-credential-validates-oidc-auth ()
-  "Native mongo.el should enforce MONGODB-OIDC credential constraints."
+(ert-deftest mongodb-test-params-credential-validates-oidc-auth ()
+  "Native mongodb.el should enforce MONGODB-OIDC credential constraints."
   (should-error
-   (mongo--params-credential
+   (mongodb--params-credential
     '(:url "mongodb://user:secret@cluster.example.net/app?authMechanism=MONGODB-OIDC"))
-   :type 'mongo-error)
+   :type 'mongodb-error)
   (should-error
-   (mongo--params-credential
+   (mongodb--params-credential
     '(:url "mongodb://cluster.example.net/app?authMechanism=MONGODB-OIDC&authSource=admin"))
-   :type 'mongo-error)
+   :type 'mongodb-error)
   (should-error
-   (mongo--params-credential
+   (mongodb--params-credential
     '(:url "mongodb://cluster.example.net/app?authMechanism=MONGODB-OIDC&authMechanismProperties=SERVICE_NAME:mongodb"))
-   :type 'mongo-error)
+   :type 'mongodb-error)
   (should-error
-   (mongo--params-credential
+   (mongodb--params-credential
     '(:url "mongodb://cluster.example.net/app?authMechanism=MONGODB-OIDC&authMechanismProperties=ENVIRONMENT:bogus"))
-   :type 'mongo-error)
+   :type 'mongodb-error)
   (should-error
-   (mongo--params-credential
+   (mongodb--params-credential
     '(:url "mongodb://cluster.example.net/app?authMechanism=MONGODB-OIDC&authMechanismProperties=ENVIRONMENT:azure"))
-   :type 'mongo-error)
+   :type 'mongodb-error)
   (should-error
-   (mongo--params-credential
+   (mongodb--params-credential
     '(:url "mongodb://cluster.example.net/app?authMechanism=MONGODB-OIDC&authMechanismProperties=TOKEN_RESOURCE:api%3A%2F%2Fclient"))
-   :type 'mongo-error)
+   :type 'mongodb-error)
   (should-error
-   (mongo--params-credential
+   (mongodb--params-credential
     '(:url "mongodb://cluster.example.net/app?authMechanism=MONGODB-OIDC&authMechanismProperties=ENVIRONMENT:k8s,TOKEN_RESOURCE:api%3A%2F%2Fclient"))
-   :type 'mongo-error)
+   :type 'mongodb-error)
   (should-error
-   (mongo--params-credential
+   (mongodb--params-credential
     '(:url "mongodb://cluster.example.net/app?authMechanism=MONGODB-OIDC&authMechanismProperties=ENVIRONMENT:k8s"
       :oidc-callback ignore))
-   :type 'mongo-error)
+   :type 'mongodb-error)
   (should-error
-   (mongo--params-credential
+   (mongodb--params-credential
     '(:url "mongodb://cluster.example.net/app?authMechanism=MONGODB-OIDC"
       :oidc-callback ignore
       :oidc-human-callback ignore))
-   :type 'mongo-error)
+   :type 'mongodb-error)
   (should-error
-   (mongo--params-credential
+   (mongodb--params-credential
     '(:url "mongodb://cluster.example.net/app?authMechanism=MONGODB-OIDC"
       :oidc-allowed-hosts ("")))
-   :type 'mongo-error))
+   :type 'mongodb-error))
 
 
 
-(ert-deftest mongo-test-auth-mechanism-selects-scram-sha1 ()
-  "Native mongo.el should fall back to SCRAM-SHA-1 when SHA-256 is unavailable."
-  (let ((credential (make-mongo--credential
+(ert-deftest mongodb-test-auth-mechanism-selects-scram-sha1 ()
+  "Native mongodb.el should fall back to SCRAM-SHA-1 when SHA-256 is unavailable."
+  (let ((credential (make-mongodb--credential
                      :username "user"
                      :password "secret"
                      :source "admin")))
     (should (equal
-             (mongo--choose-auth-mechanism
+             (mongodb--choose-auth-mechanism
               credential
               '(("saslSupportedMechs" . ("SCRAM-SHA-1"))))
              "SCRAM-SHA-1"))
-    (setf (mongo--credential-mechanism credential) "SCRAM-SHA-1")
+    (setf (mongodb--credential-mechanism credential) "SCRAM-SHA-1")
     (should (equal
-             (mongo--choose-auth-mechanism
+             (mongodb--choose-auth-mechanism
               credential
               '(("saslSupportedMechs" . ("SCRAM-SHA-1"))))
              "SCRAM-SHA-1"))))
 
 
 
-(ert-deftest mongo-test-auth-mechanism-selects-x509 ()
-  "Native mongo.el should select MONGODB-X509 without SCRAM negotiation."
-  (let ((credential (make-mongo--credential
+(ert-deftest mongodb-test-auth-mechanism-selects-x509 ()
+  "Native mongodb.el should select MONGODB-X509 without SCRAM negotiation."
+  (let ((credential (make-mongodb--credential
                      :source "$external"
                      :mechanism "MONGODB-X509")))
     (should (equal
-             (mongo--choose-auth-mechanism
+             (mongodb--choose-auth-mechanism
               credential
               '(("saslSupportedMechs" . ("SCRAM-SHA-1"))))
              "MONGODB-X509"))
-    (should-not (mongo--speculative-auth-state credential))))
+    (should-not (mongodb--speculative-auth-state credential))))
 
 
 
-(ert-deftest mongo-test-auth-mechanism-selects-plain ()
-  "Native mongo.el should select explicit PLAIN without SCRAM negotiation."
-  (let ((credential (make-mongo--credential
+(ert-deftest mongodb-test-auth-mechanism-selects-plain ()
+  "Native mongodb.el should select explicit PLAIN without SCRAM negotiation."
+  (let ((credential (make-mongodb--credential
                      :username "ldap"
                      :password "secret"
                      :source "$external"
                      :mechanism "PLAIN")))
     (should (equal
-             (mongo--choose-auth-mechanism
+             (mongodb--choose-auth-mechanism
               credential
               '(("saslSupportedMechs" . ("SCRAM-SHA-1"))))
              "PLAIN"))
-    (should-not (mongo--speculative-auth-state credential))))
+    (should-not (mongodb--speculative-auth-state credential))))
 
 
 
-(ert-deftest mongo-test-auth-mechanism-selects-aws ()
-  "Native mongo.el should select explicit MONGODB-AWS without SCRAM negotiation."
-  (let* ((credential (make-mongo--credential
+(ert-deftest mongodb-test-auth-mechanism-selects-aws ()
+  "Native mongodb.el should select explicit MONGODB-AWS without SCRAM negotiation."
+  (let* ((credential (make-mongodb--credential
                       :username "AKID"
                       :password "SECRET"
                       :source "$external"
                       :mechanism "MONGODB-AWS"))
-         (handshake (mongo--initial-handshake-command credential)))
+         (handshake (mongodb--initial-handshake-command credential)))
     (should (equal
-             (mongo--choose-auth-mechanism
+             (mongodb--choose-auth-mechanism
               credential
               '(("saslSupportedMechs" . ("SCRAM-SHA-1"))))
              "MONGODB-AWS"))
-    (should-not (mongo--speculative-auth-state credential))
+    (should-not (mongodb--speculative-auth-state credential))
     (should-not (assoc "saslSupportedMechs" handshake))))
 
 
 
-(ert-deftest mongo-test-auth-mechanism-selects-oidc ()
-  "Native mongo.el should select explicit MONGODB-OIDC without SCRAM negotiation."
-  (let* ((credential (make-mongo--credential
+(ert-deftest mongodb-test-auth-mechanism-selects-oidc ()
+  "Native mongodb.el should select explicit MONGODB-OIDC without SCRAM negotiation."
+  (let* ((credential (make-mongodb--credential
                       :source "$external"
                       :mechanism "MONGODB-OIDC"
                       :oidc-token "jwt"))
-         (handshake (mongo--initial-handshake-command credential)))
+         (handshake (mongodb--initial-handshake-command credential)))
     (should (equal
-             (mongo--choose-auth-mechanism
+             (mongodb--choose-auth-mechanism
               credential
               '(("saslSupportedMechs" . ("SCRAM-SHA-1"))))
              "MONGODB-OIDC"))
-    (should-not (mongo--speculative-auth-state credential))
+    (should-not (mongodb--speculative-auth-state credential))
     (should-not (assoc "saslSupportedMechs" handshake))))
 
 
 
-(ert-deftest mongo-test-auth-mechanism-defaults-from-handshake ()
-  "Native mongo.el should follow MongoDB SCRAM mechanism negotiation."
-  (let ((credential (make-mongo--credential
+(ert-deftest mongodb-test-auth-mechanism-defaults-from-handshake ()
+  "Native mongodb.el should follow MongoDB SCRAM mechanism negotiation."
+  (let ((credential (make-mongodb--credential
                      :username "user"
                      :password "secret"
                      :source "admin")))
     (should (equal
-             (mongo--choose-auth-mechanism
+             (mongodb--choose-auth-mechanism
               credential
               '(("saslSupportedMechs" . ("SCRAM-SHA-1"
                                          "SCRAM-SHA-256"))))
              "SCRAM-SHA-256"))
     (should (equal
-	            (mongo--choose-auth-mechanism credential '())
+	            (mongodb--choose-auth-mechanism credential '())
 	            "SCRAM-SHA-1"))))
 
 
 
-(ert-deftest mongo-test-auth-mechanism-default-is-negotiated ()
+(ert-deftest mongodb-test-auth-mechanism-default-is-negotiated ()
   "authMechanism=DEFAULT should negotiate the best supported SCRAM mechanism."
-  (let ((credential (make-mongo--credential
+  (let ((credential (make-mongodb--credential
                      :username "user"
                      :password "secret"
                      :source "admin"
                      :mechanism "DEFAULT")))
     (should (equal
-             (mongo--choose-auth-mechanism
+             (mongodb--choose-auth-mechanism
               credential
               '(("saslSupportedMechs" . ("SCRAM-SHA-1"
                                          "SCRAM-SHA-256"))))
              "SCRAM-SHA-256"))
     (should (equal
-             (mongo--choose-auth-mechanism
+             (mongodb--choose-auth-mechanism
               credential
               '(("saslSupportedMechs" . ("SCRAM-SHA-1"))))
              "SCRAM-SHA-1"))))
 
 
 
-(ert-deftest mongo-test-x509-authenticates-with-external-command ()
-  "Native mongo.el should authenticate X.509 credentials with authenticate."
-  (let ((credential (make-mongo--credential
+(ert-deftest mongodb-test-x509-authenticates-with-external-command ()
+  "Native mongodb.el should authenticate X.509 credentials with authenticate."
+  (let ((credential (make-mongodb--credential
                      :source "$external"
                      :mechanism "MONGODB-X509"))
         captured-db
         captured-command)
-    (cl-letf (((symbol-function 'mongo-command)
+    (cl-letf (((symbol-function 'mongodb-command)
                (lambda (_conn database command &optional _timeout _sequences)
                  (setq captured-db database
                        captured-command command)
                  '(("ok" . 1)))))
-      (should (equal (mongo--authenticate 'conn credential '())
+      (should (equal (mongodb--authenticate 'conn credential '())
                      '(("ok" . 1)))))
     (should (equal captured-db "$external"))
     (should (equal captured-command
                    '(("authenticate" . 1)
                      ("mechanism" . "MONGODB-X509")))))
-  (let ((credential (make-mongo--credential
+  (let ((credential (make-mongodb--credential
                      :username "CN=client"
                      :source "$external"
                      :mechanism "MONGODB-X509"))
         captured-command)
-    (cl-letf (((symbol-function 'mongo-command)
+    (cl-letf (((symbol-function 'mongodb-command)
                (lambda (_conn _database command &optional _timeout _sequences)
                  (setq captured-command command)
                  '(("ok" . 1)))))
-      (mongo--authenticate-x509 'conn credential))
+      (mongodb--authenticate-x509 'conn credential))
     (should (equal captured-command
                    '(("authenticate" . 1)
                      ("mechanism" . "MONGODB-X509")
@@ -3256,66 +3256,66 @@
 
 
 
-(ert-deftest mongo-test-plain-authenticates-with-sasl-start ()
-  "Native mongo.el should authenticate PLAIN credentials with saslStart."
-  (let ((credential (make-mongo--credential
+(ert-deftest mongodb-test-plain-authenticates-with-sasl-start ()
+  "Native mongodb.el should authenticate PLAIN credentials with saslStart."
+  (let ((credential (make-mongodb--credential
                      :username "ldap"
                      :password "secret"
                      :source "$external"
                      :mechanism "PLAIN"))
         captured-db
         captured-command)
-    (cl-letf (((symbol-function 'mongo-command)
+    (cl-letf (((symbol-function 'mongodb-command)
                (lambda (_conn database command &optional _timeout _sequences)
                  (setq captured-db database
                        captured-command command)
                  '(("ok" . 1) ("done" . t)))))
-      (should (equal (mongo--authenticate 'conn credential '())
+      (should (equal (mongodb--authenticate 'conn credential '())
                      '(("ok" . 1) ("done" . t)))))
     (should (equal captured-db "$external"))
     (should (equal (cdr (assoc "saslStart" captured-command)) 1))
     (should (equal (cdr (assoc "mechanism" captured-command)) "PLAIN"))
     (should (= (cdr (assoc "autoAuthorize" captured-command)) 1))
     (let ((payload (cdr (assoc "payload" captured-command))))
-      (should (mongo-binary-p payload))
-      (should (= (mongo-binary-subtype payload) 0))
-      (should (equal (mongo-binary-data payload)
+      (should (mongodb-binary-p payload))
+      (should (= (mongodb-binary-subtype payload) 0))
+      (should (equal (mongodb-binary-data payload)
                      "\0ldap\0secret")))))
 
 
 
-(ert-deftest mongo-test-plain-auth-requires-done ()
-  "Native mongo.el should reject incomplete PLAIN SASL conversations."
-  (let ((credential (make-mongo--credential
+(ert-deftest mongodb-test-plain-auth-requires-done ()
+  "Native mongodb.el should reject incomplete PLAIN SASL conversations."
+  (let ((credential (make-mongodb--credential
                      :username "ldap"
                      :password "secret"
                      :source "$external"
                      :mechanism "PLAIN")))
-    (cl-letf (((symbol-function 'mongo-command)
+    (cl-letf (((symbol-function 'mongodb-command)
                (lambda (&rest _args)
                  '(("ok" . 1) ("done" . :false)))))
-      (should-error (mongo--authenticate-plain 'conn credential)
-                    :type 'mongo-error))))
+      (should-error (mongodb--authenticate-plain 'conn credential)
+                    :type 'mongodb-error))))
 
 
 
-(ert-deftest mongo-test-aws-authenticates-with-sasl-conversation ()
-  "Native mongo.el should authenticate MONGODB-AWS with BSON SASL payloads."
+(ert-deftest mongodb-test-aws-authenticates-with-sasl-conversation ()
+  "Native mongodb.el should authenticate MONGODB-AWS with BSON SASL payloads."
   (let* ((client-nonce "abcdefghijklmnopqrstuvwxyz123456")
          (server-nonce (concat client-nonce "ABCDEFGHIJKLMNOPQRSTUVWXYZ789012"))
-         (credential (make-mongo--credential
+         (credential (make-mongodb--credential
                       :username "AKID"
                       :password "SECRET"
                       :source "$external"
                       :mechanism "MONGODB-AWS"))
          captured)
-    (cl-letf (((symbol-function 'mongo--random-bytes)
+    (cl-letf (((symbol-function 'mongodb--random-bytes)
                (lambda (count)
                  (should (= count 32))
                  client-nonce))
-              ((symbol-function 'mongo--aws-date)
+              ((symbol-function 'mongodb--aws-date)
                (lambda () "20191107T002607Z"))
-              ((symbol-function 'mongo-command)
+              ((symbol-function 'mongodb-command)
                (lambda (_conn database command &optional _timeout _sequences)
                  (push (list database command) captured)
                  (cond
@@ -3325,18 +3325,18 @@
                                   "MONGODB-AWS"))
                    (let* ((payload (cdr (assoc "payload" command)))
                           (document
-                           (mongo--decode-document-from-string
-                            (mongo-binary-data payload))))
-                     (should (equal (mongo--binary-value-data
+                           (mongodb--decode-document-from-string
+                            (mongodb-binary-data payload))))
+                     (should (equal (mongodb--binary-value-data
                                      (cdr (assoc "r" document)))
                                     client-nonce))
                      (should (= (cdr (assoc "p" document)) ?n)))
                    `(("conversationId" . 7)
                      ("done" . :false)
-                     ("payload" . ,(mongo-binary
+                     ("payload" . ,(mongodb-binary
                                     0
-                                    (mongo--encode-document
-                                     `(("s" . ,(mongo-binary
+                                    (mongodb--encode-document
+                                     `(("s" . ,(mongodb-binary
                                                 0 server-nonce))
                                        ("h" . "sts.amazonaws.com")))))
                      ("ok" . 1)))
@@ -3345,8 +3345,8 @@
                    (should (= (cdr (assoc "conversationId" command)) 7))
                    (let* ((payload (cdr (assoc "payload" command)))
                           (document
-                           (mongo--decode-document-from-string
-                            (mongo-binary-data payload)))
+                           (mongodb--decode-document-from-string
+                            (mongodb-binary-data payload)))
                           (authorization (cdr (assoc "a" document))))
                      (should (string-prefix-p "AWS4-HMAC-SHA256 "
                                               authorization))
@@ -3367,7 +3367,7 @@
                      ("ok" . 1)))
                   (t
                    (ert-fail (format "unexpected command: %S" command)))))))
-      (should (equal (mongo--authenticate 'conn credential '())
+      (should (equal (mongodb--authenticate 'conn credential '())
                      '(("conversationId" . 7)
                        ("done" . t)
                        ("payload" . "")
@@ -3376,11 +3376,11 @@
 
 
 
-(ert-deftest mongo-test-aws-auth-uses-session-token-and-env ()
+(ert-deftest mongodb-test-aws-auth-uses-session-token-and-env ()
   "Native MONGODB-AWS auth should use env credentials and session tokens."
   (let* ((client-nonce "abcdefghijklmnopqrstuvwxyz123456")
          (server-nonce (concat client-nonce "ABCDEFGHIJKLMNOPQRSTUVWXYZ789012"))
-         (credential (make-mongo--credential
+         (credential (make-mongodb--credential
                       :source "$external"
                       :mechanism "MONGODB-AWS"))
          captured-token)
@@ -3390,28 +3390,28 @@
                              '(("AWS_ACCESS_KEY_ID" . "ENVAKID")
                                ("AWS_SECRET_ACCESS_KEY" . "ENVSECRET")
                                ("AWS_SESSION_TOKEN" . "ENVSESSION"))))))
-              ((symbol-function 'mongo--random-bytes)
+              ((symbol-function 'mongodb--random-bytes)
                (lambda (_count) client-nonce))
-              ((symbol-function 'mongo--aws-date)
+              ((symbol-function 'mongodb--aws-date)
                (lambda () "20191107T002607Z"))
-              ((symbol-function 'mongo-command)
+              ((symbol-function 'mongodb-command)
                (lambda (_conn _database command &optional _timeout _sequences)
                  (cond
                   ((assoc "saslStart" command)
                    `(("conversationId" . 8)
                      ("done" . :false)
-                     ("payload" . ,(mongo-binary
+                     ("payload" . ,(mongodb-binary
                                     0
-                                    (mongo--encode-document
-                                     `(("s" . ,(mongo-binary
+                                    (mongodb--encode-document
+                                     `(("s" . ,(mongodb-binary
                                                 0 server-nonce))
                                        ("h" . "sts.us-west-2.amazonaws.com")))))
                      ("ok" . 1)))
                   ((assoc "saslContinue" command)
                    (let* ((payload (cdr (assoc "payload" command)))
                           (document
-                           (mongo--decode-document-from-string
-                            (mongo-binary-data payload)))
+                           (mongodb--decode-document-from-string
+                            (mongodb-binary-data payload)))
                           (authorization (cdr (assoc "a" document))))
                      (setq captured-token (cdr (assoc "t" document)))
                      (should (string-match-p
@@ -3426,15 +3426,15 @@
                      ("ok" . 1)))
                   (t
                    (ert-fail (format "unexpected command: %S" command)))))))
-      (mongo--authenticate-aws 'conn credential))
+      (mongodb--authenticate-aws 'conn credential))
     (should (equal captured-token "ENVSESSION"))))
 
 
 
-(ert-deftest mongo-test-aws-auth-uses-custom-provider-before-env ()
+(ert-deftest mongodb-test-aws-auth-uses-custom-provider-before-env ()
   "Native MONGODB-AWS auth should allow a custom credential provider."
   (let* ((provider-params nil)
-         (credential (make-mongo--credential
+         (credential (make-mongodb--credential
                       :source "$external"
                       :mechanism "MONGODB-AWS"
                       :aws-credential-provider
@@ -3448,20 +3448,20 @@
                  (cdr (assoc name
                              '(("AWS_ACCESS_KEY_ID" . "ENVAKID")
                                ("AWS_SECRET_ACCESS_KEY" . "ENVSECRET")))))))
-      (let ((credentials (mongo--aws-credentials credential)))
+      (let ((credentials (mongodb--aws-credentials credential)))
         (should (= (plist-get provider-params :timeout-seconds) 10))
-        (should (equal (mongo--aws-credentials-access-key-id credentials)
+        (should (equal (mongodb--aws-credentials-access-key-id credentials)
                        "PROVIDERAKID"))
-        (should (equal (mongo--aws-credentials-secret-access-key credentials)
+        (should (equal (mongodb--aws-credentials-secret-access-key credentials)
                        "PROVIDERSECRET"))
-        (should (equal (mongo--aws-credentials-session-token credentials)
+        (should (equal (mongodb--aws-credentials-session-token credentials)
                        "PROVIDERSESSION"))))))
 
 
 
-(ert-deftest mongo-test-aws-auth-fetches-web-identity-credentials ()
+(ert-deftest mongodb-test-aws-auth-fetches-web-identity-credentials ()
   "Native MONGODB-AWS auth should support AssumeRoleWithWebIdentity."
-  (let ((file (make-temp-file "mongo-aws-web-identity-token"))
+  (let ((file (make-temp-file "mongodb-aws-web-identity-token"))
         captured-url
         captured-method
         captured-headers
@@ -3483,7 +3483,7 @@
                              captured-headers url-request-extra-headers
                              captured-timeout timeout)
                        (with-current-buffer
-                           (generate-new-buffer " *mongo-aws-web-id-test*")
+                           (generate-new-buffer " *mongodb-aws-web-id-test*")
                          (insert (concat
                                   "HTTP/1.1 200 OK\r\n\r\n"
                                   "{\"Credentials\":{\"AccessKeyId\":\"WEBAKID\","
@@ -3491,15 +3491,15 @@
                                   "\"SessionToken\":\"WEBSESSION\","
                                   "\"Expiration\":\"2035-01-01T00:00:00Z\"}}"))
                          (current-buffer)))))
-            (let* ((credential (make-mongo--credential
+            (let* ((credential (make-mongodb--credential
                                 :source "$external"
                                 :mechanism "MONGODB-AWS"))
-                   (credentials (mongo--aws-credentials credential)))
-              (should (equal (mongo--aws-credentials-access-key-id credentials)
+                   (credentials (mongodb--aws-credentials credential)))
+              (should (equal (mongodb--aws-credentials-access-key-id credentials)
                              "WEBAKID"))
-              (should (equal (mongo--aws-credentials-session-token credentials)
+              (should (equal (mongodb--aws-credentials-session-token credentials)
                              "WEBSESSION"))
-              (should (eq (mongo--credential-aws-cached-credentials credential)
+              (should (eq (mongodb--credential-aws-cached-credentials credential)
                           credentials)))))
       (delete-file file))
     (should (equal captured-method "POST"))
@@ -3518,7 +3518,7 @@
 
 
 
-(ert-deftest mongo-test-aws-auth-fetches-and-caches-ecs-credentials ()
+(ert-deftest mongodb-test-aws-auth-fetches-and-caches-ecs-credentials ()
   "Native MONGODB-AWS auth should support ECS task credentials."
   (let ((request-count 0))
     (cl-letf (((symbol-function 'getenv)
@@ -3532,7 +3532,7 @@
                                 "http://169.254.170.2/v2/credentials/task"))
                  (should (equal url-request-method "GET"))
                  (with-current-buffer
-                     (generate-new-buffer " *mongo-aws-ecs-test*")
+                     (generate-new-buffer " *mongodb-aws-ecs-test*")
                    (insert (concat
                             "HTTP/1.1 200 OK\r\n\r\n"
                             "{\"AccessKeyId\":\"ECSAKID\","
@@ -3540,21 +3540,21 @@
                             "\"Token\":\"ECSSESSION\","
                             "\"Expiration\":\"2035-01-01T00:00:00Z\"}"))
                    (current-buffer)))))
-      (let* ((credential (make-mongo--credential
+      (let* ((credential (make-mongodb--credential
                           :source "$external"
                           :mechanism "MONGODB-AWS"))
-             (first (mongo--aws-credentials credential))
-             (second (mongo--aws-credentials credential)))
+             (first (mongodb--aws-credentials credential))
+             (second (mongodb--aws-credentials credential)))
         (should (eq first second))
         (should (= request-count 1))
-        (should (equal (mongo--aws-credentials-access-key-id second)
+        (should (equal (mongodb--aws-credentials-access-key-id second)
                        "ECSAKID"))
-        (should (equal (mongo--aws-credentials-session-token second)
+        (should (equal (mongodb--aws-credentials-session-token second)
                        "ECSSESSION"))))))
 
 
 
-(ert-deftest mongo-test-aws-auth-fetches-ec2-imds-credentials ()
+(ert-deftest mongodb-test-aws-auth-fetches-ec2-imds-credentials ()
   "Native MONGODB-AWS auth should support EC2 IMDSv2 credentials."
   (let (requests)
     (cl-letf (((symbol-function 'getenv)
@@ -3564,7 +3564,7 @@
                  (push (list url url-request-method url-request-extra-headers)
                        requests)
                  (with-current-buffer
-                     (generate-new-buffer " *mongo-aws-ec2-test*")
+                     (generate-new-buffer " *mongodb-aws-ec2-test*")
                    (insert
                     (cond
                      ((equal url "http://169.254.169.254/latest/api/token")
@@ -3589,102 +3589,102 @@
                      (t
                       (ert-fail (format "unexpected URL: %s" url)))))
                    (current-buffer)))))
-      (let* ((credential (make-mongo--credential
+      (let* ((credential (make-mongodb--credential
                           :source "$external"
                           :mechanism "MONGODB-AWS"))
-             (credentials (mongo--aws-credentials credential)))
+             (credentials (mongodb--aws-credentials credential)))
         (should (= (length requests) 3))
-        (should (equal (mongo--aws-credentials-access-key-id credentials)
+        (should (equal (mongodb--aws-credentials-access-key-id credentials)
                        "EC2AKID"))
-        (should (equal (mongo--aws-credentials-session-token credentials)
+        (should (equal (mongodb--aws-credentials-session-token credentials)
                        "EC2SESSION"))))))
 
 
 
-(ert-deftest mongo-test-aws-auth-validates-server-first ()
+(ert-deftest mongodb-test-aws-auth-validates-server-first ()
   "Native MONGODB-AWS auth should validate server nonce and STS host."
   (let* ((client-nonce "abcdefghijklmnopqrstuvwxyz123456")
          (server-nonce (concat "wrongwrongwrongwrongwrongwrong12"
                                "ABCDEFGHIJKLMNOPQRSTUVWXYZ789012")))
     (should-error
-     (mongo--aws-server-first
+     (mongodb--aws-server-first
       `(("conversationId" . 9)
-        ("payload" . ,(mongo-binary
+        ("payload" . ,(mongodb-binary
                        0
-                       (mongo--encode-document
-                        `(("s" . ,(mongo-binary 0 server-nonce))
+                       (mongodb--encode-document
+                        `(("s" . ,(mongodb-binary 0 server-nonce))
                           ("h" . "sts.amazonaws.com"))))))
       client-nonce)
-     :type 'mongo-error)
+     :type 'mongodb-error)
     (should-error
-     (mongo--aws-server-first
+     (mongodb--aws-server-first
       `(("conversationId" . 9)
-        ("payload" . ,(mongo-binary
+        ("payload" . ,(mongodb-binary
                        0
-                       (mongo--encode-document
-                        `(("s" . ,(mongo-binary
+                       (mongodb--encode-document
+                        `(("s" . ,(mongodb-binary
                                    0
                                    (concat client-nonce
                                            "ABCDEFGHIJKLMNOPQRSTUVWXYZ789012")))
                           ("h" . "sts..amazonaws.com"))))))
       client-nonce)
-     :type 'mongo-error)))
+     :type 'mongodb-error)))
 
 
 
-(ert-deftest mongo-test-aws-auth-requires-credentials ()
+(ert-deftest mongodb-test-aws-auth-requires-credentials ()
   "Native MONGODB-AWS auth should fail clearly without AWS credentials."
-  (let ((credential (make-mongo--credential
+  (let ((credential (make-mongodb--credential
                      :source "$external"
                      :mechanism "MONGODB-AWS")))
     (cl-letf (((symbol-function 'getenv) (lambda (_name) nil))
-              ((symbol-function 'mongo--aws-ec2-credentials)
+              ((symbol-function 'mongodb--aws-ec2-credentials)
                (lambda ()
-                 (signal 'mongo-error
+                 (signal 'mongodb-error
                          (list "no EC2 credentials")))))
-      (should-error (mongo--aws-credentials credential)
-                    :type 'mongo-error))))
+      (should-error (mongodb--aws-credentials credential)
+                    :type 'mongodb-error))))
 
 
 
-(ert-deftest mongo-test-aws-auth-clears-cache-on-failure ()
+(ert-deftest mongodb-test-aws-auth-clears-cache-on-failure ()
   "Native MONGODB-AWS auth should clear cached credentials after failures."
-  (let* ((credentials (make-mongo--aws-credentials
+  (let* ((credentials (make-mongodb--aws-credentials
                        :access-key-id "CACHEAKID"
                        :secret-access-key "CACHESECRET"
                        :session-token "CACHESESSION"
                        :expiration (float-time
                                     (date-to-time "2035-01-01T00:00:00Z"))))
-         (credential (make-mongo--credential
+         (credential (make-mongodb--credential
                       :source "$external"
                       :mechanism "MONGODB-AWS"
                       :aws-cached-credentials credentials)))
-    (cl-letf (((symbol-function 'mongo-command)
+    (cl-letf (((symbol-function 'mongodb-command)
                (lambda (&rest _args)
-                 (signal 'mongo-error (list "auth failed")))))
-      (should-error (mongo--authenticate-aws 'conn credential)
-                    :type 'mongo-error))
-    (should-not (mongo--credential-aws-cached-credentials credential))))
+                 (signal 'mongodb-error (list "auth failed")))))
+      (should-error (mongodb--authenticate-aws 'conn credential)
+                    :type 'mongodb-error))
+    (should-not (mongodb--credential-aws-cached-credentials credential))))
 
 
 
-(ert-deftest mongo-test-oidc-token-sources ()
+(ert-deftest mongodb-test-oidc-token-sources ()
   "Native MONGODB-OIDC auth should resolve direct, file, env, and callback tokens."
-  (let ((file (make-temp-file "mongo-oidc-token")))
+  (let ((file (make-temp-file "mongodb-oidc-token")))
     (unwind-protect
         (progn
           (with-temp-file file
             (insert " file-token\n"))
           (should (equal
-                   (mongo--oidc-token
-                    (make-mongo--credential
+                   (mongodb--oidc-token
+                    (make-mongodb--credential
                      :source "$external"
                      :mechanism "MONGODB-OIDC"
                      :oidc-token "direct-token"))
                    "direct-token"))
           (should (equal
-                   (mongo--oidc-token
-                    (make-mongo--credential
+                   (mongodb--oidc-token
+                    (make-mongodb--credential
                      :source "$external"
                      :mechanism "MONGODB-OIDC"
                      :oidc-token-file file))
@@ -3694,15 +3694,15 @@
                        (and (equal name "AWS_WEB_IDENTITY_TOKEN_FILE")
                             file))))
             (should (equal
-                     (mongo--oidc-token
-                      (make-mongo--credential
+                     (mongodb--oidc-token
+                      (make-mongodb--credential
                        :source "$external"
                        :mechanism "MONGODB-OIDC"
                        :mechanism-properties '(("ENVIRONMENT" . "k8s"))))
                      "file-token")))
           (should (equal
-                   (mongo--oidc-token
-                    (make-mongo--credential
+                   (mongodb--oidc-token
+                    (make-mongodb--credential
                      :username "principal"
                      :source "$external"
                      :mechanism "MONGODB-OIDC"
@@ -3718,7 +3718,7 @@
 
 
 
-(ert-deftest mongo-test-oidc-azure-provider-fetches-token ()
+(ert-deftest mongodb-test-oidc-azure-provider-fetches-token ()
   "Native MONGODB-OIDC should fetch Azure metadata tokens."
   (let (captured-url
         captured-headers
@@ -3729,15 +3729,15 @@
                        captured-headers url-request-extra-headers
                        captured-timeout timeout)
                  (with-current-buffer
-                     (generate-new-buffer " *mongo-oidc-azure-test*")
+                     (generate-new-buffer " *mongodb-oidc-azure-test*")
                    (insert (concat "HTTP/1.1 200 OK\r\n"
                                    "Content-Type: application/json\r\n"
                                    "\r\n"
                                    "{\"access_token\":\"azure-token\"}"))
                    (current-buffer)))))
       (should (equal
-               (mongo--oidc-token
-                (make-mongo--credential
+               (mongodb--oidc-token
+                (make-mongodb--credential
                  :username "client-id"
                  :source "$external"
                  :mechanism "MONGODB-OIDC"
@@ -3763,7 +3763,7 @@
 
 
 
-(ert-deftest mongo-test-oidc-gcp-provider-fetches-token ()
+(ert-deftest mongodb-test-oidc-gcp-provider-fetches-token ()
   "Native MONGODB-OIDC should fetch GCP metadata tokens."
   (let (captured-url
         captured-headers
@@ -3774,12 +3774,12 @@
                        captured-headers url-request-extra-headers
                        captured-timeout timeout)
                  (with-current-buffer
-                     (generate-new-buffer " *mongo-oidc-gcp-test*")
+                     (generate-new-buffer " *mongodb-oidc-gcp-test*")
                    (insert "HTTP/1.1 200 OK\r\n\r\ngcp-token\n")
                    (current-buffer)))))
       (should (equal
-               (mongo--oidc-token
-                (make-mongo--credential
+               (mongodb--oidc-token
+                (make-mongodb--credential
                  :source "$external"
                  :mechanism "MONGODB-OIDC"
                  :mechanism-properties
@@ -3798,73 +3798,73 @@
 
 
 
-(ert-deftest mongo-test-oidc-metadata-provider-reports-http-errors ()
+(ert-deftest mongodb-test-oidc-metadata-provider-reports-http-errors ()
   "Native MONGODB-OIDC should surface metadata HTTP failures."
   (cl-letf (((symbol-function 'url-retrieve-synchronously)
              (lambda (&rest _args)
                (with-current-buffer
-                   (generate-new-buffer " *mongo-oidc-http-error-test*")
+                   (generate-new-buffer " *mongodb-oidc-http-error-test*")
                  (insert "HTTP/1.1 500 Internal Server Error\r\n\r\nfailed")
                  (current-buffer)))))
     (should-error
-     (mongo--oidc-token
-      (make-mongo--credential
+     (mongodb--oidc-token
+      (make-mongodb--credential
        :source "$external"
        :mechanism "MONGODB-OIDC"
        :mechanism-properties
        '(("ENVIRONMENT" . "gcp")
          ("TOKEN_RESOURCE" . "api://client"))))
-     :type 'mongo-error)))
+     :type 'mongodb-error)))
 
 
 
-(ert-deftest mongo-test-oidc-human-callback-host-matching ()
+(ert-deftest mongodb-test-oidc-human-callback-host-matching ()
   "Native MONGODB-OIDC should match human callback allowed hosts."
-  (should (mongo--oidc-allowed-host-p "cluster.mongodb.net" nil))
-  (should (mongo--oidc-allowed-host-p "a.b.mongodb.net" nil))
-  (should-not (mongo--oidc-allowed-host-p "mongodb.net" nil))
-  (should (mongo--oidc-allowed-host-p "LOCALHOST." nil))
-  (should (mongo--oidc-allowed-host-p "[::1]" nil))
-  (should (mongo--oidc-allowed-host-p "db.example.com"
+  (should (mongodb--oidc-allowed-host-p "cluster.mongodb.net" nil))
+  (should (mongodb--oidc-allowed-host-p "a.b.mongodb.net" nil))
+  (should-not (mongodb--oidc-allowed-host-p "mongodb.net" nil))
+  (should (mongodb--oidc-allowed-host-p "LOCALHOST." nil))
+  (should (mongodb--oidc-allowed-host-p "[::1]" nil))
+  (should (mongodb--oidc-allowed-host-p "db.example.com"
                                       '("*.example.com")))
-  (should-not (mongo--oidc-allowed-host-p "example.com"
+  (should-not (mongodb--oidc-allowed-host-p "example.com"
                                           '("*.example.com"))))
 
 
 
-(ert-deftest mongo-test-oidc-human-callback-rejects-disallowed-host ()
+(ert-deftest mongodb-test-oidc-human-callback-rejects-disallowed-host ()
   "Native MONGODB-OIDC should reject human callbacks on disallowed hosts."
   (let* ((callback-called nil)
          (command-called nil)
          (credential
-          (make-mongo--credential
+          (make-mongodb--credential
            :source "$external"
            :mechanism "MONGODB-OIDC"
            :oidc-human-callback
            (lambda (_params)
              (setq callback-called t)
              "jwt")))
-         (conn (make-mongo-conn :host "evil.example.com")))
-    (cl-letf (((symbol-function 'mongo-command)
+         (conn (make-mongodb-conn :host "evil.example.com")))
+    (cl-letf (((symbol-function 'mongodb-command)
                (lambda (&rest _args)
                  (setq command-called t)
                  '(("ok" . 1)))))
-      (should-error (mongo--authenticate-oidc conn credential)
-                    :type 'mongo-error))
+      (should-error (mongodb--authenticate-oidc conn credential)
+                    :type 'mongodb-error))
     (should-not callback-called)
     (should-not command-called)))
 
 
 
-(ert-deftest mongo-test-oidc-authenticates-with-one-step-sasl ()
-  "Native mongo.el should authenticate MONGODB-OIDC with JwtStepRequest."
-  (let ((credential (make-mongo--credential
+(ert-deftest mongodb-test-oidc-authenticates-with-one-step-sasl ()
+  "Native mongodb.el should authenticate MONGODB-OIDC with JwtStepRequest."
+  (let ((credential (make-mongodb--credential
                      :source "$external"
                      :mechanism "MONGODB-OIDC"
                      :oidc-token "abcd1234"))
         captured-db
         captured-command)
-    (cl-letf (((symbol-function 'mongo-command)
+    (cl-letf (((symbol-function 'mongodb-command)
                (lambda (_conn database command &optional _timeout _sequences)
                  (setq captured-db database
                        captured-command command)
@@ -3872,7 +3872,7 @@
                    ("done" . t)
                    ("payload" . "")
                    ("ok" . 1)))))
-      (should (equal (mongo--authenticate 'conn credential '())
+      (should (equal (mongodb--authenticate 'conn credential '())
                      '(("conversationId" . 1)
                        ("done" . t)
                        ("payload" . "")
@@ -3883,21 +3883,21 @@
                    "MONGODB-OIDC"))
     (should (= (cdr (assoc "autoAuthorize" captured-command)) 1))
     (let* ((payload (cdr (assoc "payload" captured-command)))
-           (document (mongo--decode-document-from-string
-                      (mongo-binary-data payload))))
-      (should (mongo-binary-p payload))
-      (should (= (mongo-binary-subtype payload) 0))
+           (document (mongodb--decode-document-from-string
+                      (mongodb-binary-data payload))))
+      (should (mongodb-binary-p payload))
+      (should (= (mongodb-binary-subtype payload) 0))
       (should (equal (cdr (assoc "jwt" document)) "abcd1234")))))
 
 
 
-(ert-deftest mongo-test-oidc-authenticates-with-two-step-sasl ()
-  "Native mongo.el should authenticate MONGODB-OIDC with IdPInfo and callback."
+(ert-deftest mongodb-test-oidc-authenticates-with-two-step-sasl ()
+  "Native mongodb.el should authenticate MONGODB-OIDC with IdPInfo and callback."
   (let* ((idp-info '(("issuer" . "https://issuer.example.test")
                      ("clientId" . "client-1")
                      ("requestScopes" . ["openid" "mongodb"])))
-         (conn (make-mongo-conn :host "cluster.mongodb.net"))
-         (credential (make-mongo--credential
+         (conn (make-mongodb-conn :host "cluster.mongodb.net"))
+         (credential (make-mongodb--credential
                       :username "myidp"
                       :source "$external"
                       :mechanism "MONGODB-OIDC"
@@ -3915,7 +3915,7 @@
                         '(:access-token "abcd1234"
                           :refresh-token "new-refresh"))))
          commands)
-    (cl-letf (((symbol-function 'mongo-command)
+    (cl-letf (((symbol-function 'mongodb-command)
                (lambda (_conn database command &optional _timeout _sequences)
                  (push (list database command) commands)
                  (cond
@@ -3925,22 +3925,22 @@
                                   "MONGODB-OIDC"))
                    (let* ((payload (cdr (assoc "payload" command)))
                           (document
-                           (mongo--decode-document-from-string
-                            (mongo-binary-data payload))))
+                           (mongodb--decode-document-from-string
+                            (mongodb-binary-data payload))))
                      (should (equal (cdr (assoc "n" document)) "myidp")))
                    `(("conversationId" . 11)
                      ("done" . :false)
-                     ("payload" . ,(mongo-binary
+                     ("payload" . ,(mongodb-binary
                                     0
-                                    (mongo--encode-document idp-info)))
+                                    (mongodb--encode-document idp-info)))
                      ("ok" . 1)))
                   ((assoc "saslContinue" command)
                    (should (equal database "$external"))
                    (should (= (cdr (assoc "conversationId" command)) 11))
                    (let* ((payload (cdr (assoc "payload" command)))
                           (document
-                           (mongo--decode-document-from-string
-                            (mongo-binary-data payload))))
+                           (mongodb--decode-document-from-string
+                            (mongodb-binary-data payload))))
                      (should (equal (cdr (assoc "jwt" document))
                                     "abcd1234")))
                    '(("conversationId" . 11)
@@ -3949,127 +3949,127 @@
                      ("ok" . 1)))
                   (t
                    (ert-fail (format "unexpected command: %S" command)))))))
-      (should (equal (mongo--authenticate conn credential '())
+      (should (equal (mongodb--authenticate conn credential '())
                      '(("conversationId" . 11)
                        ("done" . t)
                        ("payload" . "")
                        ("ok" . 1)))))
     (should (= (length commands) 2))
-    (should (equal (mongo--credential-oidc-refresh-token credential)
+    (should (equal (mongodb--credential-oidc-refresh-token credential)
                    "new-refresh"))
-    (should (equal (mongo--credential-oidc-idp-info credential)
+    (should (equal (mongodb--credential-oidc-idp-info credential)
                    idp-info))))
 
 
 
-(ert-deftest mongo-test-oidc-auth-requires-done ()
-  "Native mongo.el should reject incomplete one-step OIDC conversations."
-  (let ((credential (make-mongo--credential
+(ert-deftest mongodb-test-oidc-auth-requires-done ()
+  "Native mongodb.el should reject incomplete one-step OIDC conversations."
+  (let ((credential (make-mongodb--credential
                      :source "$external"
                      :mechanism "MONGODB-OIDC"
                      :oidc-token "jwt")))
-    (cl-letf (((symbol-function 'mongo-command)
+    (cl-letf (((symbol-function 'mongodb-command)
                (lambda (&rest _args)
                  '(("conversationId" . 1) ("done" . :false) ("ok" . 1)))))
-      (should-error (mongo--authenticate-oidc 'conn credential)
-                    :type 'mongo-error))))
+      (should-error (mongodb--authenticate-oidc 'conn credential)
+                    :type 'mongodb-error))))
 
 
 
-(ert-deftest mongo-test-saslprep-normalizes-password ()
+(ert-deftest mongodb-test-saslprep-normalizes-password ()
   "SCRAM-SHA-256 passwords should be prepared with SASLprep."
-  (should (equal (mongo--saslprep
+  (should (equal (mongodb--saslprep
                   (concat "I" (string #x00AD) "X"
                           (string #x00AA) (string #x2168)))
                  "IXaIX"))
-  (should (equal (mongo--saslprep
+  (should (equal (mongodb--saslprep
                   (concat "a" (string #x00A0) "b"
                           (string #x3000) "c"))
                  "a b c")))
 
 
 
-(ert-deftest mongo-test-saslprep-rejects-prohibited ()
+(ert-deftest mongodb-test-saslprep-rejects-prohibited ()
   "SCRAM-SHA-256 SASLprep should reject prohibited code points."
-  (should-error (mongo--saslprep (concat "a" (string #x0007) "b"))
-                :type 'mongo-error)
-  (should-error (mongo--saslprep (string #xE000))
-                :type 'mongo-error)
-  (should-error (mongo--saslprep (string #xFDD0))
-                :type 'mongo-error))
+  (should-error (mongodb--saslprep (concat "a" (string #x0007) "b"))
+                :type 'mongodb-error)
+  (should-error (mongodb--saslprep (string #xE000))
+                :type 'mongodb-error)
+  (should-error (mongodb--saslprep (string #xFDD0))
+                :type 'mongodb-error))
 
 
 
-(ert-deftest mongo-test-saslprep-rejects-invalid-bidi ()
+(ert-deftest mongodb-test-saslprep-rejects-invalid-bidi ()
   "SCRAM-SHA-256 SASLprep should enforce bidirectional text rules."
   (let ((alef (string #x0627)))
-    (should (equal (mongo--saslprep (concat alef "1" alef))
+    (should (equal (mongodb--saslprep (concat alef "1" alef))
                    (concat alef "1" alef)))
-    (should-error (mongo--saslprep (concat alef "a" alef))
-                  :type 'mongo-error)
-    (should-error (mongo--saslprep (concat "1" alef))
-                  :type 'mongo-error)))
+    (should-error (mongodb--saslprep (concat alef "a" alef))
+                  :type 'mongodb-error)
+    (should-error (mongodb--saslprep (concat "1" alef))
+                  :type 'mongodb-error)))
 
 
 
-(ert-deftest mongo-test-scram-sha256-saslprep-password ()
+(ert-deftest mongodb-test-scram-sha256-saslprep-password ()
   "SCRAM-SHA-256 key derivation should use the SASLprep password form."
   (let ((server-first
          "r=clientnonceSERVER,s=QSXCR+Q6sek8bf92,i=4096"))
     (should (equal
-             (mongo--scram-sha256-client-final
+             (mongodb--scram-sha256-client-final
               (concat "I" (string #x00AD) "X")
               "n=user,r=clientnonce" "clientnonce" server-first)
-             (mongo--scram-sha256-client-final
+             (mongodb--scram-sha256-client-final
               "IX" "n=user,r=clientnonce" "clientnonce" server-first)))))
 
 
 
-(ert-deftest mongo-test-scram-sha1-password-does-not-saslprep ()
+(ert-deftest mongodb-test-scram-sha1-password-does-not-saslprep ()
   "SCRAM-SHA-1 should digest the raw MongoDB password form."
   (let ((password (concat "I" (string #x00AD) "X")))
     (should (equal
-             (mongo--scram-sha1-password-bytes "user" password)
-             (mongo--utf8-bytes
+             (mongodb--scram-sha1-password-bytes "user" password)
+             (mongodb--utf8-bytes
               (secure-hash
                'md5
-               (mongo--utf8-bytes
-                (format "user:mongo:%s" password))))))
-    (should-not (equal (mongo--scram-sha1-password-bytes "user" password)
-                       (mongo--scram-sha1-password-bytes "user" "IX")))))
+               (mongodb--utf8-bytes
+                (format "user:mongodb:%s" password))))))
+    (should-not (equal (mongodb--scram-sha1-password-bytes "user" password)
+                       (mongodb--scram-sha1-password-bytes "user" "IX")))))
 
 
 
-(ert-deftest mongo-test-scram-rejects-low-iterations ()
+(ert-deftest mongodb-test-scram-rejects-low-iterations ()
   "MongoDB SCRAM conversations should reject downgrade iteration counts."
   (should-error
-   (mongo--scram-sha256-client-final
+   (mongodb--scram-sha256-client-final
     "pencil" "n=user,r=clientnonce" "clientnonce"
     "r=clientnonceSERVER,s=QSXCR+Q6sek8bf92,i=4095")
-   :type 'mongo-error)
+   :type 'mongodb-error)
   (should-error
-   (mongo--scram-sha1-client-final
+   (mongodb--scram-sha1-client-final
     "user" "pencil" "n=user,r=clientnonce" "clientnonce"
     "r=clientnonceSERVER,s=QSXCR+Q6sek8bf92,i=4095")
-   :type 'mongo-error))
+   :type 'mongodb-error))
 
 
 
-(ert-deftest mongo-test-scram-sha256-conversation ()
+(ert-deftest mongodb-test-scram-sha256-conversation ()
   "The native SCRAM implementation should send binary SASL payloads."
-  (let* ((credential (make-mongo--credential
+  (let* ((credential (make-mongodb--credential
                       :username "user"
                       :password "pencil"
                       :source "admin"))
          (server-first
           "r=clientnonceSERVER,s=QSXCR+Q6sek8bf92,i=4096")
          (expected-final
-          (mongo--scram-sha256-client-final
+          (mongodb--scram-sha256-client-final
            "pencil" "n=user,r=clientnonce" "clientnonce" server-first))
          calls)
-    (cl-letf (((symbol-function 'mongo--scram-client-nonce)
+    (cl-letf (((symbol-function 'mongodb--scram-client-nonce)
                (lambda () "clientnonce"))
-              ((symbol-function 'mongo-command)
+              ((symbol-function 'mongodb-command)
                (lambda (_conn database command &optional _timeout)
                  (push (list database command) calls)
                  (cond
@@ -4078,57 +4078,57 @@
                    (should (equal (cdr (assoc "options" command))
                                   '(("skipEmptyExchange" . t))))
                    (should (equal
-                            (mongo--scram-payload-string
+                            (mongodb--scram-payload-string
                              (cdr (assoc "payload" command)))
                             "n,,n=user,r=clientnonce"))
                    `(("conversationId" . 7)
                      ("done" . :false)
-                     ("payload" . ,(mongo-binary
+                     ("payload" . ,(mongodb-binary
                                     0
-                                    (mongo--utf8-bytes server-first)))
+                                    (mongodb--utf8-bytes server-first)))
                      ("ok" . 1)))
                   ((assoc "saslContinue" command)
                    (should (equal database "admin"))
                    (should (= (cdr (assoc "conversationId" command)) 7))
                    (should (string-prefix-p
                             "c=biws,r=clientnonceSERVER,p="
-                            (mongo--scram-payload-string
+                            (mongodb--scram-payload-string
                              (cdr (assoc "payload" command)))))
                    `(("conversationId" . 7)
                      ("done" . t)
-                     ("payload" . ,(mongo-binary
+                     ("payload" . ,(mongodb-binary
                                     0
-                                    (mongo--utf8-bytes
+                                    (mongodb--utf8-bytes
                                      (format
                                       "v=%s"
-                                      (mongo--base64-encode
+                                      (mongodb--base64-encode
                                        (plist-get expected-final
                                                   :server-signature))))))
                      ("ok" . 1)))
                   (t
                    (ert-fail (format "unexpected command: %S" command)))))))
-      (mongo--authenticate-scram-sha256 'conn credential)
+      (mongodb--authenticate-scram-sha256 'conn credential)
       (should (= (length calls) 2)))))
 
 
 
-(ert-deftest mongo-test-scram-sha256-speculative-conversation ()
+(ert-deftest mongodb-test-scram-sha256-speculative-conversation ()
   "Speculative SCRAM should continue from the handshake saslStart response."
-  (let* ((credential (make-mongo--credential
+  (let* ((credential (make-mongodb--credential
                       :username "user"
                       :password "pencil"
                       :source "admin"))
          (server-first
           "r=clientnonceSERVER,s=QSXCR+Q6sek8bf92,i=4096")
          (expected-final
-          (mongo--scram-sha256-client-final
+          (mongodb--scram-sha256-client-final
            "pencil" "n=user,r=clientnonce" "clientnonce" server-first))
          start-data
          calls)
-    (cl-letf (((symbol-function 'mongo--scram-client-nonce)
+    (cl-letf (((symbol-function 'mongodb--scram-client-nonce)
                (lambda () "clientnonce")))
-      (setq start-data (mongo--speculative-auth-state credential)))
-    (cl-letf (((symbol-function 'mongo-command)
+      (setq start-data (mongodb--speculative-auth-state credential)))
+    (cl-letf (((symbol-function 'mongodb-command)
                (lambda (_conn database command &optional _timeout)
                  (push (list database command) calls)
                  (cond
@@ -4139,51 +4139,51 @@
                    (should (= (cdr (assoc "conversationId" command)) 7))
                    (should (string-prefix-p
                             "c=biws,r=clientnonceSERVER,p="
-                            (mongo--scram-payload-string
+                            (mongodb--scram-payload-string
                              (cdr (assoc "payload" command)))))
                    `(("conversationId" . 7)
                      ("done" . t)
-                     ("payload" . ,(mongo-binary
+                     ("payload" . ,(mongodb-binary
                                     0
-                                    (mongo--utf8-bytes
+                                    (mongodb--utf8-bytes
                                      (format
                                       "v=%s"
-                                      (mongo--base64-encode
+                                      (mongodb--base64-encode
                                        (plist-get expected-final
                                                   :server-signature))))))
                      ("ok" . 1)))
                   (t
                    (ert-fail (format "unexpected command: %S" command)))))))
-      (mongo--authenticate
+      (mongodb--authenticate
        'conn credential
        `(("saslSupportedMechs" . ("SCRAM-SHA-1" "SCRAM-SHA-256"))
          ("speculativeAuthenticate" .
           (("conversationId" . 7)
            ("done" . :false)
-           ("payload" . ,(mongo-binary
+           ("payload" . ,(mongodb-binary
                           0
-                          (mongo--utf8-bytes server-first))))))
+                          (mongodb--utf8-bytes server-first))))))
        start-data)
       (should (= (length calls) 1)))))
 
 
 
-(ert-deftest mongo-test-scram-sha1-conversation ()
+(ert-deftest mongodb-test-scram-sha1-conversation ()
   "The native SCRAM implementation should support SCRAM-SHA-1."
-  (let* ((credential (make-mongo--credential
+  (let* ((credential (make-mongodb--credential
                       :username "user"
                       :password "pencil"
                       :source "admin"))
          (server-first
           "r=clientnonceSERVER,s=QSXCR+Q6sek8bf92,i=4096")
          (expected-final
-          (mongo--scram-sha1-client-final
+          (mongodb--scram-sha1-client-final
            "user" "pencil" "n=user,r=clientnonce"
            "clientnonce" server-first))
          calls)
-    (cl-letf (((symbol-function 'mongo--scram-client-nonce)
+    (cl-letf (((symbol-function 'mongodb--scram-client-nonce)
                (lambda () "clientnonce"))
-              ((symbol-function 'mongo-command)
+              ((symbol-function 'mongodb-command)
                (lambda (_conn database command &optional _timeout)
                  (push (list database command) calls)
                  (cond
@@ -4194,50 +4194,50 @@
                                   '(("skipEmptyExchange" . t))))
                    `(("conversationId" . 7)
                      ("done" . :false)
-                     ("payload" . ,(mongo-binary
+                     ("payload" . ,(mongodb-binary
                                     0
-                                    (mongo--utf8-bytes server-first)))
+                                    (mongodb--utf8-bytes server-first)))
                      ("ok" . 1)))
                   ((assoc "saslContinue" command)
                    (should (string-prefix-p
                             "c=biws,r=clientnonceSERVER,p="
-                            (mongo--scram-payload-string
+                            (mongodb--scram-payload-string
                              (cdr (assoc "payload" command)))))
                    `(("conversationId" . 7)
                      ("done" . t)
-                     ("payload" . ,(mongo-binary
+                     ("payload" . ,(mongodb-binary
                                     0
-                                    (mongo--utf8-bytes
+                                    (mongodb--utf8-bytes
                                      (format
                                       "v=%s"
-                                      (mongo--base64-encode
+                                      (mongodb--base64-encode
                                        (plist-get expected-final
                                                   :server-signature))))))
                      ("ok" . 1)))
                   (t
                    (ert-fail (format "unexpected command: %S" command)))))))
-      (mongo--authenticate
+      (mongodb--authenticate
        'conn credential
        '(("saslSupportedMechs" . ("SCRAM-SHA-1"))))
       (should (= (length calls) 2)))))
 
 
 
-(ert-deftest mongo-test-scram-sha256-final-empty-continue ()
+(ert-deftest mongodb-test-scram-sha256-final-empty-continue ()
   "SCRAM should continue with an empty payload until the server marks done."
-  (let* ((credential (make-mongo--credential
+  (let* ((credential (make-mongodb--credential
                       :username "user"
                       :password "pencil"
                       :source "admin"))
          (server-first
           "r=clientnonceSERVER,s=QSXCR+Q6sek8bf92,i=4096")
          (expected-final
-          (mongo--scram-sha256-client-final
+          (mongodb--scram-sha256-client-final
            "pencil" "n=user,r=clientnonce" "clientnonce" server-first))
          (continue-count 0))
-    (cl-letf (((symbol-function 'mongo--scram-client-nonce)
+    (cl-letf (((symbol-function 'mongodb--scram-client-nonce)
                (lambda () "clientnonce"))
-              ((symbol-function 'mongo-command)
+              ((symbol-function 'mongodb-command)
                (lambda (_conn _database command &optional _timeout)
                  (cond
                   ((assoc "saslStart" command)
@@ -4245,26 +4245,26 @@
                                   '(("skipEmptyExchange" . t))))
                    `(("conversationId" . 7)
                      ("done" . :false)
-                     ("payload" . ,(mongo-binary
+                     ("payload" . ,(mongodb-binary
                                     0
-                                    (mongo--utf8-bytes server-first)))
+                                    (mongodb--utf8-bytes server-first)))
                      ("ok" . 1)))
                   ((assoc "saslContinue" command)
                    (cl-incf continue-count)
                    (if (= continue-count 1)
                        `(("conversationId" . 7)
                          ("done" . :false)
-                         ("payload" . ,(mongo-binary
+                         ("payload" . ,(mongodb-binary
                                         0
-                                        (mongo--utf8-bytes
+                                        (mongodb--utf8-bytes
                                          (format
                                           "v=%s"
-                                          (mongo--base64-encode
+                                          (mongodb--base64-encode
                                            (plist-get expected-final
                                                       :server-signature))))))
                          ("ok" . 1))
                      (should (equal
-                              (mongo--scram-payload-string
+                              (mongodb--scram-payload-string
                                (cdr (assoc "payload" command)))
                               ""))
                      '(("conversationId" . 7)
@@ -4273,77 +4273,77 @@
                        ("ok" . 1))))
                   (t
                    (ert-fail (format "unexpected command: %S" command)))))))
-      (mongo--authenticate-scram-sha256 'conn credential)
+      (mongodb--authenticate-scram-sha256 'conn credential)
       (should (= continue-count 2)))))
 
 
 
-(ert-deftest mongo-test-params-endpoint-rejects-jdbc-url ()
-  "Native mongo.el should not silently treat JDBC URLs as localhost."
+(ert-deftest mongodb-test-params-endpoint-rejects-jdbc-url ()
+  "Native mongodb.el should not silently treat JDBC URLs as localhost."
   (let ((err (should-error
-              (mongo--params-endpoint
+              (mongodb--params-endpoint
                '(:url "jdbc:mongodb://cluster0.a.query.mongodb.net/admin"
                  :database "analytics"))
-              :type 'mongo-error)))
+              :type 'mongodb-error)))
     (should (string-match-p "expects mongodb:// URLs"
                             (error-message-string err)))))
 
 
 
-(ert-deftest mongo-test-params-endpoint-parses-url-query ()
-  "Native mongo.el should parse ordinary mongodb:// URLs with query strings."
-  (should (equal (mongo--params-endpoint
+(ert-deftest mongodb-test-params-endpoint-parses-url-query ()
+  "Native mongodb.el should parse ordinary mongodb:// URLs with query strings."
+  (should (equal (mongodb--params-endpoint
                   '(:url "mongodb://127.0.0.1:27018/app?retryWrites=true"))
                  '("127.0.0.1" 27018 "app"))))
 
 
 
-(ert-deftest mongo-test-params-endpoint-parses-unix-socket-uri ()
-  "Native mongo.el should parse URL-encoded UNIX-domain socket hosts."
-  (should (equal (mongo--params-endpoint
+(ert-deftest mongodb-test-params-endpoint-parses-unix-socket-uri ()
+  "Native mongodb.el should parse URL-encoded UNIX-domain socket hosts."
+  (should (equal (mongodb--params-endpoint
                   '(:url "mongodb://%2Ftmp%2Fmongodb-27017.sock/app"))
                  '("/tmp/mongodb-27017.sock" nil "app")))
-  (should (equal (mongo--params-endpoint
+  (should (equal (mongodb--params-endpoint
                   '(:host "/tmp/mongodb-27017.sock"
                     :database "app"))
                  '("/tmp/mongodb-27017.sock" nil "app")))
-  (should (equal (mongo--endpoint-key "/tmp/MongoDB-27017.sock" nil)
+  (should (equal (mongodb--endpoint-key "/tmp/MongoDB-27017.sock" nil)
                  "local:/tmp/MongoDB-27017.sock")))
 
 
 
-(ert-deftest mongo-test-params-url-rejects-unsupported-options ()
-  "Native mongo.el should not silently ignore unsupported URI options."
+(ert-deftest mongodb-test-params-url-rejects-unsupported-options ()
+  "Native mongodb.el should not silently ignore unsupported URI options."
   (let ((err (should-error
-              (mongo--params-endpoint
+              (mongodb--params-endpoint
                '(:url "mongodb://127.0.0.1/app?unknownOption=10"))
-              :type 'mongo-error)))
+              :type 'mongodb-error)))
     (should (string-match-p "unknownoption"
                             (error-message-string err)))))
 
 
 
-(ert-deftest mongo-test-params-url-rejects-invalid-boolean-options ()
-  "Native mongo.el should validate MongoDB URI boolean option values."
+(ert-deftest mongodb-test-params-url-rejects-invalid-boolean-options ()
+  "Native mongodb.el should validate MongoDB URI boolean option values."
   (let ((err (should-error
-              (mongo--params-endpoint
+              (mongodb--params-endpoint
                '(:url "mongodb://127.0.0.1/app?directConnection=maybe"))
-              :type 'mongo-error)))
+              :type 'mongodb-error)))
     (should (string-match-p "directconnection"
                             (error-message-string err))))
-  (should-not (mongo--params-direct-connection-p
+  (should-not (mongodb--params-direct-connection-p
                '(:direct-connection "false")))
-  (should-not (mongo--params-load-balanced-p
+  (should-not (mongodb--params-load-balanced-p
                '(:load-balanced "false")))
-  (should-error (mongo--params-direct-connection-p
+  (should-error (mongodb--params-direct-connection-p
                  '(:direct-connection "maybe"))
-                :type 'mongo-error))
+                :type 'mongodb-error))
 
 
 
-(ert-deftest mongo-test-params-url-rejects-conflicting-tls-options ()
-  "Native mongo.el should reject MongoDB TLS URI option conflicts."
-  (should (equal (mongo--params-endpoint
+(ert-deftest mongodb-test-params-url-rejects-conflicting-tls-options ()
+  "Native mongodb.el should reject MongoDB TLS URI option conflicts."
+  (should (equal (mongodb--params-endpoint
                   '(:url "mongodb://127.0.0.1/app?tls=true&ssl=true"))
                  '("127.0.0.1" 27017 "app")))
   (dolist (case '(("mongodb://127.0.0.1/app?tls=true&ssl=false"
@@ -4363,133 +4363,133 @@
                   ("mongodb://127.0.0.1/app?tlsDisableOCSPEndpointCheck=true&tlsDisableCertificateRevocationCheck=true"
                    . "tlsDisableOCSPEndpointCheck.*tlsDisableCertificateRevocationCheck")))
     (let ((err (should-error
-                (mongo--params-endpoint `(:url ,(car case)))
-                :type 'mongo-error)))
+                (mongodb--params-endpoint `(:url ,(car case)))
+                :type 'mongodb-error)))
       (should (string-match-p (cdr case)
                               (error-message-string err))))))
 
 
 
-(ert-deftest mongo-test-params-connect-timeout-from-uri ()
-  "Native mongo.el should map connectTimeoutMS to connect timeout seconds."
-  (should (= (mongo--params-connect-timeout
+(ert-deftest mongodb-test-params-connect-timeout-from-uri ()
+  "Native mongodb.el should map connectTimeoutMS to connect timeout seconds."
+  (should (= (mongodb--params-connect-timeout
               '(:url "mongodb://127.0.0.1/app?connectTimeoutMS=2500"))
              2.5))
-  (should (= (mongo--params-connect-timeout
+  (should (= (mongodb--params-connect-timeout
               '(:connect-timeout 7
                 :url "mongodb://127.0.0.1/app?connectTimeoutMS=2500"))
              7)))
 
 
 
-(ert-deftest mongo-test-params-socket-timeout-from-uri ()
-  "Native mongo.el should map socketTimeoutMS to socket timeout seconds."
-  (should (= (mongo--params-socket-timeout
+(ert-deftest mongodb-test-params-socket-timeout-from-uri ()
+  "Native mongodb.el should map socketTimeoutMS to socket timeout seconds."
+  (should (= (mongodb--params-socket-timeout
               '(:url "mongodb://127.0.0.1/app?socketTimeoutMS=1500"))
              1.5))
-  (should (= (mongo--params-socket-timeout
+  (should (= (mongodb--params-socket-timeout
               '(:socket-timeout 7
                 :url "mongodb://127.0.0.1/app?socketTimeoutMS=1500"))
              7)))
 
 
 
-(ert-deftest mongo-test-params-operation-timeout-from-uri ()
-  "Native mongo.el should map timeoutMS to default operation timeout seconds."
-  (should (= (mongo--params-operation-timeout
+(ert-deftest mongodb-test-params-operation-timeout-from-uri ()
+  "Native mongodb.el should map timeoutMS to default operation timeout seconds."
+  (should (= (mongodb--params-operation-timeout
               '(:url "mongodb://127.0.0.1/app?timeoutMS=2500"))
              2.5))
-  (should (= (mongo--params-operation-timeout
+  (should (= (mongodb--params-operation-timeout
               '(:timeout-ms 1200
                 :url "mongodb://127.0.0.1/app?timeoutMS=2500"))
              1.2))
-  (should (= (mongo--params-operation-timeout
+  (should (= (mongodb--params-operation-timeout
               '(:operation-timeout 7
                 :url "mongodb://127.0.0.1/app?timeoutMS=2500"))
              7)))
 
 
 
-(ert-deftest mongo-test-params-monitoring-options-from-uri ()
-  "Native mongo.el should parse MongoDB monitoring URI options."
-  (should (= (mongo--params-heartbeat-frequency
+(ert-deftest mongodb-test-params-monitoring-options-from-uri ()
+  "Native mongodb.el should parse MongoDB monitoring URI options."
+  (should (= (mongodb--params-heartbeat-frequency
               '(:url "mongodb://127.0.0.1/app?heartbeatFrequencyMS=1500"))
              1.5))
-  (should (= (mongo--params-heartbeat-frequency
+  (should (= (mongodb--params-heartbeat-frequency
               '(:heartbeat-frequency 2
                 :url "mongodb://127.0.0.1/app?heartbeatFrequencyMS=1500"))
              2))
-  (should (eq (mongo--params-server-monitoring-mode
+  (should (eq (mongodb--params-server-monitoring-mode
                '(:url "mongodb://127.0.0.1/app?serverMonitoringMode=poll"))
               'poll))
-  (should (eq (mongo--params-server-monitoring-mode
+  (should (eq (mongodb--params-server-monitoring-mode
                '(:server-monitoring-mode stream))
               'stream))
   (should-error
-   (mongo--params-heartbeat-frequency
+   (mongodb--params-heartbeat-frequency
     '(:url "mongodb://127.0.0.1/app?heartbeatFrequencyMS=0"))
-   :type 'mongo-error)
+   :type 'mongodb-error)
   (should-error
-   (mongo--params-server-monitoring-mode
+   (mongodb--params-server-monitoring-mode
     '(:url "mongodb://127.0.0.1/app?serverMonitoringMode=bad"))
-   :type 'mongo-error))
+   :type 'mongodb-error))
 
 
 
-(ert-deftest mongo-test-params-pool-options-from-uri ()
-  "Native mongo.el should parse MongoDB connection pool URI options."
+(ert-deftest mongodb-test-params-pool-options-from-uri ()
+  "Native mongodb.el should parse MongoDB connection pool URI options."
   (let ((params
          '(:url
            "mongodb://127.0.0.1/app?maxPoolSize=12&minPoolSize=2&maxIdleTimeMS=1500&waitQueueTimeoutMS=250&maxConnecting=3")))
-    (should (= (mongo--params-max-pool-size params) 12))
-    (should (= (mongo--params-min-pool-size params) 2))
-    (should (= (mongo--params-max-idle-time params) 1.5))
-    (should (= (mongo--params-wait-queue-timeout params) 0.25))
-    (should (= (mongo--params-max-connecting params) 3)))
-  (should-not (mongo--params-wait-queue-timeout
+    (should (= (mongodb--params-max-pool-size params) 12))
+    (should (= (mongodb--params-min-pool-size params) 2))
+    (should (= (mongodb--params-max-idle-time params) 1.5))
+    (should (= (mongodb--params-wait-queue-timeout params) 0.25))
+    (should (= (mongodb--params-max-connecting params) 3)))
+  (should-not (mongodb--params-wait-queue-timeout
                '(:url
                  "mongodb://127.0.0.1/app?waitQueueTimeoutMS=0")))
-  (should-not (mongo--params-wait-queue-timeout
+  (should-not (mongodb--params-wait-queue-timeout
                '(:wait-queue-timeout 0))))
 
 
 
-(ert-deftest mongo-test-params-pool-options-validate ()
-  "Native mongo.el should validate MongoDB connection pool options."
-  (should-not (mongo--params-max-pool-size
+(ert-deftest mongodb-test-params-pool-options-validate ()
+  "Native mongodb.el should validate MongoDB connection pool options."
+  (should-not (mongodb--params-max-pool-size
                '(:url "mongodb://127.0.0.1/app?maxPoolSize=0")))
   (should-error
-   (mongo--params-validate-pool-options
+   (mongodb--params-validate-pool-options
     '(:url "mongodb://127.0.0.1/app?maxPoolSize=1&minPoolSize=2"))
-   :type 'mongo-error)
+   :type 'mongodb-error)
   (should-error
-   (mongo--params-max-connecting
+   (mongodb--params-max-connecting
     '(:url "mongodb://127.0.0.1/app?maxConnecting=0"))
-   :type 'mongo-error)
+   :type 'mongodb-error)
   (should-error
-   (mongo--params-wait-queue-timeout
+   (mongodb--params-wait-queue-timeout
     '(:wait-queue-timeout -1))
-   :type 'mongo-error))
+   :type 'mongodb-error))
 
 
 
-(ert-deftest mongo-test-params-proxy-from-uri ()
-  "Native mongo.el should parse standard SOCKS5 proxy URI options."
-  (should (equal (mongo--params-proxy
+(ert-deftest mongodb-test-params-proxy-from-uri ()
+  "Native mongodb.el should parse standard SOCKS5 proxy URI options."
+  (should (equal (mongodb--params-proxy
                   '(:url
                     "mongodb://127.0.0.1/app?proxyHost=proxy.example&proxyPort=1081&proxyUsername=u&proxyPassword=p"))
                  '(:host "proxy.example"
                    :port 1081
                    :username "u"
                    :password "p")))
-  (should (equal (mongo--params-proxy
+  (should (equal (mongodb--params-proxy
                   '(:url
                     "mongodb://127.0.0.1/app?proxyHost=proxy.example"))
                  '(:host "proxy.example"
                    :port 1080
                    :username nil
                    :password nil)))
-  (should (equal (mongo--params-proxy
+  (should (equal (mongodb--params-proxy
                   '(:proxy-host "proxy.local"
                     :proxy-port 1082))
                  '(:host "proxy.local"
@@ -4503,349 +4503,349 @@
              (:url "mongodb://127.0.0.1/app?proxyHost=proxy.example&proxyPort=65536")
              (:url "mongodb://127.0.0.1/app?proxyHost=proxy.example&proxyUsername=u")
              (:url "mongodb://127.0.0.1/app?proxyHost=proxy.example&proxyPassword=p")))
-    (should-error (mongo--params-proxy params)
-                  :type 'mongo-error)))
+    (should-error (mongodb--params-proxy params)
+                  :type 'mongodb-error)))
 
 
 
-(ert-deftest mongo-test-params-retry-reads-defaults-enabled ()
-  "Native mongo.el should parse retryReads and default it to enabled."
-  (should (mongo--params-retry-reads-p
+(ert-deftest mongodb-test-params-retry-reads-defaults-enabled ()
+  "Native mongodb.el should parse retryReads and default it to enabled."
+  (should (mongodb--params-retry-reads-p
            '(:url "mongodb://127.0.0.1/app")))
-  (should (mongo--params-retry-reads-p
+  (should (mongodb--params-retry-reads-p
            '(:url "mongodb://127.0.0.1/app?retryReads=true")))
-  (should-not (mongo--params-retry-reads-p
+  (should-not (mongodb--params-retry-reads-p
                '(:url "mongodb://127.0.0.1/app?retryReads=false")))
-  (should-not (mongo--params-retry-reads-p
+  (should-not (mongodb--params-retry-reads-p
                '(:retry-reads nil
                  :url "mongodb://127.0.0.1/app?retryReads=true")))
-  (should-error (mongo--params-retry-reads-p
+  (should-error (mongodb--params-retry-reads-p
                  '(:retry-reads maybe))
-                :type 'mongo-error))
+                :type 'mongodb-error))
 
 
 
-(ert-deftest mongo-test-params-retry-writes-defaults-enabled ()
-  "Native mongo.el should parse retryWrites and default it to enabled."
-  (should (mongo--params-retry-writes-p
+(ert-deftest mongodb-test-params-retry-writes-defaults-enabled ()
+  "Native mongodb.el should parse retryWrites and default it to enabled."
+  (should (mongodb--params-retry-writes-p
            '(:url "mongodb://127.0.0.1/app")))
-  (should (mongo--params-retry-writes-p
+  (should (mongodb--params-retry-writes-p
            '(:url "mongodb://127.0.0.1/app?retryWrites=true")))
-  (should-not (mongo--params-retry-writes-p
+  (should-not (mongodb--params-retry-writes-p
                '(:url "mongodb://127.0.0.1/app?retryWrites=false")))
-  (should-not (mongo--params-retry-writes-p
+  (should-not (mongodb--params-retry-writes-p
                '(:retry-writes nil
                  :url "mongodb://127.0.0.1/app?retryWrites=true")))
-  (should-error (mongo--params-retry-writes-p
+  (should-error (mongodb--params-retry-writes-p
                  '(:retry-writes maybe))
-                :type 'mongo-error))
+                :type 'mongodb-error))
 
 
 
-(ert-deftest mongo-test-params-server-selection-timeout-from-uri ()
-  "Native mongo.el should map serverSelectionTimeoutMS to seconds."
-  (should (= (mongo--params-server-selection-timeout
+(ert-deftest mongodb-test-params-server-selection-timeout-from-uri ()
+  "Native mongodb.el should map serverSelectionTimeoutMS to seconds."
+  (should (= (mongodb--params-server-selection-timeout
               '(:url "mongodb://127.0.0.1/app"))
              30))
-  (should (= (mongo--params-server-selection-timeout
+  (should (= (mongodb--params-server-selection-timeout
               '(:url "mongodb://127.0.0.1/app?serverSelectionTimeoutMS=2500"))
              2.5))
-  (should (= (mongo--params-server-selection-timeout
+  (should (= (mongodb--params-server-selection-timeout
               '(:server-selection-timeout 7
                 :url "mongodb://127.0.0.1/app?serverSelectionTimeoutMS=2500"))
              7))
   (should-error
-   (mongo--params-server-selection-timeout
+   (mongodb--params-server-selection-timeout
     '(:url "mongodb://127.0.0.1/app?serverSelectionTimeoutMS=-1"))
-   :type 'mongo-error)
+   :type 'mongodb-error)
   (should-error
-  (mongo--params-server-selection-timeout
+  (mongodb--params-server-selection-timeout
    '(:server-selection-timeout -1))
-  :type 'mongo-error))
+  :type 'mongodb-error))
 
 
 
-(ert-deftest mongo-test-params-server-selection-try-once-from-uri ()
-  "Native mongo.el should parse serverSelectionTryOnce."
-  (should (mongo--params-server-selection-try-once-p
+(ert-deftest mongodb-test-params-server-selection-try-once-from-uri ()
+  "Native mongodb.el should parse serverSelectionTryOnce."
+  (should (mongodb--params-server-selection-try-once-p
            '(:url "mongodb://127.0.0.1/app")))
-  (should-not (mongo--params-server-selection-try-once-p
+  (should-not (mongodb--params-server-selection-try-once-p
                '(:url
                  "mongodb://127.0.0.1/app?serverSelectionTryOnce=false")))
-  (should-not (mongo--params-server-selection-try-once-p
+  (should-not (mongodb--params-server-selection-try-once-p
                '(:server-selection-try-once nil
                  :url
                  "mongodb://127.0.0.1/app?serverSelectionTryOnce=true")))
-  (should (mongo--params-server-selection-try-once-p
+  (should (mongodb--params-server-selection-try-once-p
            '(:serverSelectionTryOnce t)))
   (should-error
-   (mongo--params-server-selection-try-once-p
+   (mongodb--params-server-selection-try-once-p
     '(:url "mongodb://127.0.0.1/app?serverSelectionTryOnce=maybe"))
-   :type 'mongo-error)
+   :type 'mongodb-error)
   (should-error
-   (mongo--params-server-selection-try-once-p
+   (mongodb--params-server-selection-try-once-p
     '(:server-selection-try-once maybe))
-   :type 'mongo-error))
+   :type 'mongodb-error))
 
 
 
-(ert-deftest mongo-test-params-local-threshold-from-uri ()
-  "Native mongo.el should map localThresholdMS to seconds."
-  (should (= (mongo--params-local-threshold
+(ert-deftest mongodb-test-params-local-threshold-from-uri ()
+  "Native mongodb.el should map localThresholdMS to seconds."
+  (should (= (mongodb--params-local-threshold
               '(:url "mongodb://127.0.0.1/app?localThresholdMS=25"))
              0.025))
-  (should (= (mongo--params-local-threshold
+  (should (= (mongodb--params-local-threshold
               '(:local-threshold 0.2
                 :url "mongodb://127.0.0.1/app?localThresholdMS=25"))
              0.2))
-  (should (= (mongo--params-local-threshold
+  (should (= (mongodb--params-local-threshold
               '(:local-threshold-ms 30))
              0.03))
   (should-error
-   (mongo--params-local-threshold
+   (mongodb--params-local-threshold
     '(:url "mongodb://127.0.0.1/app?localThresholdMS=-1"))
-   :type 'mongo-error)
+   :type 'mongodb-error)
   (should-error
-   (mongo--params-local-threshold
+   (mongodb--params-local-threshold
     '(:local-threshold -0.1))
-   :type 'mongo-error))
+   :type 'mongodb-error))
 
 
 
-(ert-deftest mongo-test-params-endpoints-parse-replica-set-seeds ()
-  "Native mongo.el should parse MongoDB replica-set seed lists."
-  (let* ((params '(:url "mongodb://mongo-a,mongo-b:27018/app?replicaSet=rs0"))
-         (endpoints (mongo--params-endpoints params)))
+(ert-deftest mongodb-test-params-endpoints-parse-replica-set-seeds ()
+  "Native mongodb.el should parse MongoDB replica-set seed lists."
+  (let* ((params '(:url "mongodb://mongodb-a,mongodb-b:27018/app?replicaSet=rs0"))
+         (endpoints (mongodb--params-endpoints params)))
     (should (equal endpoints
-                   '(("mongo-a" 27017 "app")
-                     ("mongo-b" 27018 "app"))))
-    (should (equal (mongo--params-endpoint params)
-                   '("mongo-a" 27017 "app")))
-    (should (equal (mongo--params-replica-set-name params) "rs0"))
-    (should (mongo--params-replica-discovery-p params endpoints))))
+                   '(("mongodb-a" 27017 "app")
+                     ("mongodb-b" 27018 "app"))))
+    (should (equal (mongodb--params-endpoint params)
+                   '("mongodb-a" 27017 "app")))
+    (should (equal (mongodb--params-replica-set-name params) "rs0"))
+    (should (mongodb--params-replica-discovery-p params endpoints))))
 
 
 
-(ert-deftest mongo-test-params-direct-connection-bypasses-discovery ()
-  "Native mongo.el should honor directConnection for one explicit host."
-  (let* ((params '(:url "mongodb://mongo-a/app?replicaSet=rs0&directConnection=true"))
-         (endpoints (mongo--params-endpoints params)))
-    (should (mongo--params-direct-connection-p params))
-    (should-not (mongo--params-replica-discovery-p params endpoints))))
+(ert-deftest mongodb-test-params-direct-connection-bypasses-discovery ()
+  "Native mongodb.el should honor directConnection for one explicit host."
+  (let* ((params '(:url "mongodb://mongodb-a/app?replicaSet=rs0&directConnection=true"))
+         (endpoints (mongodb--params-endpoints params)))
+    (should (mongodb--params-direct-connection-p params))
+    (should-not (mongodb--params-replica-discovery-p params endpoints))))
 
 
 
-(ert-deftest mongo-test-params-compressors-parse-supported ()
-  "Native mongo.el should parse supported wire compression options."
-  (should (equal (mongo--params-compressors
+(ert-deftest mongodb-test-params-compressors-parse-supported ()
+  "Native mongodb.el should parse supported wire compression options."
+  (should (equal (mongodb--params-compressors
                   '(:url "mongodb://127.0.0.1/app?compressors=snappy"))
                  '("snappy")))
-  (should (equal (mongo--params-compressors
+  (should (equal (mongodb--params-compressors
                   '(:url "mongodb://127.0.0.1/app?compressors=zlib"))
                  '("zlib")))
-  (if (mongo--zstd-available-p)
-      (should (equal (mongo--params-compressors
+  (if (mongodb--zstd-available-p)
+      (should (equal (mongodb--params-compressors
                       '(:url "mongodb://127.0.0.1/app?compressors=zstd"))
                      '("zstd")))
     (let ((err (should-error
-                (mongo--params-compressors
+                (mongodb--params-compressors
                  '(:url "mongodb://127.0.0.1/app?compressors=zstd"))
-                :type 'mongo-error)))
+                :type 'mongodb-error)))
       (should (string-match-p "zstd" (error-message-string err)))))
-  (should (equal (mongo--params-compressors
+  (should (equal (mongodb--params-compressors
                   '(:compressors ("snappy" "zlib" "noop")))
                  '("snappy" "zlib" "noop"))))
 
 
 
-(ert-deftest mongo-test-params-zlib-compression-level ()
-  "Native mongo.el should validate standard zlibCompressionLevel options."
+(ert-deftest mongodb-test-params-zlib-compression-level ()
+  "Native mongodb.el should validate standard zlibCompressionLevel options."
   (should-not
-   (mongo--params-zlib-compression-level
+   (mongodb--params-zlib-compression-level
     '(:url "mongodb://127.0.0.1/app")))
-  (should (= (mongo--params-zlib-compression-level
+  (should (= (mongodb--params-zlib-compression-level
               '(:url
                 "mongodb://127.0.0.1/app?zlibCompressionLevel=0"))
              0))
-  (should (= (mongo--params-zlib-compression-level
+  (should (= (mongodb--params-zlib-compression-level
               '(:zlib-compression-level 6))
              6))
-  (should (equal (mongo--params-compressors
+  (should (equal (mongodb--params-compressors
                   '(:url
                     "mongodb://127.0.0.1/app?compressors=zlib&zlibCompressionLevel=0"))
                  '("zlib")))
   (dolist (level '("-2" "10"))
     (let ((err (should-error
-                (mongo--params-zlib-compression-level
+                (mongodb--params-zlib-compression-level
                  `(:url
                    ,(format
                      "mongodb://127.0.0.1/app?zlibCompressionLevel=%s"
                      level)))
-                :type 'mongo-error)))
+                :type 'mongodb-error)))
       (should (string-match-p "zlibCompressionLevel"
                               (error-message-string err)))))
   (let ((err (should-error
-              (mongo--params-compressors
+              (mongodb--params-compressors
                '(:url
                  "mongodb://127.0.0.1/app?compressors=zlib&zlibCompressionLevel=9"))
-              :type 'mongo-error)))
+              :type 'mongodb-error)))
     (should (string-match-p "zlibCompressionLevel"
                             (error-message-string err)))))
 
 
 
-(ert-deftest mongo-test-negotiated-compressors-preserve-request-order ()
+(ert-deftest mongodb-test-negotiated-compressors-preserve-request-order ()
   "Negotiated MongoDB compressors should preserve client preference order."
-  (should (equal (mongo--negotiated-compressors
+  (should (equal (mongodb--negotiated-compressors
                   '("snappy" "zstd" "zlib" "noop")
                   ["noop" "zlib" "zstd" "snappy"])
                  '("snappy" "zstd" "zlib" "noop")))
-  (should (equal (mongo--negotiated-compressors
+  (should (equal (mongodb--negotiated-compressors
                   '("zlib" "noop")
                   '("noop"))
                  '("noop")))
-  (should-not (mongo--negotiated-compressors
+  (should-not (mongodb--negotiated-compressors
                '("zlib")
                nil)))
 
 
 
-(ert-deftest mongo-test-params-compressors-reject-unavailable-zstd ()
-  "Native mongo.el should reject zstd compression when zstd is unavailable."
-  (let ((mongo-zstd-program nil))
+(ert-deftest mongodb-test-params-compressors-reject-unavailable-zstd ()
+  "Native mongodb.el should reject zstd compression when zstd is unavailable."
+  (let ((mongodb-zstd-program nil))
     (let ((err (should-error
-                (mongo--params-compressors
+                (mongodb--params-compressors
                  '(:url "mongodb://127.0.0.1/app?compressors=zstd"))
-                :type 'mongo-error)))
+                :type 'mongodb-error)))
       (should (string-match-p "zstd"
                               (error-message-string err))))))
 
 
 
-(ert-deftest mongo-test-params-compressors-reject-unknown ()
-  "Native mongo.el should reject unknown wire compressors."
+(ert-deftest mongodb-test-params-compressors-reject-unknown ()
+  "Native mongodb.el should reject unknown wire compressors."
   (let ((err (should-error
-              (mongo--params-compressors
+              (mongodb--params-compressors
                '(:url "mongodb://127.0.0.1/app?compressors=brotli"))
-              :type 'mongo-error)))
+              :type 'mongodb-error)))
     (should (string-match-p "brotli"
                             (error-message-string err)))))
 
 
 
-(ert-deftest mongo-test-params-read-preference-parses-uri ()
-  "Native mongo.el should parse URI readPreference options."
+(ert-deftest mongodb-test-params-read-preference-parses-uri ()
+  "Native mongodb.el should parse URI readPreference options."
   (let ((read-preference
-         (mongo--params-read-preference
+         (mongodb--params-read-preference
           '(:url
-            "mongodb://mongo-a/app?readPreference=secondaryPreferred&maxStalenessSeconds=120&readPreferenceTags=dc:ny,rack:1&readPreferenceTags="))))
-    (should (equal (mongo--read-preference-mode read-preference)
+            "mongodb://mongodb-a/app?readPreference=secondaryPreferred&maxStalenessSeconds=120&readPreferenceTags=dc:ny,rack:1&readPreferenceTags="))))
+    (should (equal (mongodb--read-preference-mode read-preference)
                    "secondaryPreferred"))
-    (should (= (mongo--read-preference-max-staleness-seconds
+    (should (= (mongodb--read-preference-max-staleness-seconds
                 read-preference)
                120))
-    (should (= (length (mongo--read-preference-tags read-preference))
+    (should (= (length (mongodb--read-preference-tags read-preference))
                2))
-    (should (equal (aref (mongo--read-preference-tags read-preference) 0)
+    (should (equal (aref (mongodb--read-preference-tags read-preference) 0)
                    '(("dc" . "ny")
                      ("rack" . "1"))))
-    (should (equal (aref (mongo--read-preference-tags read-preference) 1)
-                   (mongo-document nil)))))
+    (should (equal (aref (mongodb--read-preference-tags read-preference) 1)
+                   (mongodb-document nil)))))
 
 
 
-(ert-deftest mongo-test-params-read-preference-rejects-primary-tags ()
-  "Native mongo.el should reject illegal primary read preference tag options."
+(ert-deftest mongodb-test-params-read-preference-rejects-primary-tags ()
+  "Native mongodb.el should reject illegal primary read preference tag options."
   (let ((err (should-error
-              (mongo--params-read-preference
+              (mongodb--params-read-preference
                '(:read-preference primary
                  :read-preference-tags ((("dc" . "ny")))))
-              :type 'mongo-error)))
+              :type 'mongodb-error)))
     (should (string-match-p "readPreference=primary"
                             (error-message-string err)))))
 
 
 
-(ert-deftest mongo-test-params-read-preference-max-staleness-rules ()
-  "Native mongo.el should follow MongoDB maxStalenessSeconds rules."
+(ert-deftest mongodb-test-params-read-preference-max-staleness-rules ()
+  "Native mongodb.el should follow MongoDB maxStalenessSeconds rules."
   (let ((read-preference
-         (mongo--params-read-preference
+         (mongodb--params-read-preference
           '(:url
-            "mongodb://mongo-a/app?readPreference=secondary&maxStalenessSeconds=-1"))))
+            "mongodb://mongodb-a/app?readPreference=secondary&maxStalenessSeconds=-1"))))
     (should-not
-     (mongo--read-preference-max-staleness-seconds read-preference)))
+     (mongodb--read-preference-max-staleness-seconds read-preference)))
   (dolist (value '("0" "89" "-2"))
     (let ((err (should-error
-                (mongo--params-read-preference
+                (mongodb--params-read-preference
                  `(:url
-                   ,(format "mongodb://mongo-a/app?readPreference=secondary&maxStalenessSeconds=%s"
+                   ,(format "mongodb://mongodb-a/app?readPreference=secondary&maxStalenessSeconds=%s"
                             value)))
-                :type 'mongo-error)))
+                :type 'mongodb-error)))
       (should (string-match-p "maxStalenessSeconds"
                               (error-message-string err)))))
   (let ((err (should-error
-              (mongo--params-read-preference
+              (mongodb--params-read-preference
                '(:url
-                 "mongodb://mongo-a/app?readPreference=secondary&heartbeatFrequencyMS=95000&maxStalenessSeconds=90"))
-              :type 'mongo-error)))
+                 "mongodb://mongodb-a/app?readPreference=secondary&heartbeatFrequencyMS=95000&maxStalenessSeconds=90"))
+              :type 'mongodb-error)))
     (should (string-match-p "heartbeatFrequencyMS"
                             (error-message-string err)))))
 
 
 
-(ert-deftest mongo-test-params-read-write-concern-parse-uri ()
-  "Native mongo.el should parse readConcern/writeConcern URI options."
+(ert-deftest mongodb-test-params-read-write-concern-parse-uri ()
+  "Native mongodb.el should parse readConcern/writeConcern URI options."
   (let* ((params
           '(:url
-            "mongodb://mongo-a/app?readConcernLevel=majority&w=2&wTimeoutMS=5000&journal=true"))
-         (read-concern (mongo--params-read-concern params))
-         (write-concern (mongo--params-write-concern params)))
-    (should (equal (mongo--read-concern-document read-concern)
+            "mongodb://mongodb-a/app?readConcernLevel=majority&w=2&wTimeoutMS=5000&journal=true"))
+         (read-concern (mongodb--params-read-concern params))
+         (write-concern (mongodb--params-write-concern params)))
+    (should (equal (mongodb--read-concern-document read-concern)
                    '(("level" . "majority"))))
-    (should (equal (mongo--write-concern-document write-concern)
+    (should (equal (mongodb--write-concern-document write-concern)
                    '(("w" . 2)
                      ("wtimeout" . 5000)
                      ("j" . t)))))
-  (should (equal (mongo--write-concern-document
-                  (mongo--params-write-concern '(:journal nil)))
+  (should (equal (mongodb--write-concern-document
+                  (mongodb--params-write-concern '(:journal nil)))
                  '(("j" . :false)))))
 
 
 
-(ert-deftest mongo-test-params-write-concern-rejects-negative-timeout ()
-  "Native mongo.el should reject negative writeConcern timeouts."
+(ert-deftest mongodb-test-params-write-concern-rejects-negative-timeout ()
+  "Native mongodb.el should reject negative writeConcern timeouts."
   (let ((err (should-error
-              (mongo--params-write-concern '(:w-timeout-ms -1))
-              :type 'mongo-error)))
+              (mongodb--params-write-concern '(:w-timeout-ms -1))
+              :type 'mongodb-error)))
     (should (string-match-p "wTimeoutMS"
                             (error-message-string err)))))
 
 
 
-(ert-deftest mongo-test-params-write-concern-rejects-invalid-journal ()
-  "Native mongo.el should reject invalid journal booleans."
+(ert-deftest mongodb-test-params-write-concern-rejects-invalid-journal ()
+  "Native mongodb.el should reject invalid journal booleans."
   (let ((err (should-error
-              (mongo--params-write-concern
-               '(:url "mongodb://mongo-a/app?journal=maybe"))
-              :type 'mongo-error)))
+              (mongodb--params-write-concern
+               '(:url "mongodb://mongodb-a/app?journal=maybe"))
+              :type 'mongodb-error)))
     (should (string-match-p "journal"
                             (error-message-string err)))))
 
 
 
-(ert-deftest mongo-test-params-server-api-requires-version ()
+(ert-deftest mongodb-test-params-server-api-requires-version ()
   "Stable API strict/deprecation flags should require an API version."
   (let ((err (should-error
-              (mongo--params-server-api '(:api-strict t))
-              :type 'mongo-error)))
+              (mongodb--params-server-api '(:api-strict t))
+              :type 'mongodb-error)))
     (should (string-match-p "Stable API requires"
                             (error-message-string err)))))
 
 
 
-(ert-deftest mongo-test-params-load-balanced-validated ()
-  "Native mongo.el should validate loadBalanced URI constraints."
-  (should (mongo--params-load-balanced-p
+(ert-deftest mongodb-test-params-load-balanced-validated ()
+  "Native mongodb.el should validate loadBalanced URI constraints."
+  (should (mongodb--params-load-balanced-p
            '(:url "mongodb://lb.example.test/app?loadBalanced=true")))
   (dolist (case '(("mongodb://a.example.test,b.example.test/app?loadBalanced=true"
                    . "exactly one host")
@@ -4856,14 +4856,14 @@
                   ("mongodb://lb.example.test/app?loadBalanced=true&srvMaxHosts=1"
                    . "srvMaxHosts")))
     (let ((err (should-error
-                (mongo-connect `(:url ,(car case)))
-                :type 'mongo-error)))
+                (mongodb-connect `(:url ,(car case)))
+                :type 'mongodb-error)))
       (should (string-match-p (cdr case)
                               (error-message-string err))))))
 
 
 
-(ert-deftest mongo-test-params-load-balanced-srv-conflict-preflights ()
+(ert-deftest mongodb-test-params-load-balanced-srv-conflict-preflights ()
   "loadBalanced SRV conflicts that need no DNS should fail before DNS lookup."
   (let (dns-called)
     (cl-letf (((symbol-function 'dns-query)
@@ -4871,20 +4871,20 @@
                  (setq dns-called t)
                  (ert-fail "loadBalanced/srvMaxHosts conflict should not query DNS"))))
       (let ((err (should-error
-                  (mongo-connect
+                  (mongodb-connect
                    '(:url
                      "mongodb+srv://cluster.example.com/app?loadBalanced=true&srvMaxHosts=1"))
-                  :type 'mongo-error)))
+                  :type 'mongodb-error)))
         (should (string-match-p "srvMaxHosts"
                                 (error-message-string err)))
         (should-not dns-called)))))
 
 
 
-(ert-deftest mongo-test-params-endpoints-parse-srv-uri ()
-  "Native mongo.el should resolve MongoDB SRV seed lists and TXT options."
+(ert-deftest mongodb-test-params-endpoints-parse-srv-uri ()
+  "Native mongodb.el should resolve MongoDB SRV seed lists and TXT options."
   (let ((txt "authSource=admin&replicaSet=rs0")
-        (mongo--srv-resolution-cache nil))
+        (mongodb--srv-resolution-cache nil))
     (cl-letf (((symbol-function 'dns-query)
                (lambda (name type &optional full _reverse)
                  (should full)
@@ -4916,20 +4916,20 @@
                    '((response-code name-error)
                      (answers nil)))))))
       (let* ((params '(:url "mongodb+srv://user:secret@cluster.example.com/app"))
-             (credential (mongo--params-credential params))
-             (endpoints (mongo--params-endpoints params)))
+             (credential (mongodb--params-credential params))
+             (endpoints (mongodb--params-endpoints params)))
         (should (equal endpoints
                        '(("db1.example.com" 27017 "app")
                          ("db2.example.com" 27018 "app"))))
-        (should (equal (mongo--credential-source credential) "admin"))
-        (should (equal (mongo--params-replica-set-name params) "rs0"))
-        (should (mongo--params-tls-enabled-p params))))))
+        (should (equal (mongodb--credential-source credential) "admin"))
+        (should (equal (mongodb--params-replica-set-name params) "rs0"))
+        (should (mongodb--params-tls-enabled-p params))))))
 
 
 
-(ert-deftest mongo-test-params-srv-uri-service-and-max-hosts ()
-  "Native mongo.el should honor srvServiceName and srvMaxHosts."
-  (let ((mongo--srv-resolution-cache nil))
+(ert-deftest mongodb-test-params-srv-uri-service-and-max-hosts ()
+  "Native mongodb.el should honor srvServiceName and srvMaxHosts."
+  (let ((mongodb--srv-resolution-cache nil))
     (cl-letf (((symbol-function 'dns-query)
                (lambda (name type &optional _full _reverse)
                  (cond
@@ -4955,30 +4955,30 @@
       (let* ((params
               '(:url
                 "mongodb+srv://cluster.example.com/app?srvServiceName=custom&srvMaxHosts=1"))
-             (endpoints (mongo--params-endpoints params)))
+             (endpoints (mongodb--params-endpoints params)))
         (should (equal endpoints
                        '(("db1.example.com" 27017 "app"))))
-        (should (equal (mongo--params-srv-service-name params) "custom"))
-        (should (= (mongo--params-srv-max-hosts params) 1))))))
+        (should (equal (mongodb--params-srv-service-name params) "custom"))
+        (should (= (mongodb--params-srv-max-hosts params) 1))))))
 
 
 
-(ert-deftest mongo-test-params-srv-uri-validates-service-and-max-hosts ()
-  "Native mongo.el should validate SRV-specific connection options."
-  (should-not (mongo--params-srv-max-hosts
+(ert-deftest mongodb-test-params-srv-uri-validates-service-and-max-hosts ()
+  "Native mongodb.el should validate SRV-specific connection options."
+  (should-not (mongodb--params-srv-max-hosts
                '(:url "mongodb+srv://cluster.example.com/app?srvMaxHosts=0")))
   (should-error
-   (mongo--params-srv-max-hosts
+   (mongodb--params-srv-max-hosts
     '(:url "mongodb+srv://cluster.example.com/app?srvMaxHosts=-1"))
-   :type 'mongo-error)
+   :type 'mongodb-error)
   (should-error
-   (mongo--params-srv-service-name
+   (mongodb--params-srv-service-name
     '(:url "mongodb+srv://cluster.example.com/app?srvServiceName=bad.name"))
-   :type 'mongo-error))
+   :type 'mongodb-error))
 
 
 
-(ert-deftest mongo-test-params-srv-max-hosts-rejects-replica-set ()
+(ert-deftest mongodb-test-params-srv-max-hosts-rejects-replica-set ()
   "srvMaxHosts should not be used with replicaSet, including SRV TXT records."
   (let (dns-called)
     (cl-letf (((symbol-function 'dns-query)
@@ -4986,15 +4986,15 @@
                  (setq dns-called t)
                  (ert-fail "raw srvMaxHosts/replicaSet conflict should not query DNS"))))
       (let ((err (should-error
-                  (mongo-connect
+                  (mongodb-connect
                    '(:url
                      "mongodb+srv://cluster.example.com/app?srvMaxHosts=1&replicaSet=rs0"))
-                  :type 'mongo-error)))
+                  :type 'mongodb-error)))
         (should (string-match-p "replicaSet"
                                 (error-message-string err)))
         (should-not dns-called))))
   (let ((txt "replicaSet=rs0")
-        (mongo--srv-resolution-cache nil))
+        (mongodb--srv-resolution-cache nil))
     (cl-letf (((symbol-function 'dns-query)
                (lambda (name type &optional _full _reverse)
                  (cond
@@ -5019,18 +5019,18 @@
                    '((response-code name-error)
                      (answers nil)))))))
       (let ((err (should-error
-                  (mongo-connect
+                  (mongodb-connect
                    '(:url
                      "mongodb+srv://cluster.example.com/app?srvMaxHosts=1"))
-                  :type 'mongo-error)))
+                  :type 'mongodb-error)))
         (should (string-match-p "replicaSet"
                                 (error-message-string err)))))))
 
 
 
-(ert-deftest mongo-test-params-srv-uri-tls-can-be-disabled ()
-  "Native mongo.el should allow mongodb+srv TLS to be disabled explicitly."
-  (let ((mongo--srv-resolution-cache nil))
+(ert-deftest mongodb-test-params-srv-uri-tls-can-be-disabled ()
+  "Native mongodb.el should allow mongodb+srv TLS to be disabled explicitly."
+  (let ((mongodb--srv-resolution-cache nil))
     (cl-letf (((symbol-function 'dns-query)
                (lambda (name type &optional _full _reverse)
                  (cond
@@ -5048,14 +5048,14 @@
                    '((response-code no-error)
                      (answers nil)))))))
       (should-not
-       (mongo--params-tls-enabled-p
+       (mongodb--params-tls-enabled-p
         '(:url "mongodb+srv://cluster.example.com/app?tls=false"))))))
 
 
 
-(ert-deftest mongo-test-params-srv-uri-rejects-invalid-records ()
-  "Native mongo.el should reject invalid MongoDB SRV DNS responses."
-  (let ((mongo--srv-resolution-cache nil))
+(ert-deftest mongodb-test-params-srv-uri-rejects-invalid-records ()
+  "Native mongodb.el should reject invalid MongoDB SRV DNS responses."
+  (let ((mongodb--srv-resolution-cache nil))
     (cl-letf (((symbol-function 'dns-query)
                (lambda (name type &optional _full _reverse)
                  (cond
@@ -5073,47 +5073,47 @@
                    '((response-code no-error)
                      (answers nil)))))))
       (let ((err (should-error
-                  (mongo--params-endpoints
+                  (mongodb--params-endpoints
                    '(:url "mongodb+srv://cluster.example.com/app"))
-                  :type 'mongo-error)))
+                  :type 'mongodb-error)))
         (should (string-match-p "outside parent domain"
                                 (error-message-string err)))))))
 
 
 
-(ert-deftest mongo-test-params-srv-uri-rejects-port ()
-  "Native mongo.el should reject mongodb+srv URLs with an explicit port."
+(ert-deftest mongodb-test-params-srv-uri-rejects-port ()
+  "Native mongodb.el should reject mongodb+srv URLs with an explicit port."
   (let ((err (should-error
-              (mongo--params-endpoints
+              (mongodb--params-endpoints
                '(:url "mongodb+srv://cluster.example.com:27017/app"))
-              :type 'mongo-error)))
+              :type 'mongodb-error)))
     (should (string-match-p "no port"
                             (error-message-string err)))))
 
 
 
-(ert-deftest mongo-test-params-tls-from-url ()
-  "Native mongo.el should treat MongoDB TLS URI options as TLS settings."
+(ert-deftest mongodb-test-params-tls-from-url ()
+  "Native mongodb.el should treat MongoDB TLS URI options as TLS settings."
   (let* ((params '(:url "mongodb://db.example.test/app?tls=true&tlsAllowInvalidHostnames=true&tlsCAFile=/tmp/ca.pem"))
-         (spec (mongo--params-tls-spec params "db.example.test")))
-    (should (mongo--params-tls-enabled-p params))
+         (spec (mongodb--params-tls-spec params "db.example.test")))
+    (should (mongodb--params-tls-enabled-p params))
     (should (equal (plist-get spec :hostname) "db.example.test"))
     (should (equal (plist-get spec :trustfiles) '("/tmp/ca.pem")))
     (should (equal (plist-get spec :verify-error) '(:trustfiles)))
     (should-not (plist-get spec :verify-hostname-error)))
   (let* ((params '(:url "mongodb://db.example.test/app?tls=true&tlsInsecure=true&tlsCAFile=/tmp/ca.pem"))
-         (spec (mongo--params-tls-spec params "db.example.test")))
+         (spec (mongodb--params-tls-spec params "db.example.test")))
     (should (equal (plist-get spec :trustfiles) '("/tmp/ca.pem")))
     (should-not (plist-get spec :verify-error))
     (should-not (plist-get spec :verify-hostname-error)))
-  (should (mongo--params-tls-enabled-p
+  (should (mongodb--params-tls-enabled-p
            '(:url "mongodb://db.example.test/app?ssl=true"))))
 
 
 
-(ert-deftest mongo-test-params-tls-verify-can-be-disabled ()
+(ert-deftest mongodb-test-params-tls-verify-can-be-disabled ()
   "Native MongoDB TLS should allow explicit verification opt-out for local certs."
-  (let ((spec (mongo--params-tls-spec
+  (let ((spec (mongodb--params-tls-spec
                '(:host "127.0.0.1" :tls t :tls-verify nil)
                "127.0.0.1")))
     (should (equal (plist-get spec :hostname) "127.0.0.1"))
@@ -5122,25 +5122,25 @@
 
 
 
-(ert-deftest mongo-test-connect-rejects-direct-multiple-seeds ()
-  "Native mongo.el should not silently ignore seeds with directConnection=true."
+(ert-deftest mongodb-test-connect-rejects-direct-multiple-seeds ()
+  "Native mongodb.el should not silently ignore seeds with directConnection=true."
   (let ((err (should-error
-              (mongo-connect
-               '(:url "mongodb://mongo-a,mongo-b/app?directConnection=true"))
-              :type 'mongo-error)))
+              (mongodb-connect
+               '(:url "mongodb://mongodb-a,mongodb-b/app?directConnection=true"))
+              :type 'mongodb-error)))
     (should (string-match-p "exactly one host"
                             (error-message-string err)))))
 
 
 
-(ert-deftest mongo-test-connect-selects-replica-primary ()
-  "Native mongo.el should follow replica-set hello data to the writable primary."
+(ert-deftest mongodb-test-connect-selects-replica-primary ()
+  "Native mongodb.el should follow replica-set hello data to the writable primary."
   (let (calls disconnected authenticated)
-    (cl-letf (((symbol-function 'mongo--connect-endpoint)
+    (cl-letf (((symbol-function 'mongodb--connect-endpoint)
                (lambda (_params host port database credential authenticate)
                  (push (list host port database
                              (and credential
-                                  (mongo--credential-username credential))
+                                  (mongodb--credential-username credential))
                              authenticate)
                        calls)
                  (pcase host
@@ -5161,15 +5161,15 @@
                             ("isWritablePrimary" . t))))
                    (_
                     (error "Unexpected seed %s" host)))))
-              ((symbol-function 'mongo-disconnect)
+              ((symbol-function 'mongodb-disconnect)
                (lambda (conn)
                  (push conn disconnected)))
-              ((symbol-function 'mongo--authenticate)
+              ((symbol-function 'mongodb--authenticate)
                (lambda (conn credential _hello)
                  (push (list conn
-                             (mongo--credential-username credential))
+                             (mongodb--credential-username credential))
                        authenticated))))
-      (should (eq (mongo-connect
+      (should (eq (mongodb-connect
                    '(:url "mongodb://user:secret@seed-a/app?replicaSet=rs0"))
                   'conn-b)))
     (should (equal (nreverse calls)
@@ -5180,10 +5180,10 @@
 
 
 
-(ert-deftest mongo-test-connect-skips-replica-seed-alias-by-me ()
+(ert-deftest mongodb-test-connect-skips-replica-seed-alias-by-me ()
   "Replica discovery should follow hosts when a seed's me is canonical."
   (let (calls disconnected)
-    (cl-letf (((symbol-function 'mongo--connect-endpoint)
+    (cl-letf (((symbol-function 'mongodb--connect-endpoint)
                (lambda (_params host port database _credential authenticate)
                  (push (list host port database authenticate) calls)
                  (pcase host
@@ -5205,10 +5205,10 @@
                             ("hosts" . ("canonical:27017")))))
                    (_
                     (error "Unexpected seed %s" host)))))
-              ((symbol-function 'mongo-disconnect)
+              ((symbol-function 'mongodb-disconnect)
                (lambda (conn)
                  (push conn disconnected))))
-      (should (eq (mongo-connect
+      (should (eq (mongodb-connect
                    '(:url
                      "mongodb://alias:27021/app?replicaSet=rs0"))
                   'conn-canonical)))
@@ -5219,10 +5219,10 @@
 
 
 
-(ert-deftest mongo-test-connect-falls-back-to-reachable-seed-alias ()
+(ert-deftest mongodb-test-connect-falls-back-to-reachable-seed-alias ()
   "Replica discovery should retain a reachable seed alias if canonical hosts fail."
   (let (calls disconnected)
-    (cl-letf (((symbol-function 'mongo--connect-endpoint)
+    (cl-letf (((symbol-function 'mongodb--connect-endpoint)
                (lambda (_params host port database _credential authenticate)
                  (push (list host port database authenticate) calls)
                  (pcase host
@@ -5235,13 +5235,13 @@
                             ("me" . "canonical:27017")
                             ("hosts" . ("canonical:27017")))))
                    ("canonical"
-                    (signal 'mongo-error (list "Connection refused")))
+                    (signal 'mongodb-error (list "Connection refused")))
                    (_
                     (error "Unexpected seed %s" host)))))
-              ((symbol-function 'mongo-disconnect)
+              ((symbol-function 'mongodb-disconnect)
                (lambda (conn)
                  (push conn disconnected))))
-      (should (eq (mongo-connect
+      (should (eq (mongodb-connect
                    '(:url
                      "mongodb://alias:27021/app?replicaSet=rs0"))
                   'conn-alias)))
@@ -5252,10 +5252,10 @@
 
 
 
-(ert-deftest mongo-test-connect-rejects-replica-seed-alias-without-hosts ()
+(ert-deftest mongodb-test-connect-rejects-replica-seed-alias-without-hosts ()
   "Replica discovery should reject a seed whose me cannot be followed."
   (let (disconnected)
-    (cl-letf (((symbol-function 'mongo--connect-endpoint)
+    (cl-letf (((symbol-function 'mongodb--connect-endpoint)
                (lambda (_params host port database _credential authenticate)
                  (should (equal (list host port database authenticate)
                                 '("alias" 27021 "app" nil)))
@@ -5266,24 +5266,24 @@
                          ("isWritablePrimary" . t)
                          ("me" . "canonical:27017")
                          ("hosts" . ("alias:27021"))))))
-              ((symbol-function 'mongo-disconnect)
+              ((symbol-function 'mongodb-disconnect)
                (lambda (conn)
                  (push conn disconnected))))
       (let ((err (should-error
-                  (mongo-connect
+                  (mongodb-connect
                    '(:url
                      "mongodb://alias:27021/app?replicaSet=rs0"))
-                  :type 'mongo-error)))
+                  :type 'mongodb-error)))
         (should (string-match-p "canonical replica-set member canonical:27017"
                                 (error-message-string err)))))
     (should (equal disconnected '(conn-alias)))))
 
 
 
-(ert-deftest mongo-test-connect-hidden-seed-discovers-primary ()
+(ert-deftest mongodb-test-connect-hidden-seed-discovers-primary ()
   "Replica discovery should use hidden members for hosts, not selection."
   (let (calls disconnected)
-    (cl-letf (((symbol-function 'mongo--connect-endpoint)
+    (cl-letf (((symbol-function 'mongodb--connect-endpoint)
                (lambda (_params host port database _credential authenticate)
                  (push (list host port database authenticate) calls)
                  (pcase host
@@ -5304,10 +5304,10 @@
                             ("isWritablePrimary" . t))))
                    (_
                     (error "Unexpected seed %s" host)))))
-              ((symbol-function 'mongo-disconnect)
+              ((symbol-function 'mongodb-disconnect)
                (lambda (conn)
                  (push conn disconnected))))
-      (should (eq (mongo-connect
+      (should (eq (mongodb-connect
                    '(:url "mongodb://hidden:27018/app?replicaSet=rs0"))
                   'conn-primary)))
     (should (equal (nreverse calls)
@@ -5317,10 +5317,10 @@
 
 
 
-(ert-deftest mongo-test-connect-arbiter-can-discover-primary ()
+(ert-deftest mongodb-test-connect-arbiter-can-discover-primary ()
   "Replica discovery should queue arbiters because they can reveal members."
   (let (calls disconnected)
-    (cl-letf (((symbol-function 'mongo--connect-endpoint)
+    (cl-letf (((symbol-function 'mongodb--connect-endpoint)
                (lambda (_params host port database _credential authenticate)
                  (push (list host port database authenticate) calls)
                  (pcase host
@@ -5349,10 +5349,10 @@
                             ("isWritablePrimary" . t))))
                    (_
                     (error "Unexpected seed %s" host)))))
-              ((symbol-function 'mongo-disconnect)
+              ((symbol-function 'mongodb-disconnect)
                (lambda (conn)
                  (push conn disconnected))))
-      (should (eq (mongo-connect
+      (should (eq (mongodb-connect
                    '(:url "mongodb://secondary:27018/app?replicaSet=rs0"))
                   'conn-primary)))
     (should (equal (nreverse calls)
@@ -5363,14 +5363,14 @@
 
 
 
-(ert-deftest mongo-test-connect-selects-replica-secondary-for-read-preference ()
-  "Native mongo.el should prefer a secondary when readPreference allows it."
+(ert-deftest mongodb-test-connect-selects-replica-secondary-for-read-preference ()
+  "Native mongodb.el should prefer a secondary when readPreference allows it."
   (let (calls disconnected authenticated)
-    (cl-letf (((symbol-function 'mongo--connect-endpoint)
+    (cl-letf (((symbol-function 'mongodb--connect-endpoint)
                (lambda (_params host port database credential authenticate)
                  (push (list host port database
                              (and credential
-                                  (mongo--credential-username credential))
+                                  (mongodb--credential-username credential))
                              authenticate)
                        calls)
                  (pcase host
@@ -5390,15 +5390,15 @@
                             ("secondary" . t))))
                    (_
                     (error "Unexpected seed %s" host)))))
-              ((symbol-function 'mongo-disconnect)
+              ((symbol-function 'mongodb-disconnect)
                (lambda (conn)
                  (push conn disconnected)))
-              ((symbol-function 'mongo--authenticate)
+              ((symbol-function 'mongodb--authenticate)
                (lambda (conn credential _hello)
                  (push (list conn
-                             (mongo--credential-username credential))
+                             (mongodb--credential-username credential))
                        authenticated))))
-      (should (eq (mongo-connect
+      (should (eq (mongodb-connect
                    '(:url
                      "mongodb://user:secret@seed-a/app?replicaSet=rs0&readPreference=secondaryPreferred"))
                   'conn-b)))
@@ -5410,10 +5410,10 @@
 
 
 
-(ert-deftest mongo-test-connect-server-selection-try-once-default ()
+(ert-deftest mongodb-test-connect-server-selection-try-once-default ()
   "Replica discovery should scan once by default when no server matches."
   (let (calls disconnected slept)
-    (cl-letf (((symbol-function 'mongo--connect-endpoint)
+    (cl-letf (((symbol-function 'mongodb--connect-endpoint)
                (lambda (_params host port database _credential _authenticate)
                  (push (list host port database) calls)
                  (cons 'conn-secondary
@@ -5422,19 +5422,19 @@
                          ("setName" . "rs0")
                          ("secondary" . t)
                          ("hosts" . ("seed:27017"))))))
-              ((symbol-function 'mongo-disconnect)
+              ((symbol-function 'mongodb-disconnect)
                (lambda (conn)
                  (push conn disconnected)))
               ((symbol-function 'sleep-for)
                (lambda (&rest _args)
                  (setq slept t))))
       (let ((err (should-error
-                  (mongo--connect-replica-server
+                  (mongodb--connect-replica-server
                    '(:replica-set "rs0"
                      :server-selection-timeout 1)
                    '(("seed" 27017 "app"))
                    nil)
-                  :type 'mongo-error)))
+                  :type 'mongodb-error)))
         (should (string-match-p "readPreference=primary"
                                 (error-message-string err)))))
     (should (equal (nreverse calls)
@@ -5444,11 +5444,11 @@
 
 
 
-(ert-deftest mongo-test-connect-server-selection-try-once-false-rescans ()
+(ert-deftest mongodb-test-connect-server-selection-try-once-false-rescans ()
   "serverSelectionTryOnce=false should rescan known endpoints before timeout."
   (let ((attempt 0)
         calls disconnected slept)
-    (cl-letf (((symbol-function 'mongo--connect-endpoint)
+    (cl-letf (((symbol-function 'mongodb--connect-endpoint)
                (lambda (_params host port database _credential _authenticate)
                  (cl-incf attempt)
                  (push (list host port database) calls)
@@ -5464,13 +5464,13 @@
                            ("maxWireVersion" . 17)
                            ("setName" . "rs0")
                            ("isWritablePrimary" . t))))))
-              ((symbol-function 'mongo-disconnect)
+              ((symbol-function 'mongodb-disconnect)
                (lambda (conn)
                  (push conn disconnected)))
               ((symbol-function 'sleep-for)
                (lambda (&rest _args)
                  (setq slept t))))
-      (should (eq (mongo--connect-replica-server
+      (should (eq (mongodb--connect-replica-server
                    '(:replica-set "rs0"
                      :server-selection-try-once nil
                      :server-selection-timeout 1)
@@ -5485,13 +5485,13 @@
 
 
 
-(ert-deftest mongo-test-connect-selects-replica-secondary-by-latency-window ()
+(ert-deftest mongodb-test-connect-selects-replica-secondary-by-latency-window ()
   "Replica discovery should apply localThresholdMS to matching secondaries."
   (let (calls disconnected fast-conn)
-    (cl-letf (((symbol-function 'mongo--connect-endpoint)
+    (cl-letf (((symbol-function 'mongodb--connect-endpoint)
                (lambda (_params host port database _credential _authenticate)
                  (push (list host port database) calls)
-                 (let* ((conn (make-mongo-conn
+                 (let* ((conn (make-mongodb-conn
                                :host host
                                :port port
                                :database database))
@@ -5501,14 +5501,14 @@
                                  ("secondary" . t)
                                  ("hosts" . ("slow:27017"
                                              "fast:27018"))))
-                        (address (mongo--endpoint-key host port))
+                        (address (mongodb--endpoint-key host port))
                         (rtt (pcase host
                                ("fast" 0.003)
                                ("slow" 0.030)))
-                        (server (mongo--server-description-from-hello
+                        (server (mongodb--server-description-from-hello
                                  address hello nil rtt)))
-                   (setf (mongo-conn-topology conn)
-                         (make-mongo-topology-description
+                   (setf (mongodb-conn-topology conn)
+                         (make-mongodb-topology-description
                           :type 'replica-set-no-primary
                           :set-name "rs0"
                           :servers `((,address . ,server))
@@ -5516,11 +5516,11 @@
                    (when (equal host "fast")
                      (setq fast-conn conn))
                    (cons conn hello))))
-              ((symbol-function 'mongo-disconnect)
+              ((symbol-function 'mongodb-disconnect)
                (lambda (conn)
-                 (push (mongo-conn-host conn) disconnected))))
+                 (push (mongodb-conn-host conn) disconnected))))
       (should
-       (eq (mongo--connect-replica-server
+       (eq (mongodb--connect-replica-server
             '(:replica-set "rs0"
               :read-preference secondary
               :local-threshold 0.005
@@ -5536,9 +5536,9 @@
 
 
 
-(ert-deftest mongo-test-topology-description-from-primary-hello ()
+(ert-deftest mongodb-test-topology-description-from-primary-hello ()
   "MongoDB hello data should produce a lightweight SDAM topology description."
-  (let* ((conn (make-mongo-conn :host "seed-b"
+  (let* ((conn (make-mongodb-conn :host "seed-b"
                                 :port 27018
                                 :database "app"))
          (hello '(("ok" . 1)
@@ -5554,34 +5554,34 @@
                   ("hosts" . ("seed-a:27017" "seed-b:27018"))
                   ("passives" . ("seed-c:27017"))
                   ("arbiters" . ("seed-d:27017"))))
-         (topology (mongo--topology-description-from-hello conn hello))
-         (servers (mongo-topology-description-servers topology))
+         (topology (mongodb--topology-description-from-hello conn hello))
+         (servers (mongodb-topology-description-servers topology))
          (primary (cdr (assoc "seed-b:27018" servers)))
          (seed-a (cdr (assoc "seed-a:27017" servers))))
-    (should (eq (mongo-topology-description-type topology)
+    (should (eq (mongodb-topology-description-type topology)
                 'replica-set-with-primary))
-    (should (equal (mongo-topology-description-set-name topology) "rs0"))
-    (should (equal (mongo-topology-description-primary-address topology)
+    (should (equal (mongodb-topology-description-set-name topology) "rs0"))
+    (should (equal (mongodb-topology-description-primary-address topology)
                    "seed-b:27018"))
-    (should (= (mongo-topology-description-logical-session-timeout-minutes
+    (should (= (mongodb-topology-description-logical-session-timeout-minutes
                 topology)
                30))
-    (should (mongo-topology-description-compatible topology))
-    (should (eq (mongo-server-description-type primary) 'rs-primary))
-    (should (equal (mongo-server-description-tags primary)
+    (should (mongodb-topology-description-compatible topology))
+    (should (eq (mongodb-server-description-type primary) 'rs-primary))
+    (should (equal (mongodb-server-description-tags primary)
                    '(("dc" . "ny")
                      ("rack" . "1"))))
-    (should (= (mongo-server-description-last-write-date primary)
+    (should (= (mongodb-server-description-last-write-date primary)
                1704164645.0))
-    (should (eq (mongo-server-description-type seed-a) 'unknown))
+    (should (eq (mongodb-server-description-type seed-a) 'unknown))
     (should (assoc "seed-c:27017" servers))
     (should (assoc "seed-d:27017" servers))))
 
 
-(ert-deftest mongo-test-topology-description-readable-writable-server-p ()
+(ert-deftest mongodb-test-topology-description-readable-writable-server-p ()
   "Topology availability predicates should follow SDAM readability rules."
   (let* ((primary
-          (make-mongo-server-description
+          (make-mongodb-server-description
            :address "primary:27017"
            :type 'rs-primary
            :tags '(("dc" . "east"))
@@ -5589,7 +5589,7 @@
            :last-write-date 1000
            :last-update-time 1000))
          (secondary
-          (make-mongo-server-description
+          (make-mongodb-server-description
            :address "secondary:27017"
            :type 'rs-secondary
            :tags '(("dc" . "west"))
@@ -5597,94 +5597,94 @@
            :last-write-date 1000
            :last-update-time 1000))
          (mongos
-          (make-mongo-server-description
+          (make-mongodb-server-description
            :address "mongos:27017"
            :type 'mongos))
          (unknown
-          (mongo--unknown-server-description "unknown:27017"))
+          (mongodb--unknown-server-description "unknown:27017"))
          (rs-with-primary
-          (make-mongo-topology-description
+          (make-mongodb-topology-description
            :type 'replica-set-with-primary
            :primary-address "primary:27017"
            :servers `(("primary:27017" . ,primary)
                       ("secondary:27017" . ,secondary))))
          (rs-no-primary
-          (make-mongo-topology-description
+          (make-mongodb-topology-description
            :type 'replica-set-no-primary
            :servers `(("secondary:27017" . ,secondary)
                       ("unknown:27017" . ,unknown))))
          (single-secondary
-          (make-mongo-topology-description
+          (make-mongodb-topology-description
            :type 'single
            :servers `(("secondary:27017" . ,secondary))))
          (single-unknown
-          (make-mongo-topology-description
+          (make-mongodb-topology-description
            :type 'single
            :servers `(("unknown:27017" . ,unknown))))
          (sharded
-          (make-mongo-topology-description
+          (make-mongodb-topology-description
            :type 'sharded
            :servers `(("mongos:27017" . ,mongos))))
          (unknown-topology
-          (make-mongo-topology-description
+          (make-mongodb-topology-description
            :type 'unknown
            :servers `(("unknown:27017" . ,unknown))))
          (load-balanced
-          (make-mongo-topology-description
+          (make-mongodb-topology-description
            :type 'load-balanced))
          (west-secondary
-          (mongo--params-read-preference
+          (mongodb--params-read-preference
            '(:read-preference secondary
              :read-preference-tags ((("dc" . "west"))))))
          (east-secondary
-          (mongo--params-read-preference
+          (mongodb--params-read-preference
            '(:read-preference secondary
              :read-preference-tags ((("dc" . "east")))))))
-    (should (mongo-topology-description-has-readable-server-p
+    (should (mongodb-topology-description-has-readable-server-p
              rs-with-primary))
-    (should (mongo-topology-description-has-writable-server-p
+    (should (mongodb-topology-description-has-writable-server-p
              rs-with-primary))
-    (should-not (mongo-topology-description-has-readable-server-p
+    (should-not (mongodb-topology-description-has-readable-server-p
                  rs-no-primary))
-    (should (mongo-topology-description-has-readable-server-p
+    (should (mongodb-topology-description-has-readable-server-p
              rs-no-primary "secondary"))
-    (should (mongo-topology-description-has-readable-server-p
+    (should (mongodb-topology-description-has-readable-server-p
              rs-no-primary west-secondary))
-    (should-not (mongo-topology-description-has-readable-server-p
+    (should-not (mongodb-topology-description-has-readable-server-p
                  rs-no-primary east-secondary))
-    (should-not (mongo-topology-description-has-writable-server-p
+    (should-not (mongodb-topology-description-has-writable-server-p
                  rs-no-primary))
-    (should (mongo-topology-description-has-readable-server-p
+    (should (mongodb-topology-description-has-readable-server-p
              single-secondary))
-    (should (mongo-topology-description-has-writable-server-p
+    (should (mongodb-topology-description-has-writable-server-p
              single-secondary))
-    (should-not (mongo-topology-description-has-readable-server-p
+    (should-not (mongodb-topology-description-has-readable-server-p
                  single-unknown))
-    (should-not (mongo-topology-description-has-writable-server-p
+    (should-not (mongodb-topology-description-has-writable-server-p
                  single-unknown))
-    (should (mongo-topology-description-has-readable-server-p
+    (should (mongodb-topology-description-has-readable-server-p
              sharded))
-    (should (mongo-topology-description-has-writable-server-p
+    (should (mongodb-topology-description-has-writable-server-p
              sharded))
-    (should-not (mongo-topology-description-has-readable-server-p
+    (should-not (mongodb-topology-description-has-readable-server-p
                  unknown-topology))
-    (should-not (mongo-topology-description-has-writable-server-p
+    (should-not (mongodb-topology-description-has-writable-server-p
                  unknown-topology))
-    (should (mongo-topology-description-has-readable-server-p
+    (should (mongodb-topology-description-has-readable-server-p
              load-balanced))
-    (should (mongo-topology-description-has-writable-server-p
+    (should (mongodb-topology-description-has-writable-server-p
              load-balanced))))
 
 
 
-(ert-deftest mongo-test-topology-hidden-secondary-is-rs-other ()
+(ert-deftest mongodb-test-topology-hidden-secondary-is-rs-other ()
   "Hidden replica-set members should be discoverable but not readable."
-  (let* ((conn (make-mongo-conn
+  (let* ((conn (make-mongodb-conn
                 :host "hidden"
                 :port 27018
                 :database "app"
                 :read-preference
-                (mongo--params-read-preference '(:read-preference secondary))))
+                (mongodb--params-read-preference '(:read-preference secondary))))
          (hello '(("ok" . 1)
                   ("maxWireVersion" . 17)
                   ("setName" . "rs0")
@@ -5692,100 +5692,100 @@
                   ("hidden" . t)
                   ("hosts" . ("primary:27017"
                               "hidden:27018"))))
-         (topology (mongo--topology-description-from-hello conn hello))
-         (servers (mongo-topology-description-servers topology))
+         (topology (mongodb--topology-description-from-hello conn hello))
+         (servers (mongodb-topology-description-servers topology))
          (server (cdr (assoc "hidden:27018" servers))))
-    (setf (mongo-conn-topology conn) topology)
-    (should (eq (mongo-topology-description-type topology)
+    (setf (mongodb-conn-topology conn) topology)
+    (should (eq (mongodb-topology-description-type topology)
                 'replica-set-no-primary))
-    (should (eq (mongo-server-description-type server) 'rs-other))
+    (should (eq (mongodb-server-description-type server) 'rs-other))
     (should (assoc "primary:27017" servers))
-    (should-not (mongo-select-server conn 'read))))
+    (should-not (mongodb-select-server conn 'read))))
 
 
 
-(ert-deftest mongo-test-topology-rejects-too-old-wire-version ()
+(ert-deftest mongodb-test-topology-rejects-too-old-wire-version ()
   "SDAM compatibility should reject servers older than this OP_MSG client."
-  (let* ((conn (make-mongo-conn :host "legacy"
+  (let* ((conn (make-mongodb-conn :host "legacy"
                                 :port 27017
                                 :database "app"))
-         (topology (mongo--topology-description-from-hello
+         (topology (mongodb--topology-description-from-hello
                     conn
                     '(("ok" . 1)
                       ("minWireVersion" . 0)
                       ("maxWireVersion" . 5)
                       ("isWritablePrimary" . t))))
-         (error (mongo-topology-description-compatibility-error topology)))
-    (should-not (mongo-topology-description-compatible topology))
+         (error (mongodb-topology-description-compatibility-error topology)))
+    (should-not (mongodb-topology-description-compatible topology))
     (should (string-match-p "reports wire version 5" error))
-    (setf (mongo-conn-topology conn) topology)
-    (let ((err (should-error (mongo-select-server conn 'write)
-                             :type 'mongo-error)))
+    (setf (mongodb-conn-topology conn) topology)
+    (let ((err (should-error (mongodb-select-server conn 'write)
+                             :type 'mongodb-error)))
       (should (string-match-p "requires at least 6"
                               (error-message-string err))))))
 
 
 
-(ert-deftest mongo-test-topology-rejects-future-min-wire-version ()
+(ert-deftest mongodb-test-topology-rejects-future-min-wire-version ()
   "SDAM compatibility should reject servers that require a newer client."
-  (let* ((future-min (1+ mongo--client-max-wire-version))
-         (conn (make-mongo-conn :host "future"
+  (let* ((future-min (1+ mongodb--client-max-wire-version))
+         (conn (make-mongodb-conn :host "future"
                                 :port 27017
                                 :database "app"))
-         (topology (mongo--topology-description-from-hello
+         (topology (mongodb--topology-description-from-hello
                     conn
                     `(("ok" . 1)
                       ("minWireVersion" . ,future-min)
                       ("maxWireVersion" . ,future-min)
                       ("isWritablePrimary" . t))))
-         (error (mongo-topology-description-compatibility-error topology)))
-    (should-not (mongo-topology-description-compatible topology))
+         (error (mongodb-topology-description-compatibility-error topology)))
+    (should-not (mongodb-topology-description-compatible topology))
     (should (string-match-p
              (format "requires wire version %s" future-min)
              error))
-    (setf (mongo-conn-topology conn) topology)
-    (let ((err (should-error (mongo-select-server conn 'read)
-                             :type 'mongo-error)))
+    (setf (mongodb-conn-topology conn) topology)
+    (let ((err (should-error (mongodb-select-server conn 'read)
+                             :type 'mongodb-error)))
       (should (string-match-p "only supports up to"
                               (error-message-string err))))))
 
 
 
-(ert-deftest mongo-test-topology-description-tracks-average-rtt ()
+(ert-deftest mongodb-test-topology-description-tracks-average-rtt ()
   "MongoDB hello refreshes should maintain the SDAM average RTT."
-  (let* ((conn (make-mongo-conn :host "seed-b"
+  (let* ((conn (make-mongodb-conn :host "seed-b"
                                 :port 27018
                                 :database "app"))
          (hello '(("ok" . 1)
                   ("maxWireVersion" . 17)
                   ("setName" . "rs0")
                   ("isWritablePrimary" . t))))
-    (setf (mongo-conn-topology conn)
-          (mongo--topology-description-from-hello conn hello 0.100))
-    (let ((server (mongo--current-server-description conn)))
-      (should (= (mongo-server-description-round-trip-time server)
+    (setf (mongodb-conn-topology conn)
+          (mongodb--topology-description-from-hello conn hello 0.100))
+    (let ((server (mongodb--current-server-description conn)))
+      (should (= (mongodb-server-description-round-trip-time server)
                  0.100)))
-    (setf (mongo-conn-topology conn)
-          (mongo--topology-description-from-hello conn hello 0.200))
-    (let ((server (mongo--current-server-description conn)))
-      (should (< (abs (- (mongo-server-description-round-trip-time server)
+    (setf (mongodb-conn-topology conn)
+          (mongodb--topology-description-from-hello conn hello 0.200))
+    (let ((server (mongodb--current-server-description conn)))
+      (should (< (abs (- (mongodb-server-description-round-trip-time server)
                          0.120))
                  0.000001)))))
 
 
 
-(ert-deftest mongo-test-topology-secondary-update-preserves-primary ()
+(ert-deftest mongodb-test-topology-secondary-update-preserves-primary ()
   "Secondary SDAM updates should preserve an already known primary."
-  (let* ((conn (make-mongo-conn :host "secondary"
+  (let* ((conn (make-mongodb-conn :host "secondary"
                                 :port 27018
                                 :database "app"))
-         (primary (make-mongo-server-description
+         (primary (make-mongodb-server-description
                    :address "primary:27017"
                    :type 'rs-primary
                    :set-name "rs0"))
-         (old-secondary (mongo--unknown-server-description
+         (old-secondary (mongodb--unknown-server-description
                          "secondary:27018"))
-         (old-topology (make-mongo-topology-description
+         (old-topology (make-mongodb-topology-description
                         :type 'replica-set-with-primary
                         :set-name "rs0"
                         :servers `(("primary:27017" . ,primary)
@@ -5800,37 +5800,37 @@
                   ("hosts" . ("primary:27017"
                               "secondary:27018"
                               "new-secondary:27019")))))
-    (setf (mongo-conn-topology conn) old-topology)
-    (let* ((topology (mongo--topology-description-from-hello conn hello))
-           (servers (mongo-topology-description-servers topology))
+    (setf (mongodb-conn-topology conn) old-topology)
+    (let* ((topology (mongodb--topology-description-from-hello conn hello))
+           (servers (mongodb-topology-description-servers topology))
            (secondary (cdr (assoc "secondary:27018" servers)))
            (new-secondary (cdr (assoc "new-secondary:27019" servers))))
-      (should (eq (mongo-topology-description-type topology)
+      (should (eq (mongodb-topology-description-type topology)
                   'replica-set-with-primary))
-      (should (equal (mongo-topology-description-primary-address topology)
+      (should (equal (mongodb-topology-description-primary-address topology)
                      "primary:27017"))
       (should (eq (cdr (assoc "primary:27017" servers)) primary))
-      (should (eq (mongo-server-description-type secondary)
+      (should (eq (mongodb-server-description-type secondary)
                   'rs-secondary))
-      (should (eq (mongo-server-description-type new-secondary)
+      (should (eq (mongodb-server-description-type new-secondary)
                   'unknown)))))
 
 
 
-(ert-deftest mongo-test-topology-primary-update-prunes-removed-members ()
+(ert-deftest mongodb-test-topology-primary-update-prunes-removed-members ()
   "Primary SDAM updates should remove servers absent from the primary host list."
-  (let* ((conn (make-mongo-conn :host "primary"
+  (let* ((conn (make-mongodb-conn :host "primary"
                                 :port 27017
                                 :database "app"))
-         (removed (make-mongo-server-description
+         (removed (make-mongodb-server-description
                    :address "removed:27019"
                    :type 'rs-secondary
                    :set-name "rs0"))
-         (old-topology (make-mongo-topology-description
+         (old-topology (make-mongodb-topology-description
                         :type 'replica-set-with-primary
                         :set-name "rs0"
                         :servers `(("primary:27017" .
-                                    ,(mongo--unknown-server-description
+                                    ,(mongodb--unknown-server-description
                                       "primary:27017"))
                                    ("removed:27019" . ,removed))
                         :primary-address "primary:27017"
@@ -5841,36 +5841,36 @@
                   ("isWritablePrimary" . t)
                   ("hosts" . ("primary:27017"
                               "secondary:27018")))))
-    (setf (mongo-conn-topology conn) old-topology)
-    (let* ((topology (mongo--topology-description-from-hello conn hello))
-           (servers (mongo-topology-description-servers topology))
+    (setf (mongodb-conn-topology conn) old-topology)
+    (let* ((topology (mongodb--topology-description-from-hello conn hello))
+           (servers (mongodb-topology-description-servers topology))
            (primary (cdr (assoc "primary:27017" servers)))
            (secondary (cdr (assoc "secondary:27018" servers))))
-      (should (eq (mongo-topology-description-type topology)
+      (should (eq (mongodb-topology-description-type topology)
                   'replica-set-with-primary))
-      (should (equal (mongo-topology-description-primary-address topology)
+      (should (equal (mongodb-topology-description-primary-address topology)
                      "primary:27017"))
-      (should (eq (mongo-server-description-type primary) 'rs-primary))
-      (should (eq (mongo-server-description-type secondary) 'unknown))
+      (should (eq (mongodb-server-description-type primary) 'rs-primary))
+      (should (eq (mongodb-server-description-type secondary) 'unknown))
       (should-not (assoc "removed:27019" servers)))))
 
 
 
-(ert-deftest mongo-test-topology-new-primary-marks-old-primary-unknown ()
+(ert-deftest mongodb-test-topology-new-primary-marks-old-primary-unknown ()
   "Primary SDAM updates should mark any previous primary Unknown."
-  (let* ((conn (make-mongo-conn :host "new-primary"
+  (let* ((conn (make-mongodb-conn :host "new-primary"
                                 :port 27018
                                 :database "app"))
-         (old-primary (make-mongo-server-description
+         (old-primary (make-mongodb-server-description
                        :address "old-primary:27017"
                        :type 'rs-primary
                        :set-name "rs0"))
-         (old-topology (make-mongo-topology-description
+         (old-topology (make-mongodb-topology-description
                         :type 'replica-set-with-primary
                         :set-name "rs0"
                         :servers `(("old-primary:27017" . ,old-primary)
                                    ("new-primary:27018" .
-                                    ,(mongo--unknown-server-description
+                                    ,(mongodb--unknown-server-description
                                       "new-primary:27018")))
                         :primary-address "old-primary:27017"
                         :compatible t))
@@ -5880,31 +5880,31 @@
                   ("isWritablePrimary" . t)
                   ("hosts" . ("old-primary:27017"
                               "new-primary:27018")))))
-    (setf (mongo-conn-topology conn) old-topology)
-    (let* ((topology (mongo--topology-description-from-hello conn hello))
-           (servers (mongo-topology-description-servers topology))
+    (setf (mongodb-conn-topology conn) old-topology)
+    (let* ((topology (mongodb--topology-description-from-hello conn hello))
+           (servers (mongodb-topology-description-servers topology))
            (old (cdr (assoc "old-primary:27017" servers)))
            (new (cdr (assoc "new-primary:27018" servers))))
-      (should (eq (mongo-topology-description-type topology)
+      (should (eq (mongodb-topology-description-type topology)
                   'replica-set-with-primary))
-      (should (equal (mongo-topology-description-primary-address topology)
+      (should (equal (mongodb-topology-description-primary-address topology)
                      "new-primary:27018"))
-      (should (eq (mongo-server-description-type new) 'rs-primary))
-      (should (eq (mongo-server-description-type old) 'unknown))
+      (should (eq (mongodb-server-description-type new) 'rs-primary))
+      (should (eq (mongodb-server-description-type old) 'unknown))
       (should (string-match-p
                "discovery of newer primary"
-               (mongo-server-description-error old))))))
+               (mongodb-server-description-error old))))))
 
 
 
-(ert-deftest mongo-test-topology-secondary-primary-address-is-not-known-primary ()
+(ert-deftest mongodb-test-topology-secondary-primary-address-is-not-known-primary ()
   "A secondary's primary field should not make an unchecked primary selectable."
-  (let* ((conn (make-mongo-conn
+  (let* ((conn (make-mongodb-conn
                 :host "secondary"
                 :port 27018
                 :database "app"
                 :read-preference
-                (make-mongo--read-preference
+                (make-mongodb--read-preference
                  :mode "primaryPreferred")))
          (hello '(("ok" . 1)
                   ("maxWireVersion" . 17)
@@ -5913,38 +5913,38 @@
                   ("primary" . "primary:27017")
                   ("hosts" . ("primary:27017"
                               "secondary:27018")))))
-    (setf (mongo-conn-topology conn)
-          (mongo--topology-description-from-hello conn hello))
-    (should (eq (mongo-topology-description-type
-                 (mongo-conn-topology conn))
+    (setf (mongodb-conn-topology conn)
+          (mongodb--topology-description-from-hello conn hello))
+    (should (eq (mongodb-topology-description-type
+                 (mongodb-conn-topology conn))
                 'replica-set-no-primary))
-    (should-not (mongo-topology-description-primary-address
-                 (mongo-conn-topology conn)))
-    (should (eq (mongo-select-server conn 'read)
-                (mongo--current-server-description conn)))))
+    (should-not (mongodb-topology-description-primary-address
+                 (mongodb-conn-topology conn)))
+    (should (eq (mongodb-select-server conn 'read)
+                (mongodb--current-server-description conn)))))
 
 
 
-(ert-deftest mongo-test-topology-ignores-stale-topology-version ()
+(ert-deftest mongodb-test-topology-ignores-stale-topology-version ()
   "Older topologyVersion hello data should not replace a newer description."
-  (let* ((conn (make-mongo-conn :host "primary"
+  (let* ((conn (make-mongodb-conn :host "primary"
                                 :port 27017
                                 :database "app"))
          (old-version `(("processId" .
-                         ,(mongo-object-id
+                         ,(mongodb-object-id
                            "64f000000000000000000001"))
                         ("counter" . 8)))
          (new-version `(("processId" .
-                         ,(mongo-object-id
+                         ,(mongodb-object-id
                            "64f000000000000000000001"))
                         ("counter" . 7)))
-         (server (make-mongo-server-description
+         (server (make-mongodb-server-description
                   :address "primary:27017"
                   :type 'rs-primary
                   :set-name "rs0"
                   :tags '(("version" . "old"))
                   :topology-version old-version))
-         (old-topology (make-mongo-topology-description
+         (old-topology (make-mongodb-topology-description
                         :type 'replica-set-with-primary
                         :set-name "rs0"
                         :servers `(("primary:27017" . ,server))
@@ -5956,30 +5956,30 @@
                   ("isWritablePrimary" . t)
                   ("tags" . (("version" . "new")))
                   ("topologyVersion" . ,new-version))))
-    (setf (mongo-conn-topology conn) old-topology)
-    (should (eq (mongo--topology-description-from-hello conn hello)
+    (setf (mongodb-conn-topology conn) old-topology)
+    (should (eq (mongodb--topology-description-from-hello conn hello)
                 old-topology))
-    (should (equal (mongo-server-description-tags
-                    (mongo--current-server-description conn))
+    (should (equal (mongodb-server-description-tags
+                    (mongodb--current-server-description conn))
                    '(("version" . "old"))))))
 
 
 
-(ert-deftest mongo-test-topology-rejects-stale-primary-election-id ()
+(ert-deftest mongodb-test-topology-rejects-stale-primary-election-id ()
   "Modern SDAM should reject an RSPrimary with an older electionId."
-  (let* ((conn (make-mongo-conn :host "old-primary"
+  (let* ((conn (make-mongodb-conn :host "old-primary"
                                 :port 27017
                                 :database "app"))
          (max-election "000000000000000000000002")
-         (new-primary (make-mongo-server-description
+         (new-primary (make-mongodb-server-description
                        :address "new-primary:27018"
                        :type 'rs-primary
                        :set-name "rs0"
-                       :election-id (mongo-object-id max-election)
+                       :election-id (mongodb-object-id max-election)
                        :set-version 4))
-         (old-primary (mongo--unknown-server-description
+         (old-primary (mongodb--unknown-server-description
                        "old-primary:27017"))
-         (old-topology (make-mongo-topology-description
+         (old-topology (make-mongodb-topology-description
                         :type 'replica-set-with-primary
                         :set-name "rs0"
                         :servers `(("new-primary:27018" . ,new-primary)
@@ -5993,34 +5993,34 @@
                   ("setName" . "rs0")
                   ("isWritablePrimary" . t)
                   ("electionId" .
-                   ,(mongo-object-id "000000000000000000000001"))
+                   ,(mongodb-object-id "000000000000000000000001"))
                   ("setVersion" . 4)
                   ("hosts" . ("new-primary:27018"
                               "old-primary:27017")))))
-    (setf (mongo-conn-topology conn) old-topology)
-    (let* ((topology (mongo--topology-description-from-hello conn hello))
-           (servers (mongo-topology-description-servers topology))
+    (setf (mongodb-conn-topology conn) old-topology)
+    (let* ((topology (mongodb--topology-description-from-hello conn hello))
+           (servers (mongodb-topology-description-servers topology))
            (old (cdr (assoc "old-primary:27017" servers))))
-      (should (eq (mongo-topology-description-type topology)
+      (should (eq (mongodb-topology-description-type topology)
                   'replica-set-with-primary))
-      (should (equal (mongo-topology-description-primary-address topology)
+      (should (equal (mongodb-topology-description-primary-address topology)
                      "new-primary:27018"))
-      (should (equal (mongo-topology-description-max-election-id topology)
+      (should (equal (mongodb-topology-description-max-election-id topology)
                      max-election))
-      (should (= (mongo-topology-description-max-set-version topology) 4))
-      (should (eq (mongo-server-description-type old) 'unknown))
+      (should (= (mongodb-topology-description-max-set-version topology) 4))
+      (should (eq (mongodb-server-description-type old) 'unknown))
       (should (string-match-p
                "Stale primary"
-               (mongo-server-description-error old))))))
+               (mongodb-server-description-error old))))))
 
 
 
-(ert-deftest mongo-test-topology-updates-primary-version-max ()
+(ert-deftest mongodb-test-topology-updates-primary-version-max ()
   "A newer RSPrimary should update the remembered electionId/setVersion tuple."
-  (let* ((conn (make-mongo-conn :host "new-primary"
+  (let* ((conn (make-mongodb-conn :host "new-primary"
                                 :port 27018
                                 :database "app"))
-         (old-topology (make-mongo-topology-description
+         (old-topology (make-mongodb-topology-description
                         :type 'replica-set-with-primary
                         :set-name "rs0"
                         :servers nil
@@ -6034,25 +6034,25 @@
                   ("setName" . "rs0")
                   ("isWritablePrimary" . t)
                   ("electionId" .
-                   ,(mongo-object-id "000000000000000000000002"))
+                   ,(mongodb-object-id "000000000000000000000002"))
                   ("setVersion" . 1)
                   ("hosts" . ("new-primary:27018")))))
-    (setf (mongo-conn-topology conn) old-topology)
-    (let ((topology (mongo--topology-description-from-hello conn hello)))
-      (should (equal (mongo-topology-description-primary-address topology)
+    (setf (mongodb-conn-topology conn) old-topology)
+    (let ((topology (mongodb--topology-description-from-hello conn hello)))
+      (should (equal (mongodb-topology-description-primary-address topology)
                      "new-primary:27018"))
-      (should (equal (mongo-topology-description-max-election-id topology)
+      (should (equal (mongodb-topology-description-max-election-id topology)
                      "000000000000000000000002"))
-      (should (= (mongo-topology-description-max-set-version topology) 1)))))
+      (should (= (mongodb-topology-description-max-set-version topology) 1)))))
 
 
 
-(ert-deftest mongo-test-topology-legacy-stale-primary-order ()
+(ert-deftest mongodb-test-topology-legacy-stale-primary-order ()
   "Pre-6.0 SDAM compatibility should compare setVersion before electionId."
-  (let* ((conn (make-mongo-conn :host "legacy-primary"
+  (let* ((conn (make-mongodb-conn :host "legacy-primary"
                                 :port 27017
                                 :database "app"))
-         (old-topology (make-mongo-topology-description
+         (old-topology (make-mongodb-topology-description
                         :type 'replica-set-with-primary
                         :set-name "rs0"
                         :servers nil
@@ -6066,27 +6066,27 @@
                   ("setName" . "rs0")
                   ("isWritablePrimary" . t)
                   ("electionId" .
-                   ,(mongo-object-id "000000000000000000000002"))
+                   ,(mongodb-object-id "000000000000000000000002"))
                   ("setVersion" . 4)
                   ("hosts" . ("legacy-primary:27017")))))
-    (setf (mongo-conn-topology conn) old-topology)
-    (let* ((topology (mongo--topology-description-from-hello conn hello))
+    (setf (mongodb-conn-topology conn) old-topology)
+    (let* ((topology (mongodb--topology-description-from-hello conn hello))
            (server (cdr (assoc "legacy-primary:27017"
-                               (mongo-topology-description-servers
+                               (mongodb-topology-description-servers
                                 topology)))))
-      (should (eq (mongo-topology-description-type topology)
+      (should (eq (mongodb-topology-description-type topology)
                   'replica-set-no-primary))
-      (should-not (mongo-topology-description-primary-address topology))
-      (should (eq (mongo-server-description-type server) 'unknown))
-      (should (equal (mongo-topology-description-max-election-id topology)
+      (should-not (mongodb-topology-description-primary-address topology))
+      (should (eq (mongodb-server-description-type server) 'unknown))
+      (should (equal (mongodb-topology-description-max-election-id topology)
                      "000000000000000000000001"))
-      (should (= (mongo-topology-description-max-set-version topology) 5)))))
+      (should (= (mongodb-topology-description-max-set-version topology) 5)))))
 
 
 
-(ert-deftest mongo-test-topology-ignores-secondary-set-version ()
+(ert-deftest mongodb-test-topology-ignores-secondary-set-version ()
   "SDAM should not update max election/set version from non-primary hello."
-  (let* ((conn (make-mongo-conn :host "secondary"
+  (let* ((conn (make-mongodb-conn :host "secondary"
                                 :port 27018
                                 :database "app"))
          (hello `(("ok" . 1)
@@ -6094,49 +6094,49 @@
                   ("setName" . "rs0")
                   ("secondary" . t)
                   ("electionId" .
-                   ,(mongo-object-id "0000000000000000000000ff"))
+                   ,(mongodb-object-id "0000000000000000000000ff"))
                   ("setVersion" . 99)
                   ("hosts" . ("primary:27017"
                               "secondary:27018")))))
-    (let ((topology (mongo--topology-description-from-hello conn hello)))
-      (should (eq (mongo-topology-description-type topology)
+    (let ((topology (mongodb--topology-description-from-hello conn hello)))
+      (should (eq (mongodb-topology-description-type topology)
                   'replica-set-no-primary))
-      (should-not (mongo-topology-description-max-election-id topology))
-      (should-not (mongo-topology-description-max-set-version topology)))))
+      (should-not (mongodb-topology-description-max-election-id topology))
+      (should-not (mongodb-topology-description-max-set-version topology)))))
 
 
 
-(ert-deftest mongo-test-topology-rsghost-initial-remains-unknown ()
+(ert-deftest mongodb-test-topology-rsghost-initial-remains-unknown ()
   "Initial SDAM Unknown topology should remain Unknown for RSGhost servers."
-  (let* ((conn (make-mongo-conn :host "ghost"
+  (let* ((conn (make-mongodb-conn :host "ghost"
                                 :port 27017
                                 :database "app"))
          (hello '(("ok" . 1)
                   ("maxWireVersion" . 17)
                   ("isreplicaset" . t)))
-         (topology (mongo--topology-description-from-hello conn hello))
+         (topology (mongodb--topology-description-from-hello conn hello))
          (server (cdr (assoc "ghost:27017"
-                             (mongo-topology-description-servers topology)))))
-    (should (eq (mongo-topology-description-type topology) 'unknown))
-    (should-not (mongo-topology-description-set-name topology))
-    (should-not (mongo-topology-description-primary-address topology))
-    (should (eq (mongo-server-description-type server) 'rs-ghost))))
+                             (mongodb-topology-description-servers topology)))))
+    (should (eq (mongodb-topology-description-type topology) 'unknown))
+    (should-not (mongodb-topology-description-set-name topology))
+    (should-not (mongodb-topology-description-primary-address topology))
+    (should (eq (mongodb-server-description-type server) 'rs-ghost))))
 
 
 
-(ert-deftest mongo-test-topology-rsghost-keeps-replica-set-state ()
+(ert-deftest mongodb-test-topology-rsghost-keeps-replica-set-state ()
   "RSGhost updates should not collapse an existing replica-set topology."
-  (let* ((conn (make-mongo-conn :host "ghost"
+  (let* ((conn (make-mongodb-conn :host "ghost"
                                 :port 27017
                                 :database "app"))
-         (old-topology (make-mongo-topology-description
+         (old-topology (make-mongodb-topology-description
                         :type 'replica-set-no-primary
                         :set-name "rs0"
                         :servers `(("ghost:27017" .
-                                    ,(mongo--unknown-server-description
+                                    ,(mongodb--unknown-server-description
                                       "ghost:27017"))
                                    ("secondary:27018" .
-                                    ,(make-mongo-server-description
+                                    ,(make-mongodb-server-description
                                       :address "secondary:27018"
                                       :type 'rs-secondary
                                       :set-name "rs0")))
@@ -6144,23 +6144,23 @@
          (hello '(("ok" . 1)
                   ("maxWireVersion" . 17)
                   ("isreplicaset" . t))))
-    (setf (mongo-conn-topology conn) old-topology)
-    (let* ((topology (mongo--topology-description-from-hello conn hello))
+    (setf (mongodb-conn-topology conn) old-topology)
+    (let* ((topology (mongodb--topology-description-from-hello conn hello))
            (server (cdr (assoc "ghost:27017"
-                               (mongo-topology-description-servers
+                               (mongodb-topology-description-servers
                                 topology)))))
-      (should (eq (mongo-topology-description-type topology)
+      (should (eq (mongodb-topology-description-type topology)
                   'replica-set-no-primary))
-      (should (equal (mongo-topology-description-set-name topology) "rs0"))
-      (should (eq (mongo-server-description-type server) 'rs-ghost))
+      (should (equal (mongodb-topology-description-set-name topology) "rs0"))
+      (should (eq (mongodb-server-description-type server) 'rs-ghost))
       (should (assoc "secondary:27018"
-                     (mongo-topology-description-servers topology))))))
+                     (mongodb-topology-description-servers topology))))))
 
 
 
-(ert-deftest mongo-test-topology-direct-rsghost-is-single ()
+(ert-deftest mongodb-test-topology-direct-rsghost-is-single ()
   "directConnection=true should use Single topology for an RSGhost server."
-  (let* ((conn (make-mongo-conn
+  (let* ((conn (make-mongodb-conn
                 :host "ghost"
                 :port 27017
                 :database "app"
@@ -6169,21 +6169,21 @@
          (hello '(("ok" . 1)
                   ("maxWireVersion" . 17)
                   ("isreplicaset" . t)))
-         (topology (mongo--topology-description-from-hello conn hello))
+         (topology (mongodb--topology-description-from-hello conn hello))
          (server (cdr (assoc "ghost:27017"
-                             (mongo-topology-description-servers
+                             (mongodb-topology-description-servers
                               topology)))))
-    (setf (mongo-conn-topology conn) topology)
-    (should (eq (mongo-topology-description-type topology) 'single))
-    (should (eq (mongo-server-description-type server) 'rs-ghost))
-    (should (eq (mongo-select-server conn 'read) server))
-    (should (eq (mongo-select-server conn 'write) server))))
+    (setf (mongodb-conn-topology conn) topology)
+    (should (eq (mongodb-topology-description-type topology) 'single))
+    (should (eq (mongodb-server-description-type server) 'rs-ghost))
+    (should (eq (mongodb-select-server conn 'read) server))
+    (should (eq (mongodb-select-server conn 'write) server))))
 
 
 
-(ert-deftest mongo-test-topology-direct-secondary-is-single ()
+(ert-deftest mongodb-test-topology-direct-secondary-is-single ()
   "directConnection=true should use Single topology for a replica-set member."
-  (let* ((conn (make-mongo-conn
+  (let* ((conn (make-mongodb-conn
                 :host "seed-a"
                 :port 27018
                 :database "app"
@@ -6193,21 +6193,21 @@
                   ("maxWireVersion" . 17)
                   ("setName" . "rs0")
                   ("secondary" . t)))
-         (topology (mongo--topology-description-from-hello conn hello))
+         (topology (mongodb--topology-description-from-hello conn hello))
          (server (cdr (assoc "seed-a:27018"
-                             (mongo-topology-description-servers
+                             (mongodb-topology-description-servers
                               topology)))))
-    (setf (mongo-conn-topology conn) topology)
-    (should (eq (mongo-topology-description-type topology) 'single))
-    (should (eq (mongo-server-description-type server) 'rs-secondary))
-    (should (eq (mongo-select-server conn 'read) server))
-    (should (eq (mongo-select-server conn 'write) server))))
+    (setf (mongodb-conn-topology conn) topology)
+    (should (eq (mongodb-topology-description-type topology) 'single))
+    (should (eq (mongodb-server-description-type server) 'rs-secondary))
+    (should (eq (mongodb-select-server conn 'read) server))
+    (should (eq (mongodb-select-server conn 'write) server))))
 
 
 
-(ert-deftest mongo-test-topology-direct-replica-set-name-matches ()
+(ert-deftest mongodb-test-topology-direct-replica-set-name-matches ()
   "Single topology should keep direct replica-set members with matching setName."
-  (let* ((conn (make-mongo-conn
+  (let* ((conn (make-mongodb-conn
                 :host "seed-a"
                 :port 27018
                 :database "app"
@@ -6217,20 +6217,20 @@
                   ("maxWireVersion" . 17)
                   ("setName" . "rs0")
                   ("secondary" . t)))
-         (topology (mongo--topology-description-from-hello conn hello))
+         (topology (mongodb--topology-description-from-hello conn hello))
          (server (cdr (assoc "seed-a:27018"
-                             (mongo-topology-description-servers
+                             (mongodb-topology-description-servers
                               topology)))))
-    (setf (mongo-conn-topology conn) topology)
-    (should (eq (mongo-topology-description-type topology) 'single))
-    (should (eq (mongo-server-description-type server) 'rs-secondary))
-    (should (eq (mongo-select-server conn 'read) server))))
+    (setf (mongodb-conn-topology conn) topology)
+    (should (eq (mongodb-topology-description-type topology) 'single))
+    (should (eq (mongodb-server-description-type server) 'rs-secondary))
+    (should (eq (mongodb-select-server conn 'read) server))))
 
 
 
-(ert-deftest mongo-test-topology-direct-replica-set-name-missing ()
+(ert-deftest mongodb-test-topology-direct-replica-set-name-missing ()
   "Single topology should reject direct servers missing requested setName."
-  (let* ((conn (make-mongo-conn
+  (let* ((conn (make-mongodb-conn
                 :host "seed-a"
                 :port 27017
                 :database "app"
@@ -6239,23 +6239,23 @@
          (hello '(("ok" . 1)
                   ("maxWireVersion" . 17)
                   ("isWritablePrimary" . t)))
-         (topology (mongo--topology-description-from-hello conn hello))
+         (topology (mongodb--topology-description-from-hello conn hello))
          (server (cdr (assoc "seed-a:27017"
-                             (mongo-topology-description-servers
+                             (mongodb-topology-description-servers
                               topology)))))
-    (setf (mongo-conn-topology conn) topology)
-    (should (eq (mongo-topology-description-type topology) 'single))
-    (should (eq (mongo-server-description-type server) 'unknown))
+    (setf (mongodb-conn-topology conn) topology)
+    (should (eq (mongodb-topology-description-type topology) 'single))
+    (should (eq (mongodb-server-description-type server) 'unknown))
     (should (string-match-p
              "did not report replica set rs0"
-             (mongo-server-description-error server)))
-    (should-not (mongo-select-server conn 'read))))
+             (mongodb-server-description-error server)))
+    (should-not (mongodb-select-server conn 'read))))
 
 
 
-(ert-deftest mongo-test-topology-direct-replica-set-name-mismatch ()
+(ert-deftest mongodb-test-topology-direct-replica-set-name-mismatch ()
   "Single topology should reject direct servers with the wrong setName."
-  (let* ((conn (make-mongo-conn
+  (let* ((conn (make-mongodb-conn
                 :host "seed-a"
                 :port 27017
                 :database "app"
@@ -6267,46 +6267,46 @@
                   ("maxWireVersion" . 17)
                   ("setName" . "other")
                   ("isWritablePrimary" . t)))
-         (topology (mongo--topology-description-from-hello conn hello))
+         (topology (mongodb--topology-description-from-hello conn hello))
          (server (cdr (assoc "seed-a:27017"
-                             (mongo-topology-description-servers
+                             (mongodb-topology-description-servers
                               topology)))))
-    (setf (mongo-conn-topology conn) topology)
-    (should (eq (mongo-topology-description-type topology) 'single))
-    (should (eq (mongo-server-description-type server) 'unknown))
+    (setf (mongodb-conn-topology conn) topology)
+    (should (eq (mongodb-topology-description-type topology) 'single))
+    (should (eq (mongodb-server-description-type server) 'unknown))
     (should (string-match-p
              "belongs to replica set other, not rs0"
-             (mongo-server-description-error server)))
+             (mongodb-server-description-error server)))
     (cl-letf (((symbol-function 'process-live-p)
                (lambda (_proc) t))
-              ((symbol-function 'mongo-hello)
+              ((symbol-function 'mongodb-hello)
                (lambda (&rest _args) nil))
-              ((symbol-function 'mongo--send-document)
+              ((symbol-function 'mongodb--send-document)
                (lambda (&rest _args)
                  (ert-fail "setName mismatch should fail before send"))))
       (let ((err (should-error
-                  (mongo-command conn "app" '(("find" . "users")))
-                  :type 'mongo-error)))
+                  (mongodb-command conn "app" '(("find" . "users")))
+                  :type 'mongodb-error)))
         (should (string-match-p
                  "belongs to replica set other, not rs0"
                  (error-message-string err)))))))
 
 
 
-(ert-deftest mongo-test-topology-replica-primary-set-name-mismatch-removes ()
+(ert-deftest mongodb-test-topology-replica-primary-set-name-mismatch-removes ()
   "Replica-set topology should remove a primary with a wrong setName."
-  (let* ((conn (make-mongo-conn :host "primary"
+  (let* ((conn (make-mongodb-conn :host "primary"
                                 :port 27017
                                 :database "app"))
-         (old-primary (make-mongo-server-description
+         (old-primary (make-mongodb-server-description
                        :address "primary:27017"
                        :type 'rs-primary
                        :set-name "rs0"))
-         (secondary (make-mongo-server-description
+         (secondary (make-mongodb-server-description
                      :address "secondary:27018"
                      :type 'rs-secondary
                      :set-name "rs0"))
-         (old-topology (make-mongo-topology-description
+         (old-topology (make-mongodb-topology-description
                         :type 'replica-set-with-primary
                         :set-name "rs0"
                         :servers `(("primary:27017" . ,old-primary)
@@ -6319,33 +6319,33 @@
                   ("isWritablePrimary" . t)
                   ("hosts" . ("primary:27017"
                               "secondary:27018")))))
-    (setf (mongo-conn-topology conn) old-topology)
-    (let* ((topology (mongo--topology-description-from-hello conn hello))
-           (servers (mongo-topology-description-servers topology)))
-      (should (eq (mongo-topology-description-type topology)
+    (setf (mongodb-conn-topology conn) old-topology)
+    (let* ((topology (mongodb--topology-description-from-hello conn hello))
+           (servers (mongodb-topology-description-servers topology)))
+      (should (eq (mongodb-topology-description-type topology)
                   'replica-set-no-primary))
-      (should (equal (mongo-topology-description-set-name topology) "rs0"))
-      (should-not (mongo-topology-description-primary-address topology))
+      (should (equal (mongodb-topology-description-set-name topology) "rs0"))
+      (should-not (mongodb-topology-description-primary-address topology))
       (should-not (assoc "primary:27017" servers))
       (should (eq (cdr (assoc "secondary:27018" servers))
                   secondary)))))
 
 
 
-(ert-deftest mongo-test-topology-replica-secondary-set-name-mismatch-removes ()
+(ert-deftest mongodb-test-topology-replica-secondary-set-name-mismatch-removes ()
   "Replica-set topology should remove a non-primary with a wrong setName."
-  (let* ((conn (make-mongo-conn :host "secondary"
+  (let* ((conn (make-mongodb-conn :host "secondary"
                                 :port 27018
                                 :database "app"))
-         (primary (make-mongo-server-description
+         (primary (make-mongodb-server-description
                    :address "primary:27017"
                    :type 'rs-primary
                    :set-name "rs0"))
-         (old-secondary (make-mongo-server-description
+         (old-secondary (make-mongodb-server-description
                          :address "secondary:27018"
                          :type 'rs-secondary
                          :set-name "rs0"))
-         (old-topology (make-mongo-topology-description
+         (old-topology (make-mongodb-topology-description
                         :type 'replica-set-with-primary
                         :set-name "rs0"
                         :servers `(("primary:27017" . ,primary)
@@ -6358,13 +6358,13 @@
                   ("secondary" . t)
                   ("hosts" . ("primary:27017"
                               "secondary:27018")))))
-    (setf (mongo-conn-topology conn) old-topology)
-    (let* ((topology (mongo--topology-description-from-hello conn hello))
-           (servers (mongo-topology-description-servers topology)))
-      (should (eq (mongo-topology-description-type topology)
+    (setf (mongodb-conn-topology conn) old-topology)
+    (let* ((topology (mongodb--topology-description-from-hello conn hello))
+           (servers (mongodb-topology-description-servers topology)))
+      (should (eq (mongodb-topology-description-type topology)
                   'replica-set-with-primary))
-      (should (equal (mongo-topology-description-set-name topology) "rs0"))
-      (should (equal (mongo-topology-description-primary-address topology)
+      (should (equal (mongodb-topology-description-set-name topology) "rs0"))
+      (should (equal (mongodb-topology-description-primary-address topology)
                      "primary:27017"))
       (should (eq (cdr (assoc "primary:27017" servers))
                   primary))
@@ -6372,9 +6372,9 @@
 
 
 
-(ert-deftest mongo-test-topology-replica-set-name-param-mismatch-removes ()
+(ert-deftest mongodb-test-topology-replica-set-name-param-mismatch-removes ()
   "Requested replicaSet should be enforced before a topology name is known."
-  (let* ((conn (make-mongo-conn
+  (let* ((conn (make-mongodb-conn
                 :host "seed-a"
                 :port 27017
                 :database "app"
@@ -6384,30 +6384,30 @@
                   ("setName" . "other")
                   ("secondary" . t)
                   ("hosts" . ("seed-a:27017"))))
-         (topology (mongo--topology-description-from-hello conn hello)))
-    (should (eq (mongo-topology-description-type topology)
+         (topology (mongodb--topology-description-from-hello conn hello)))
+    (should (eq (mongodb-topology-description-type topology)
                 'replica-set-no-primary))
-    (should (equal (mongo-topology-description-set-name topology) "rs0"))
-    (should-not (mongo-topology-description-servers topology))
-    (setf (mongo-conn-topology conn) topology)
-    (should-not (mongo-select-server conn 'read))))
+    (should (equal (mongodb-topology-description-set-name topology) "rs0"))
+    (should-not (mongodb-topology-description-servers topology))
+    (setf (mongodb-conn-topology conn) topology)
+    (should-not (mongodb-select-server conn 'read))))
 
 
 
-(ert-deftest mongo-test-topology-replica-secondary-me-mismatch-removes ()
+(ert-deftest mongodb-test-topology-replica-secondary-me-mismatch-removes ()
   "Replica-set topology should remove non-primary members with wrong me."
-  (let* ((conn (make-mongo-conn :host "alias-secondary"
+  (let* ((conn (make-mongodb-conn :host "alias-secondary"
                                 :port 27018
                                 :database "app"))
-         (primary (make-mongo-server-description
+         (primary (make-mongodb-server-description
                    :address "primary:27017"
                    :type 'rs-primary
                    :set-name "rs0"))
-         (old-secondary (make-mongo-server-description
+         (old-secondary (make-mongodb-server-description
                          :address "alias-secondary:27018"
                          :type 'rs-secondary
                          :set-name "rs0"))
-         (old-topology (make-mongo-topology-description
+         (old-topology (make-mongodb-topology-description
                         :type 'replica-set-with-primary
                         :set-name "rs0"
                         :servers `(("primary:27017" . ,primary)
@@ -6421,13 +6421,13 @@
                   ("me" . "secondary:27018")
                   ("hosts" . ("primary:27017"
                               "secondary:27018")))))
-    (setf (mongo-conn-topology conn) old-topology)
-    (let* ((topology (mongo--topology-description-from-hello conn hello))
-           (servers (mongo-topology-description-servers topology)))
-      (should (eq (mongo-topology-description-type topology)
+    (setf (mongodb-conn-topology conn) old-topology)
+    (let* ((topology (mongodb--topology-description-from-hello conn hello))
+           (servers (mongodb-topology-description-servers topology)))
+      (should (eq (mongodb-topology-description-type topology)
                   'replica-set-with-primary))
-      (should (equal (mongo-topology-description-set-name topology) "rs0"))
-      (should (equal (mongo-topology-description-primary-address topology)
+      (should (equal (mongodb-topology-description-set-name topology) "rs0"))
+      (should (equal (mongodb-topology-description-primary-address topology)
                      "primary:27017"))
       (should (eq (cdr (assoc "primary:27017" servers))
                   primary))
@@ -6436,19 +6436,19 @@
 
 
 
-(ert-deftest mongo-test-topology-direct-secondary-me-mismatch-is-kept ()
+(ert-deftest mongodb-test-topology-direct-secondary-me-mismatch-is-kept ()
   "Single topology should not remove direct members when me is canonical."
-  (let* ((conn (make-mongo-conn
+  (let* ((conn (make-mongodb-conn
                 :host "alias-secondary"
                 :port 27018
                 :database "app"
                 :params '(:url
                           "mongodb://alias-secondary:27018/app?directConnection=true")))
-         (old-secondary (make-mongo-server-description
+         (old-secondary (make-mongodb-server-description
                          :address "alias-secondary:27018"
                          :type 'rs-secondary
                          :set-name "rs0"))
-         (old-topology (make-mongo-topology-description
+         (old-topology (make-mongodb-topology-description
                         :type 'single
                         :servers `(("alias-secondary:27018" . ,old-secondary))
                         :compatible t))
@@ -6459,32 +6459,32 @@
                   ("me" . "secondary:27018")
                   ("hosts" . ("primary:27017"
                               "secondary:27018")))))
-    (setf (mongo-conn-topology conn) old-topology)
-    (let* ((topology (mongo--topology-description-from-hello conn hello))
-           (servers (mongo-topology-description-servers topology))
+    (setf (mongodb-conn-topology conn) old-topology)
+    (let* ((topology (mongodb--topology-description-from-hello conn hello))
+           (servers (mongodb-topology-description-servers topology))
            (server (cdr (assoc "alias-secondary:27018" servers))))
-      (should (eq (mongo-topology-description-type topology) 'single))
-      (should (eq (mongo-server-description-type server) 'rs-secondary))
-      (should (equal (mongo-server-description-me server)
+      (should (eq (mongodb-topology-description-type topology) 'single))
+      (should (eq (mongodb-server-description-type server) 'rs-secondary))
+      (should (equal (mongodb-server-description-me server)
                      "secondary:27018"))
       (should-not (assoc "secondary:27018" servers)))))
 
 
 
-(ert-deftest mongo-test-topology-replica-primary-me-alias-is-kept-for-fallback ()
+(ert-deftest mongodb-test-topology-replica-primary-me-alias-is-kept-for-fallback ()
   "Primary aliases should remain for local port-forward fallback."
-  (let* ((conn (make-mongo-conn :host "alias-primary"
+  (let* ((conn (make-mongodb-conn :host "alias-primary"
                                 :port 27021
                                 :database "app"))
-         (old-primary (make-mongo-server-description
+         (old-primary (make-mongodb-server-description
                        :address "alias-primary:27021"
                        :type 'rs-primary
                        :set-name "rs0"))
-         (old-secondary (make-mongo-server-description
+         (old-secondary (make-mongodb-server-description
                          :address "secondary:27018"
                          :type 'rs-secondary
                          :set-name "rs0"))
-         (old-topology (make-mongo-topology-description
+         (old-topology (make-mongodb-topology-description
                         :type 'replica-set-with-primary
                         :set-name "rs0"
                         :servers `(("alias-primary:27021" . ,old-primary)
@@ -6498,129 +6498,129 @@
                   ("me" . "primary:27017")
                   ("hosts" . ("primary:27017"
                               "secondary:27018")))))
-    (setf (mongo-conn-topology conn) old-topology)
-    (let* ((topology (mongo--topology-description-from-hello conn hello))
-           (servers (mongo-topology-description-servers topology))
+    (setf (mongodb-conn-topology conn) old-topology)
+    (let* ((topology (mongodb--topology-description-from-hello conn hello))
+           (servers (mongodb-topology-description-servers topology))
            (server (cdr (assoc "alias-primary:27021" servers))))
-      (should (eq (mongo-topology-description-type topology)
+      (should (eq (mongodb-topology-description-type topology)
                   'replica-set-with-primary))
-      (should (equal (mongo-topology-description-primary-address topology)
+      (should (equal (mongodb-topology-description-primary-address topology)
                      "alias-primary:27021"))
-      (should (eq (mongo-server-description-type server) 'rs-primary))
-      (should (equal (mongo-server-description-me server)
+      (should (eq (mongodb-server-description-type server) 'rs-primary))
+      (should (equal (mongodb-server-description-me server)
                      "primary:27017"))
       (should (assoc "primary:27017" servers))
       (should (assoc "secondary:27018" servers)))))
 
 
 
-(ert-deftest mongo-test-hello-refreshes-topology-description ()
-  "mongo-hello should refresh cached hello and topology descriptions."
-  (let ((conn (make-mongo-conn :host "db"
+(ert-deftest mongodb-test-hello-refreshes-topology-description ()
+  "mongodb-hello should refresh cached hello and topology descriptions."
+  (let ((conn (make-mongodb-conn :host "db"
                                :port 27017
                                :database "app"
                                :hello-command "hello"))
         captured)
-    (cl-letf (((symbol-function 'mongo-command)
+    (cl-letf (((symbol-function 'mongodb-command)
                (lambda (_conn database command &optional _timeout)
                  (setq captured (list database command))
                  '(("ok" . 1)
                    ("maxWireVersion" . 17)
                    ("msg" . "isdbgrid")))))
-      (mongo-hello conn))
+      (mongodb-hello conn))
     (should (equal captured
                    '("admin" (("hello" . 1)))))
-    (should (equal (mongo-conn-last-hello conn)
+    (should (equal (mongodb-conn-last-hello conn)
                    '(("ok" . 1)
                      ("maxWireVersion" . 17)
                      ("msg" . "isdbgrid"))))
-    (should (eq (mongo-topology-description-type
-                 (mongo-conn-topology conn))
+    (should (eq (mongodb-topology-description-type
+                 (mongodb-conn-topology conn))
                 'sharded))
-    (let ((server (cdar (mongo-topology-description-servers
-                         (mongo-conn-topology conn)))))
-      (should (eq (mongo-server-description-type server) 'mongos)))))
+    (let ((server (cdar (mongodb-topology-description-servers
+                         (mongodb-conn-topology conn)))))
+      (should (eq (mongodb-server-description-type server) 'mongos)))))
 
 
 
-(ert-deftest mongo-test-awaitable-hello-includes-topology-version ()
-  "mongo-awaitable-hello should send topologyVersion and maxAwaitTimeMS."
-  (let* ((conn (make-mongo-conn :host "db"
+(ert-deftest mongodb-test-awaitable-hello-includes-topology-version ()
+  "mongodb-awaitable-hello should send topologyVersion and maxAwaitTimeMS."
+  (let* ((conn (make-mongodb-conn :host "db"
                                 :port 27017
                                 :database "app"
                                 :hello-command "hello"))
          (topology-version '(("processId" . (("$oid" . "64f000000000000000000001")))
                              ("counter" . 7)))
          (command-topology-version
-          (mongo-document
+          (mongodb-document
            `(("processId" .
-              ,(mongo-object-id "64f000000000000000000001"))
-             ("counter" . ,(mongo-int64 7)))))
+              ,(mongodb-object-id "64f000000000000000000001"))
+             ("counter" . ,(mongodb-int64 7)))))
          (next-topology-version '(("processId" . (("$oid" . "64f000000000000000000001")))
                                   ("counter" . 8)))
          captured)
-    (setf (mongo-conn-topology conn)
-          (mongo--topology-description-from-hello
+    (setf (mongodb-conn-topology conn)
+          (mongodb--topology-description-from-hello
            conn
            `(("ok" . 1)
              ("maxWireVersion" . 17)
              ("topologyVersion" . ,topology-version))))
-    (cl-letf (((symbol-function 'mongo-command)
+    (cl-letf (((symbol-function 'mongodb-command)
                (lambda (_conn database command &optional _timeout)
                  (setq captured (list database command))
                  `(("ok" . 1)
                    ("maxWireVersion" . 17)
                    ("topologyVersion" . ,next-topology-version)))))
-      (mongo-awaitable-hello conn 250))
+      (mongodb-awaitable-hello conn 250))
     (should (equal captured
                    `("admin"
                      (("hello" . 1)
                       ("topologyVersion" . ,command-topology-version)
                       ("maxAwaitTimeMS" . 250)))))
-    (should (equal (mongo-server-description-topology-version
-                    (mongo--current-server-description conn))
+    (should (equal (mongodb-server-description-topology-version
+                    (mongodb--current-server-description conn))
                    next-topology-version))))
 
 
 
-(ert-deftest mongo-test-awaitable-hello-falls-back-without-topology-version ()
-  "mongo-awaitable-hello should use ordinary hello when no topologyVersion is known."
-  (let ((conn (make-mongo-conn :host "db"
+(ert-deftest mongodb-test-awaitable-hello-falls-back-without-topology-version ()
+  "mongodb-awaitable-hello should use ordinary hello when no topologyVersion is known."
+  (let ((conn (make-mongodb-conn :host "db"
                                :port 27017
                                :database "app"
                                :hello-command "hello"))
         captured)
-    (cl-letf (((symbol-function 'mongo-command)
+    (cl-letf (((symbol-function 'mongodb-command)
                (lambda (_conn database command &optional _timeout)
                  (setq captured (list database command))
                  '(("ok" . 1)
                    ("maxWireVersion" . 17)))))
-      (mongo-awaitable-hello conn 250))
+      (mongodb-awaitable-hello conn 250))
     (should (equal captured
                    '("admin" (("hello" . 1)))))))
 
 
 
-(ert-deftest mongo-test-monitor-once-clears-error ()
+(ert-deftest mongodb-test-monitor-once-clears-error ()
   "MongoDB monitor heartbeat should clear old monitor errors on success."
-  (let ((conn (make-mongo-conn :host "db"
+  (let ((conn (make-mongodb-conn :host "db"
                                :port 27017
                                :database "app"))
         captured)
-    (setf (mongo-conn-monitor-error conn) '(mongo-error "old"))
-    (cl-letf (((symbol-function 'mongo-awaitable-hello)
+    (setf (mongodb-conn-monitor-error conn) '(mongodb-error "old"))
+    (cl-letf (((symbol-function 'mongodb-awaitable-hello)
                (lambda (_conn max-await timeout)
                  (setq captured (list max-await timeout))
                  '(("ok" . 1)
                    ("maxWireVersion" . 17)))))
-      (should (equal (mongo-monitor-once conn 250 3)
+      (should (equal (mongodb-monitor-once conn 250 3)
                      '(("ok" . 1)
                        ("maxWireVersion" . 17)))))
     (should (equal captured '(250 3)))
-    (should-not (mongo-conn-monitor-error conn))))
+    (should-not (mongodb-conn-monitor-error conn))))
 
 
-(ert-deftest mongo-test-monitor-heartbeat-emits-sdam-success-events ()
+(ert-deftest mongodb-test-monitor-heartbeat-emits-sdam-success-events ()
   "Monitor heartbeats should emit paired SDAM started/succeeded events."
   (let* ((topology-version
           '(("processId" . (("$oid" . "64f000000000000000000001")))
@@ -6629,29 +6629,29 @@
                   ("maxWireVersion" . 17)
                   ("connectionId" . 42)
                   ("topologyVersion" . ,topology-version)))
-         (conn (make-mongo-conn :host "db"
+         (conn (make-mongodb-conn :host "db"
                                 :port 27017
                                 :database "app"))
          events)
-    (setf (mongo-conn-last-hello conn)
+    (setf (mongodb-conn-last-hello conn)
           '(("ok" . 1)
             ("connectionId" . 41)))
-    (setf (mongo-conn-topology conn)
-          (mongo--topology-description-from-hello
+    (setf (mongodb-conn-topology conn)
+          (mongodb--topology-description-from-hello
            conn
            `(("ok" . 1)
              ("maxWireVersion" . 17)
              ("topologyVersion" . ,topology-version))))
-    (cl-letf (((symbol-function 'mongo-awaitable-hello)
+    (cl-letf (((symbol-function 'mongodb-awaitable-hello)
                (lambda (_conn max-await timeout)
                  (should (= max-await 250))
                  (should (= timeout 3))
-                 (setf (mongo-conn-last-hello conn) reply)
+                 (setf (mongodb-conn-last-hello conn) reply)
                  reply)))
-      (let ((mongo-sdam-event-hook
+      (let ((mongodb-sdam-event-hook
              (list (lambda (event)
                      (push event events)))))
-        (should (equal (mongo-monitor-once conn 250 3) reply))))
+        (should (equal (mongodb-monitor-once conn 250 3) reply))))
     (let ((ordered (nreverse events)))
       (should (equal (mapcar (lambda (event)
                                (alist-get 'type event))
@@ -6670,20 +6670,20 @@
       (should (equal (alist-get 'reply (nth 1 ordered)) reply)))))
 
 
-(ert-deftest mongo-test-monitor-heartbeat-emits-sdam-failure-events ()
+(ert-deftest mongodb-test-monitor-heartbeat-emits-sdam-failure-events ()
   "Monitor heartbeat failures should emit paired SDAM started/failed events."
-  (let ((conn (make-mongo-conn :host "db"
+  (let ((conn (make-mongodb-conn :host "db"
                                :port 27017
                                :database "app"))
         events)
-    (cl-letf (((symbol-function 'mongo-awaitable-hello)
+    (cl-letf (((symbol-function 'mongodb-awaitable-hello)
                (lambda (&rest _args)
-                 (signal 'mongo-error (list "heartbeat failed")))))
-      (let ((mongo-sdam-event-hook
+                 (signal 'mongodb-error (list "heartbeat failed")))))
+      (let ((mongodb-sdam-event-hook
              (list (lambda (event)
                      (push event events)))))
-        (should-error (mongo-monitor-once conn 250 3)
-                      :type 'mongo-error)))
+        (should-error (mongodb-monitor-once conn 250 3)
+                      :type 'mongodb-error)))
     (let ((ordered (nreverse events)))
       (should (equal (mapcar (lambda (event)
                                (alist-get 'type event))
@@ -6696,10 +6696,10 @@
                      "db:27017"))
       (should (numberp (alist-get 'duration-ms (nth 1 ordered))))
       (should (equal (alist-get 'failure (nth 1 ordered))
-                     '(mongo-error "heartbeat failed"))))))
+                     '(mongodb-error "heartbeat failed"))))))
 
 
-(ert-deftest mongo-test-sdam-description-change-events-from-hello ()
+(ert-deftest mongodb-test-sdam-description-change-events-from-hello ()
   "Post-handshake hello should emit SDAM description change events."
   (let* ((primary-hello
           '(("ok" . 1)
@@ -6713,20 +6713,20 @@
             ("setName" . "rs0")
             ("secondary" . t)
             ("hosts" . ("db:27017"))))
-         (conn (make-mongo-conn :host "db"
+         (conn (make-mongodb-conn :host "db"
                                 :port 27017
                                 :database "app"))
          events)
-    (setf (mongo-conn-topology conn)
-          (mongo--topology-description-from-hello conn primary-hello))
-    (cl-letf (((symbol-function 'mongo-command)
+    (setf (mongodb-conn-topology conn)
+          (mongodb--topology-description-from-hello conn primary-hello))
+    (cl-letf (((symbol-function 'mongodb-command)
                (lambda (_conn _database command &optional _timeout)
                  (should (equal command '(("hello" . 1))))
                  secondary-hello)))
-      (let ((mongo-sdam-event-hook
+      (let ((mongodb-sdam-event-hook
              (list (lambda (event)
                      (push event events)))))
-        (should (equal (mongo-hello conn) secondary-hello))))
+        (should (equal (mongodb-hello conn) secondary-hello))))
     (let ((ordered (nreverse events)))
       (should (equal (mapcar (lambda (event)
                                (alist-get 'type event))
@@ -6738,21 +6738,21 @@
                      (alist-get 'topology-id (nth 1 ordered))))
       (should (equal (alist-get 'address (nth 0 ordered))
                      "db:27017"))
-      (should (eq (mongo-server-description-type
+      (should (eq (mongodb-server-description-type
                    (alist-get 'previous-description (nth 0 ordered)))
                   'rs-primary))
-      (should (eq (mongo-server-description-type
+      (should (eq (mongodb-server-description-type
                    (alist-get 'new-description (nth 0 ordered)))
                   'rs-secondary))
-      (should (eq (mongo-topology-description-type
+      (should (eq (mongodb-topology-description-type
                    (alist-get 'previous-description (nth 1 ordered)))
                   'replica-set-with-primary))
-      (should (eq (mongo-topology-description-type
+      (should (eq (mongodb-topology-description-type
                    (alist-get 'new-description (nth 1 ordered)))
                   'replica-set-no-primary)))))
 
 
-(ert-deftest mongo-test-sdam-description-change-ignores-rtt-only ()
+(ert-deftest mongodb-test-sdam-description-change-ignores-rtt-only ()
   "SDAM description change events should ignore RTT-only refreshes."
   (let* ((hello
           '(("ok" . 1)
@@ -6760,27 +6760,27 @@
             ("setName" . "rs0")
             ("secondary" . t)
             ("hosts" . ("db:27017"))))
-         (conn (make-mongo-conn :host "db"
+         (conn (make-mongodb-conn :host "db"
                                 :port 27017
                                 :database "app"))
          events)
-    (setf (mongo-conn-topology conn)
-          (mongo--topology-description-from-hello conn hello 0.100))
+    (setf (mongodb-conn-topology conn)
+          (mongodb--topology-description-from-hello conn hello 0.100))
     (cl-letf (((symbol-function 'float-time)
                (let ((times '(1000.0 1000.2)))
                  (lambda ()
                    (prog1 (or (pop times) 1000.2)))))
-              ((symbol-function 'mongo-command)
+              ((symbol-function 'mongodb-command)
                (lambda (&rest _args)
                  hello)))
-      (let ((mongo-sdam-event-hook
+      (let ((mongodb-sdam-event-hook
              (list (lambda (event)
                      (push event events)))))
-        (should (equal (mongo-hello conn) hello))))
+        (should (equal (mongodb-hello conn) hello))))
     (should-not events)))
 
 
-(ert-deftest mongo-test-sdam-description-change-events-from-monitor-error ()
+(ert-deftest mongodb-test-sdam-description-change-events-from-monitor-error ()
   "Monitor errors should emit SDAM description changes to Unknown."
   (let* ((hello
           '(("ok" . 1)
@@ -6788,20 +6788,20 @@
             ("setName" . "rs0")
             ("isWritablePrimary" . t)
             ("hosts" . ("db:27017"))))
-         (conn (make-mongo-conn :host "db"
+         (conn (make-mongodb-conn :host "db"
                                 :port 27017
                                 :database "app"))
          events)
-    (setf (mongo-conn-topology conn)
-          (mongo--topology-description-from-hello conn hello))
-    (cl-letf (((symbol-function 'mongo-awaitable-hello)
+    (setf (mongodb-conn-topology conn)
+          (mongodb--topology-description-from-hello conn hello))
+    (cl-letf (((symbol-function 'mongodb-awaitable-hello)
                (lambda (&rest _args)
-                 (signal 'mongo-error (list "heartbeat failed")))))
-      (let ((mongo-sdam-event-hook
+                 (signal 'mongodb-error (list "heartbeat failed")))))
+      (let ((mongodb-sdam-event-hook
              (list (lambda (event)
                      (push event events)))))
-        (should-error (mongo-monitor-once conn 250 3)
-                      :type 'mongo-error)))
+        (should-error (mongodb-monitor-once conn 250 3)
+                      :type 'mongodb-error)))
     (let ((ordered (nreverse events)))
       (should (equal (mapcar (lambda (event)
                                (alist-get 'type event))
@@ -6810,39 +6810,39 @@
                        server-description-changed
                        topology-description-changed
                        server-heartbeat-failed)))
-      (should (eq (mongo-server-description-type
+      (should (eq (mongodb-server-description-type
                    (alist-get 'new-description (nth 1 ordered)))
                   'unknown))
-      (should (eq (mongo-topology-description-type
+      (should (eq (mongodb-topology-description-type
                    (alist-get 'new-description (nth 2 ordered)))
                   'replica-set-no-primary)))))
 
 
-(ert-deftest mongo-test-sdam-lifecycle-events-connect-disconnect ()
+(ert-deftest mongodb-test-sdam-lifecycle-events-connect-disconnect ()
   "Connect/disconnect should emit SDAM opening and closed lifecycle events."
   (let (events conn)
     (cl-letf (((symbol-function 'make-network-process)
                (lambda (&rest _args) 'proc))
               ((symbol-function 'set-process-coding-system) #'ignore)
-              ((symbol-function 'mongo--send-handshake)
+              ((symbol-function 'mongodb--send-handshake)
                (lambda (&rest _args) 1))
-              ((symbol-function 'mongo--recv-handshake-message)
+              ((symbol-function 'mongodb--recv-handshake-message)
                (lambda (&rest _args)
                  '(("ok" . 1)
                    ("maxWireVersion" . 17))))
               ((symbol-function 'process-live-p)
                (lambda (_proc) t))
               ((symbol-function 'delete-process) #'ignore))
-      (let ((mongo-sdam-event-hook
+      (let ((mongodb-sdam-event-hook
              (list (lambda (event)
                      (push event events)))))
         (unwind-protect
-            (setq conn (mongo-connect '(:host "db"
+            (setq conn (mongodb-connect '(:host "db"
                                         :port 27017
                                         :database "app")))
           (when conn
-            (mongo-disconnect conn)
-            (mongo-disconnect conn)))))
+            (mongodb-disconnect conn)
+            (mongodb-disconnect conn)))))
     (let* ((ordered (nreverse events))
            (types (mapcar (lambda (event)
                             (alist-get 'type event))
@@ -6864,104 +6864,104 @@
                              (equal id (car topology-ids)))
                            topology-ids))
       (should (equal (alist-get 'address (nth 1 ordered)) "db:27017"))
-      (should (eq (mongo-server-description-type
+      (should (eq (mongodb-server-description-type
                    (alist-get 'previous-description (nth 2 ordered)))
                   'unknown))
-      (should (eq (mongo-server-description-type
+      (should (eq (mongodb-server-description-type
                    (alist-get 'new-description (nth 2 ordered)))
                   'standalone))
-      (should (eq (mongo-topology-description-type
+      (should (eq (mongodb-topology-description-type
                    (alist-get 'previous-description (nth 3 ordered)))
                   'unknown))
-      (should (eq (mongo-topology-description-type
+      (should (eq (mongodb-topology-description-type
                    (alist-get 'new-description (nth 3 ordered)))
                   'single))
-      (should (eq (mongo-server-description-type
+      (should (eq (mongodb-server-description-type
                    (alist-get 'new-description (nth 4 ordered)))
                   'unknown))
-      (should (eq (mongo-topology-description-type
+      (should (eq (mongodb-topology-description-type
                    (alist-get 'new-description (nth 5 ordered)))
                   'unknown))
       (should (eq (car (last types)) 'topology-closed)))))
 
 
 
-(ert-deftest mongo-test-monitor-once-can-use-poll-mode ()
+(ert-deftest mongodb-test-monitor-once-can-use-poll-mode ()
   "serverMonitoringMode=poll should use ordinary hello for monitoring."
-  (let ((conn (make-mongo-conn :host "db"
+  (let ((conn (make-mongodb-conn :host "db"
                                :port 27017
                                :database "app"
                                :server-monitoring-mode 'poll))
         captured)
-    (cl-letf (((symbol-function 'mongo-hello)
+    (cl-letf (((symbol-function 'mongodb-hello)
                (lambda (_conn timeout)
                  (setq captured (list 'hello timeout))
                  '(("ok" . 1)
                    ("maxWireVersion" . 17))))
-              ((symbol-function 'mongo-awaitable-hello)
+              ((symbol-function 'mongodb-awaitable-hello)
                (lambda (&rest _args)
                  (ert-fail "poll mode should not use awaitable hello"))))
-      (should (equal (mongo-monitor-once conn 250 3)
+      (should (equal (mongodb-monitor-once conn 250 3)
                      '(("ok" . 1)
                        ("maxWireVersion" . 17)))))
     (should (equal captured '(hello 3)))))
 
 
 
-(ert-deftest mongo-test-monitor-once-load-balanced-is-noop ()
+(ert-deftest mongodb-test-monitor-once-load-balanced-is-noop ()
   "Load-balanced connections should not run monitoring hello commands."
   (let* ((last-hello '(("ok" . 1)
                        ("maxWireVersion" . 17)
                        ("serviceId" . "service-1")))
-         (conn (make-mongo-conn :host "lb"
+         (conn (make-mongodb-conn :host "lb"
                                 :port 27017
                                 :database "app"
                                 :load-balanced t
                                 :last-hello last-hello)))
-    (setf (mongo-conn-monitor-error conn) '(mongo-error "old"))
-    (cl-letf (((symbol-function 'mongo-hello)
+    (setf (mongodb-conn-monitor-error conn) '(mongodb-error "old"))
+    (cl-letf (((symbol-function 'mongodb-hello)
                (lambda (&rest _args)
                  (ert-fail "load-balanced monitor should not call hello")))
-              ((symbol-function 'mongo-awaitable-hello)
+              ((symbol-function 'mongodb-awaitable-hello)
                (lambda (&rest _args)
                  (ert-fail
                   "load-balanced monitor should not call awaitable hello"))))
-      (should (equal (mongo-monitor-once conn 250 3)
+      (should (equal (mongodb-monitor-once conn 250 3)
                      last-hello)))
-    (should-not (mongo-conn-monitor-error conn))))
+    (should-not (mongodb-conn-monitor-error conn))))
 
 
 
-(ert-deftest mongo-test-monitor-once-marks-server-unknown-on-error ()
+(ert-deftest mongodb-test-monitor-once-marks-server-unknown-on-error ()
   "Monitor errors should mark current server Unknown while preserving topology."
-  (let* ((conn (make-mongo-conn :host "db"
+  (let* ((conn (make-mongodb-conn :host "db"
                                 :port 27017
                                 :database "app"))
          (hello '(("ok" . 1)
                   ("maxWireVersion" . 17)
                   ("setName" . "rs0")
                   ("isWritablePrimary" . t))))
-    (setf (mongo-conn-topology conn)
-          (mongo--topology-description-from-hello conn hello))
-    (cl-letf (((symbol-function 'mongo-awaitable-hello)
+    (setf (mongodb-conn-topology conn)
+          (mongodb--topology-description-from-hello conn hello))
+    (cl-letf (((symbol-function 'mongodb-awaitable-hello)
                (lambda (&rest _args)
-                 (signal 'mongo-error (list "heartbeat failed")))))
-      (should-error (mongo-monitor-once conn 250 3) :type 'mongo-error))
-    (should (mongo-conn-monitor-error conn))
-    (should (eq (mongo-topology-description-type
-                 (mongo-conn-topology conn))
+                 (signal 'mongodb-error (list "heartbeat failed")))))
+      (should-error (mongodb-monitor-once conn 250 3) :type 'mongodb-error))
+    (should (mongodb-conn-monitor-error conn))
+    (should (eq (mongodb-topology-description-type
+                 (mongodb-conn-topology conn))
                 'replica-set-no-primary))
-    (let ((server (mongo--current-server-description conn)))
-      (should (eq (mongo-server-description-type server) 'unknown))
+    (let ((server (mongodb--current-server-description conn)))
+      (should (eq (mongodb-server-description-type server) 'unknown))
       (should (string-match-p
                "heartbeat failed"
-               (mongo-server-description-error server))))))
+               (mongodb-server-description-error server))))))
 
 
 
-(ert-deftest mongo-test-start-stop-monitor-schedules-tick ()
+(ert-deftest mongodb-test-start-stop-monitor-schedules-tick ()
   "Explicit MongoDB monitor timers should schedule ticks and stop cleanly."
-  (let ((conn (make-mongo-conn :host "db"
+  (let ((conn (make-mongodb-conn :host "db"
                                :port 27017
                                :database "app"
                                :process 'proc
@@ -6978,25 +6978,25 @@
                  (push timer cancelled)))
               ((symbol-function 'process-live-p)
                (lambda (_proc) t))
-              ((symbol-function 'mongo-monitor-once)
+              ((symbol-function 'mongodb-monitor-once)
                (lambda (_conn max-await timeout)
                  (setq ticked (list max-await timeout))
                  '(("ok" . 1)))))
-      (should (eq (mongo-start-monitor conn 2 250 4) conn))
-      (should (eq (mongo-conn-monitor-timer conn) 'fake-monitor-timer))
+      (should (eq (mongodb-start-monitor conn 2 250 4) conn))
+      (should (eq (mongodb-conn-monitor-timer conn) 'fake-monitor-timer))
       (should (equal (list (nth 0 scheduled) (nth 1 scheduled))
                      '(0 2)))
       (apply (nth 2 scheduled) (nth 3 scheduled))
       (should (equal ticked '(250 4)))
-      (should (eq (mongo-stop-monitor conn) conn))
-      (should-not (mongo-conn-monitor-timer conn))
+      (should (eq (mongodb-stop-monitor conn) conn))
+      (should-not (mongodb-conn-monitor-timer conn))
       (should (equal cancelled '(fake-monitor-timer))))))
 
 
 
-(ert-deftest mongo-test-start-monitor-load-balanced-is-noop ()
+(ert-deftest mongodb-test-start-monitor-load-balanced-is-noop ()
   "Load-balanced connections should not schedule monitor timers."
-  (let ((conn (make-mongo-conn :host "lb"
+  (let ((conn (make-mongodb-conn :host "lb"
                                :port 27017
                                :database "app"
                                :load-balanced t
@@ -7009,15 +7009,15 @@
                (lambda (&rest _args)
                  (ert-fail
                   "load-balanced monitor should not schedule a timer"))))
-      (should (eq (mongo-start-monitor conn 2 250 4) conn)))
-    (should-not (mongo-conn-monitor-timer conn))
+      (should (eq (mongodb-start-monitor conn 2 250 4) conn)))
+    (should-not (mongodb-conn-monitor-timer conn))
     (should (equal cancelled '(old-monitor-timer)))))
 
 
 
-(ert-deftest mongo-test-start-monitor-uses-connection-heartbeat ()
+(ert-deftest mongodb-test-start-monitor-uses-connection-heartbeat ()
   "heartbeatFrequencyMS should configure explicit monitor scheduling."
-  (let ((conn (make-mongo-conn :host "db"
+  (let ((conn (make-mongodb-conn :host "db"
                                :port 27017
                                :database "app"
                                :process 'proc
@@ -7031,11 +7031,11 @@
                  'fake-monitor-timer))
               ((symbol-function 'process-live-p)
                (lambda (_proc) t))
-              ((symbol-function 'mongo-monitor-once)
+              ((symbol-function 'mongodb-monitor-once)
                (lambda (_conn max-await timeout)
                  (setq ticked (list max-await timeout))
                  '(("ok" . 1)))))
-      (mongo-start-monitor conn)
+      (mongodb-start-monitor conn)
       (should (equal (list (nth 0 scheduled) (nth 1 scheduled))
                      '(0 1.5)))
       (apply (nth 2 scheduled) (nth 3 scheduled))
@@ -7043,46 +7043,46 @@
 
 
 
-(ert-deftest mongo-test-select-server-uses-current-topology ()
-  "mongo-select-server should classify the current topology server."
-  (let* ((primary-conn (make-mongo-conn :host "seed-b"
+(ert-deftest mongodb-test-select-server-uses-current-topology ()
+  "mongodb-select-server should classify the current topology server."
+  (let* ((primary-conn (make-mongodb-conn :host "seed-b"
                                         :port 27018
                                         :database "app"))
          (secondary-read-preference
-          (mongo--params-read-preference
+          (mongodb--params-read-preference
            '(:read-preference secondary)))
          (primary-hello '(("ok" . 1)
                           ("maxWireVersion" . 17)
                           ("setName" . "rs0")
                           ("isWritablePrimary" . t)))
-         (secondary-conn (make-mongo-conn :host "seed-a"
+         (secondary-conn (make-mongodb-conn :host "seed-a"
                                           :port 27017
                                           :database "app"))
          (secondary-hello '(("ok" . 1)
                             ("maxWireVersion" . 17)
                             ("setName" . "rs0")
                             ("secondary" . t))))
-    (setf (mongo-conn-topology primary-conn)
-          (mongo--topology-description-from-hello
+    (setf (mongodb-conn-topology primary-conn)
+          (mongodb--topology-description-from-hello
            primary-conn primary-hello))
-    (setf (mongo-conn-topology secondary-conn)
-          (mongo--topology-description-from-hello
+    (setf (mongodb-conn-topology secondary-conn)
+          (mongodb--topology-description-from-hello
            secondary-conn secondary-hello))
-    (setf (mongo-conn-read-preference secondary-conn)
+    (setf (mongodb-conn-read-preference secondary-conn)
           secondary-read-preference)
-    (should (eq (mongo-server-description-type
-                 (mongo-select-server primary-conn 'write))
+    (should (eq (mongodb-server-description-type
+                 (mongodb-select-server primary-conn 'write))
                 'rs-primary))
-    (should (eq (mongo-server-description-type
-                 (mongo-select-server secondary-conn 'read))
+    (should (eq (mongodb-server-description-type
+                 (mongodb-select-server secondary-conn 'read))
                 'rs-secondary))
-    (should-not (mongo-select-server secondary-conn 'write))))
+    (should-not (mongodb-select-server secondary-conn 'write))))
 
 
 
-(ert-deftest mongo-test-select-server-filters-read-preference-tags ()
-  "mongo-select-server should enforce readPreferenceTags on replica reads."
-  (let* ((conn (make-mongo-conn :host "seed-a"
+(ert-deftest mongodb-test-select-server-filters-read-preference-tags ()
+  "mongodb-select-server should enforce readPreferenceTags on replica reads."
+  (let* ((conn (make-mongodb-conn :host "seed-a"
                                 :port 27017
                                 :database "app"))
          (hello '(("ok" . 1)
@@ -7091,194 +7091,194 @@
                   ("secondary" . t)
                   ("tags" . (("dc" . "ny")
                              ("rack" . "1")))))
-         (topology (mongo--topology-description-from-hello conn hello)))
-    (setf (mongo-conn-topology conn) topology)
-    (setf (mongo-conn-read-preference conn)
-          (mongo--params-read-preference
+         (topology (mongodb--topology-description-from-hello conn hello)))
+    (setf (mongodb-conn-topology conn) topology)
+    (setf (mongodb-conn-read-preference conn)
+          (mongodb--params-read-preference
            '(:read-preference secondary
              :read-preference-tags ((("dc" . "ny"))))))
-    (should (mongo-select-server conn 'read))
-    (setf (mongo-conn-read-preference conn)
-          (mongo--params-read-preference
+    (should (mongodb-select-server conn 'read))
+    (setf (mongodb-conn-read-preference conn)
+          (mongodb--params-read-preference
            '(:read-preference secondary
              :read-preference-tags ((("dc" . "sf"))))))
-    (should-not (mongo-select-server conn 'read))
-    (let ((empty-tag-set (mongo-document nil)))
-      (setf (mongo-conn-read-preference conn)
-            (mongo--params-read-preference
+    (should-not (mongodb-select-server conn 'read))
+    (let ((empty-tag-set (mongodb-document nil)))
+      (setf (mongodb-conn-read-preference conn)
+            (mongodb--params-read-preference
              (list :read-preference 'secondary
                    :read-preference-tags
                    (list '(("dc" . "sf")) empty-tag-set)))))
-    (should (mongo-select-server conn 'read))))
+    (should (mongodb-select-server conn 'read))))
 
 
 
-(ert-deftest mongo-test-select-server-filters-max-staleness ()
-  "mongo-select-server should reject stale secondaries for maxStalenessSeconds."
-  (let* ((conn (make-mongo-conn :host "seed-s"
+(ert-deftest mongodb-test-select-server-filters-max-staleness ()
+  "mongodb-select-server should reject stale secondaries for maxStalenessSeconds."
+  (let* ((conn (make-mongodb-conn :host "seed-s"
                                 :port 27018
                                 :database "app"
                                 :heartbeat-frequency 10))
          (read-preference
-          (mongo--params-read-preference
+          (mongodb--params-read-preference
            '(:read-preference secondary
              :max-staleness-seconds 120)))
          (primary
-          (make-mongo-server-description
+          (make-mongodb-server-description
            :address "seed-p:27017"
            :type 'rs-primary
            :max-wire-version 17
            :last-update-time 1000.0
            :last-write-date 1000.0))
          (secondary
-          (make-mongo-server-description
+          (make-mongodb-server-description
            :address "seed-s:27018"
            :type 'rs-secondary
            :max-wire-version 17
            :last-update-time 1000.0
            :last-write-date 880.0))
          (topology
-          (make-mongo-topology-description
+          (make-mongodb-topology-description
            :type 'replica-set-with-primary
            :primary-address "seed-p:27017"
            :servers `(("seed-p:27017" . ,primary)
                       ("seed-s:27018" . ,secondary)))))
-    (setf (mongo-conn-read-preference conn) read-preference)
-    (setf (mongo-conn-topology conn) topology)
-    (should-not (mongo-select-server conn 'read))
-    (setf (mongo-server-description-last-write-date secondary) 890.0)
-    (should (mongo-select-server conn 'read))))
+    (setf (mongodb-conn-read-preference conn) read-preference)
+    (setf (mongodb-conn-topology conn) topology)
+    (should-not (mongodb-select-server conn 'read))
+    (setf (mongodb-server-description-last-write-date secondary) 890.0)
+    (should (mongodb-select-server conn 'read))))
 
 
 
-(ert-deftest mongo-test-pool-opens-min-pool-size ()
+(ert-deftest mongodb-test-pool-opens-min-pool-size ()
   "MongoDB pools should pre-open minPoolSize native connections."
   (let ((created 0)
         disconnected
         pool)
-    (cl-letf (((symbol-function 'mongo-connect)
+    (cl-letf (((symbol-function 'mongodb-connect)
                (lambda (_params)
                  (cl-incf created)
-                 (make-mongo-conn :process (intern (format "proc-%d" created)))))
-              ((symbol-function 'mongo-disconnect)
+                 (make-mongodb-conn :process (intern (format "proc-%d" created)))))
+              ((symbol-function 'mongodb-disconnect)
                (lambda (conn)
                  (push conn disconnected))))
-      (setq pool (mongo-pool-open '(:min-pool-size 2
+      (setq pool (mongodb-pool-open '(:min-pool-size 2
                                     :max-pool-size 3)))
       (should (= created 2))
-      (should (= (length (mongo-pool-available pool)) 2))
-      (should-not (mongo-pool-in-use pool))
-      (mongo-pool-disconnect pool)
+      (should (= (length (mongodb-pool-available pool)) 2))
+      (should-not (mongodb-pool-in-use pool))
+      (mongodb-pool-disconnect pool)
       (should (= (length disconnected) 2))
-      (should (mongo-pool-closed pool)))))
+      (should (mongodb-pool-closed pool)))))
 
 
-(ert-deftest mongo-test-pool-ready-maintains-min-pool-size ()
-  "mongo-pool-ready should repopulate minPoolSize after a clear."
+(ert-deftest mongodb-test-pool-ready-maintains-min-pool-size ()
+  "mongodb-pool-ready should repopulate minPoolSize after a clear."
   (let ((created 0)
         disconnected
         pool)
-    (cl-letf (((symbol-function 'mongo-connect)
+    (cl-letf (((symbol-function 'mongodb-connect)
                (lambda (_params)
                  (cl-incf created)
-                 (make-mongo-conn
+                 (make-mongodb-conn
                   :process (intern (format "proc-%d" created)))))
-              ((symbol-function 'mongo-disconnect)
+              ((symbol-function 'mongodb-disconnect)
                (lambda (conn)
                  (push conn disconnected))))
-      (setq pool (mongo-pool-open '(:min-pool-size 2
+      (setq pool (mongodb-pool-open '(:min-pool-size 2
                                     :max-pool-size 4)))
       (should (= created 2))
-      (mongo-pool-clear pool)
-      (should (mongo-pool-paused pool))
-      (should-not (mongo-pool-available pool))
+      (mongodb-pool-clear pool)
+      (should (mongodb-pool-paused pool))
+      (should-not (mongodb-pool-available pool))
       (should (= (length disconnected) 2))
-      (mongo-pool-ready pool)
-      (should-not (mongo-pool-paused pool))
+      (mongodb-pool-ready pool)
+      (should-not (mongodb-pool-paused pool))
       (should (= created 4))
-      (should (= (length (mongo-pool-available pool)) 2)))))
+      (should (= (length (mongodb-pool-available pool)) 2)))))
 
 
-(ert-deftest mongo-test-pool-checkout-maintains-min-size-after-prune ()
+(ert-deftest mongodb-test-pool-checkout-maintains-min-size-after-prune ()
   "Checkout should refill minPoolSize after pruning dead idle connections."
   (let ((created 0)
         disconnected
         pool conn)
-    (cl-letf (((symbol-function 'mongo-connect)
+    (cl-letf (((symbol-function 'mongodb-connect)
                (lambda (_params)
                  (cl-incf created)
-                 (make-mongo-conn
+                 (make-mongodb-conn
                   :process (intern (format "proc-%d" created)))))
               ((symbol-function 'process-live-p)
                (lambda (proc)
                  (not (eq proc 'proc-1))))
-              ((symbol-function 'mongo-disconnect)
+              ((symbol-function 'mongodb-disconnect)
                (lambda (wire)
                  (push wire disconnected))))
-      (setq pool (mongo-pool-open '(:min-pool-size 2
+      (setq pool (mongodb-pool-open '(:min-pool-size 2
                                     :max-pool-size 3)))
       (should (= created 2))
-      (setq conn (mongo-pool-checkout pool))
-      (should (eq (mongo-conn-process conn) 'proc-2))
+      (setq conn (mongodb-pool-checkout pool))
+      (should (eq (mongodb-conn-process conn) 'proc-2))
       (should (= created 3))
-      (should (= (length (mongo-pool-in-use pool)) 1))
-      (should (= (length (mongo-pool-available pool)) 1))
-      (should (equal (mapcar #'mongo-conn-process disconnected)
+      (should (= (length (mongodb-pool-in-use pool)) 1))
+      (should (= (length (mongodb-pool-available pool)) 1))
+      (should (equal (mapcar #'mongodb-conn-process disconnected)
                      '(proc-1))))))
 
 
 
-(ert-deftest mongo-test-pool-reuses-released-connection ()
+(ert-deftest mongodb-test-pool-reuses-released-connection ()
   "MongoDB pools should reuse released live connections."
   (let ((created 0)
         pool first second)
-    (cl-letf (((symbol-function 'mongo-connect)
+    (cl-letf (((symbol-function 'mongodb-connect)
                (lambda (_params)
                  (cl-incf created)
-                 (make-mongo-conn :process (intern (format "proc-%d" created)))))
+                 (make-mongodb-conn :process (intern (format "proc-%d" created)))))
               ((symbol-function 'process-live-p)
                (lambda (_proc) t)))
-      (setq pool (mongo-pool-open '(:max-pool-size 2)))
-      (setq first (mongo-pool-checkout pool))
-      (mongo-pool-release pool first)
-      (setq second (mongo-pool-checkout pool))
+      (setq pool (mongodb-pool-open '(:max-pool-size 2)))
+      (setq first (mongodb-pool-checkout pool))
+      (mongodb-pool-release pool first)
+      (setq second (mongodb-pool-checkout pool))
       (should (eq first second))
       (should (= created 1))
-      (should (= (length (mongo-pool-in-use pool)) 1))
-      (should-not (mongo-pool-available pool)))))
+      (should (= (length (mongodb-pool-in-use pool)) 1))
+      (should-not (mongodb-pool-available pool)))))
 
 
-(ert-deftest mongo-test-pool-checkout-tracks-purpose ()
+(ert-deftest mongodb-test-pool-checkout-tracks-purpose ()
   "MongoDB pools should track checked-out connection purposes."
-  (let ((conn (make-mongo-conn :process 'proc))
+  (let ((conn (make-mongodb-conn :process 'proc))
         pool)
-    (cl-letf (((symbol-function 'mongo-connect)
+    (cl-letf (((symbol-function 'mongodb-connect)
                (lambda (_params) conn))
               ((symbol-function 'process-live-p)
                (lambda (_proc) t)))
-      (setq pool (mongo-pool-open '(:max-pool-size 1)))
-      (should (eq (mongo-pool-checkout pool nil 'cursor) conn))
-      (should (eq (mongo--pool-connection-purpose pool conn) 'cursor))
-      (should (= (mongo--pool-purpose-count pool 'cursor) 1))
-      (should (= (mongo--pool-purpose-count pool 'transaction) 0))
-      (should (= (mongo--pool-purpose-count pool 'other) 0))
-      (mongo-pool-release pool conn)
-      (should-not (mongo-pool-conn-purposes pool))
-      (mongo-with-pool-connection (checked-out pool nil 'transaction)
+      (setq pool (mongodb-pool-open '(:max-pool-size 1)))
+      (should (eq (mongodb-pool-checkout pool nil 'cursor) conn))
+      (should (eq (mongodb--pool-connection-purpose pool conn) 'cursor))
+      (should (= (mongodb--pool-purpose-count pool 'cursor) 1))
+      (should (= (mongodb--pool-purpose-count pool 'transaction) 0))
+      (should (= (mongodb--pool-purpose-count pool 'other) 0))
+      (mongodb-pool-release pool conn)
+      (should-not (mongodb-pool-conn-purposes pool))
+      (mongodb-with-pool-connection (checked-out pool nil 'transaction)
         (should (eq checked-out conn))
-        (should (eq (mongo--pool-connection-purpose pool conn)
+        (should (eq (mongodb--pool-connection-purpose pool conn)
                     'transaction)))
-      (should-not (mongo-pool-conn-purposes pool))
-      (should (eq (mongo-pool-checkout pool) conn))
-      (should (eq (mongo--pool-connection-purpose pool conn) 'other)))))
+      (should-not (mongodb-pool-conn-purposes pool))
+      (should (eq (mongodb-pool-checkout pool) conn))
+      (should (eq (mongodb--pool-connection-purpose pool conn) 'other)))))
 
 
-(ert-deftest mongo-test-pool-load-balanced-timeout-reports-purpose-counts ()
+(ert-deftest mongodb-test-pool-load-balanced-timeout-reports-purpose-counts ()
   "Load-balanced wait queue timeouts should report checked-out purpose counts."
-  (let* ((cursor-conn (make-mongo-conn :process 'cursor-proc))
-         (txn-conn (make-mongo-conn :process 'txn-proc))
-         (other-conn (make-mongo-conn :process 'other-proc))
-         (pool (make-mongo-pool
+  (let* ((cursor-conn (make-mongodb-conn :process 'cursor-proc))
+         (txn-conn (make-mongodb-conn :process 'txn-proc))
+         (other-conn (make-mongodb-conn :process 'other-proc))
+         (pool (make-mongodb-pool
                 :params '(:load-balanced t)
                 :max-size 3
                 :max-connecting 2
@@ -7286,30 +7286,30 @@
                 :conn-purposes `((,cursor-conn . cursor)
                                  (,txn-conn . transaction)
                                  (,other-conn . other)))))
-    (let ((err (should-error (mongo-pool-checkout pool 0)
-                             :type 'mongo-error)))
+    (let ((err (should-error (mongodb-pool-checkout pool 0)
+                             :type 'mongodb-error)))
       (should (string-match-p
                (regexp-quote
                 "Timeout waiting for connection from the connection pool. maxPoolSize: 3, connections in use by cursors: 1, connections in use by transactions: 1, connections in use by other operations: 1")
                (error-message-string err))))))
 
 
-(ert-deftest mongo-test-pool-emits-lifecycle-and-checkout-events ()
+(ert-deftest mongodb-test-pool-emits-lifecycle-and-checkout-events ()
   "MongoDB pools should expose basic CMAP-style lifecycle events."
   (let ((created 0)
         events pool conn)
-    (cl-letf (((symbol-function 'mongo-connect)
+    (cl-letf (((symbol-function 'mongodb-connect)
                (lambda (_params)
                  (cl-incf created)
-                 (make-mongo-conn :process (intern (format "proc-%d" created)))))
+                 (make-mongodb-conn :process (intern (format "proc-%d" created)))))
               ((symbol-function 'process-live-p)
                (lambda (_proc) t))
-              ((symbol-function 'mongo-disconnect)
+              ((symbol-function 'mongodb-disconnect)
                (lambda (_conn) nil)))
-      (let ((mongo-pool-event-hook
+      (let ((mongodb-pool-event-hook
              (list (lambda (event)
                      (push event events)))))
-        (setq pool (mongo-pool-open '(:host "db.example.test"
+        (setq pool (mongodb-pool-open '(:host "db.example.test"
                                       :port 27018
                                       :min-pool-size 1)))
         (let ((ordered (nreverse events)))
@@ -7327,8 +7327,8 @@
           (should-not (assoc 'service-id (nth 3 ordered)))
           (should (numberp (alist-get 'duration-ms (nth 3 ordered)))))
         (setq events nil)
-        (setq conn (mongo-pool-checkout pool))
-        (mongo-pool-release pool conn)
+        (setq conn (mongodb-pool-checkout pool))
+        (mongodb-pool-release pool conn)
         (let ((ordered (nreverse events)))
           (should (equal (mapcar (lambda (event)
                                    (alist-get 'type event))
@@ -7340,7 +7340,7 @@
           (should (numberp (alist-get 'duration-ms (nth 1 ordered))))
           (should (= (alist-get 'connection-id (nth 2 ordered)) 1)))
         (setq events nil)
-        (mongo-pool-disconnect pool)
+        (mongodb-pool-disconnect pool)
         (let ((ordered (nreverse events)))
           (should (equal (mapcar (lambda (event)
                                    (alist-get 'type event))
@@ -7353,21 +7353,21 @@
                          "poolClosed")))))))
 
 
-(ert-deftest mongo-test-pool-connection-ready-includes-service-id ()
+(ert-deftest mongodb-test-pool-connection-ready-includes-service-id ()
   "Load-balanced connection-ready events should include serviceId."
   (let ((service-id '(("$oid" . "64f0000000000000000000aa")))
         events)
-    (cl-letf (((symbol-function 'mongo-connect)
+    (cl-letf (((symbol-function 'mongodb-connect)
                (lambda (_params)
-                 (make-mongo-conn :process 'proc
+                 (make-mongodb-conn :process 'proc
                                   :load-balanced t
                                   :service-id service-id)))
               ((symbol-function 'process-live-p)
                (lambda (_proc) t)))
-      (let ((mongo-pool-event-hook
+      (let ((mongodb-pool-event-hook
              (list (lambda (event)
                      (push event events)))))
-        (mongo-pool-open '(:load-balanced t
+        (mongodb-pool-open '(:load-balanced t
                            :min-pool-size 1))))
     (let ((ready (seq-find
                   (lambda (event)
@@ -7377,13 +7377,13 @@
       (should (equal (alist-get 'service-id ready) service-id)))))
 
 
-(ert-deftest mongo-test-pool-created-event-includes-options ()
+(ert-deftest mongodb-test-pool-created-event-includes-options ()
   "MongoDB pool-created events should expose non-default pool options."
   (let (events)
-    (let ((mongo-pool-event-hook
+    (let ((mongodb-pool-event-hook
            (list (lambda (event)
                    (push event events)))))
-      (mongo-pool-open
+      (mongodb-pool-open
        '(:url
          "mongodb://user:secret@db.example.test:27018/app?maxPoolSize=0&maxIdleTimeMS=1500&waitQueueTimeoutMS=250&maxConnecting=3"))
       (let ((created (car (nreverse events))))
@@ -7398,21 +7398,21 @@
                          (max-connecting . 3))))))))
 
 
-(ert-deftest mongo-test-pool-emits-checkout-failed-event ()
+(ert-deftest mongodb-test-pool-emits-checkout-failed-event ()
   "MongoDB pool checkout failures should expose a CMAP-style event."
   (let (events pool conn)
-    (cl-letf (((symbol-function 'mongo-connect)
+    (cl-letf (((symbol-function 'mongodb-connect)
                (lambda (_params)
-                 (make-mongo-conn :process 'proc)))
+                 (make-mongodb-conn :process 'proc)))
               ((symbol-function 'process-live-p)
                (lambda (_proc) t)))
-      (let ((mongo-pool-event-hook
+      (let ((mongodb-pool-event-hook
              (list (lambda (event)
                      (push event events)))))
-        (setq pool (mongo-pool-open '(:max-pool-size 1)))
-        (setq conn (mongo-pool-checkout pool))
+        (setq pool (mongodb-pool-open '(:max-pool-size 1)))
+        (setq conn (mongodb-pool-checkout pool))
         (setq events nil)
-        (should-error (mongo-pool-checkout pool 0) :type 'mongo-error)
+        (should-error (mongodb-pool-checkout pool 0) :type 'mongodb-error)
         (setq events (nreverse events))
         (should (equal (mapcar (lambda (event)
                                  (alist-get 'type event))
@@ -7423,14 +7423,14 @@
         (should (equal (alist-get 'reason-string (cadr events))
                        "timeout"))
         (should (numberp (alist-get 'duration-ms (cadr events))))
-        (mongo-pool-release pool conn)))))
+        (mongodb-pool-release pool conn)))))
 
 
-(ert-deftest mongo-test-pool-wait-queue-timeout-zero-has-no-deadline ()
+(ert-deftest mongodb-test-pool-wait-queue-timeout-zero-has-no-deadline ()
   "MongoDB waitQueueTimeoutMS=0 should not cause immediate checkout timeout."
-  (let ((conn (make-mongo-conn :process 'proc))
+  (let ((conn (make-mongodb-conn :process 'proc))
         events pool first second released)
-    (cl-letf (((symbol-function 'mongo-connect)
+    (cl-letf (((symbol-function 'mongodb-connect)
                (lambda (_params) conn))
               ((symbol-function 'process-live-p)
                (lambda (_proc) t))
@@ -7438,20 +7438,20 @@
                (lambda (&rest _args)
                  (unless released
                    (setq released t)
-                   (mongo-pool-release pool first))
+                   (mongodb-pool-release pool first))
                  nil))
               ((symbol-function 'sit-for)
                (lambda (&rest _args) nil)))
-      (let ((mongo-pool-event-hook
+      (let ((mongodb-pool-event-hook
              (list (lambda (event)
                      (push event events)))))
         (setq pool
-              (mongo-pool-open
+              (mongodb-pool-open
                '(:max-pool-size 1
                  :wait-queue-timeout-ms 0)))
-        (setq first (mongo-pool-checkout pool))
+        (setq first (mongodb-pool-checkout pool))
         (setq events nil)
-        (setq second (mongo-pool-checkout pool))
+        (setq second (mongodb-pool-checkout pool))
         (should (eq second first))
         (should released)
         (let ((ordered (nreverse events)))
@@ -7469,19 +7469,19 @@
           (should (= (alist-get 'connection-id (caddr ordered)) 1)))))))
 
 
-(ert-deftest mongo-test-pool-emits-checkout-connection-error-event ()
+(ert-deftest mongodb-test-pool-emits-checkout-connection-error-event ()
   "MongoDB pool connection setup failures should emit checkout failure events."
   (let (events)
-    (cl-letf (((symbol-function 'mongo-connect)
+    (cl-letf (((symbol-function 'mongodb-connect)
                (lambda (_params)
-                 (signal 'mongo-error
+                 (signal 'mongodb-error
                          (list "open failed")))))
-      (let ((mongo-pool-event-hook
+      (let ((mongodb-pool-event-hook
              (list (lambda (event)
                      (push event events)))))
-        (let ((pool (mongo-pool-open '(:max-pool-size 1))))
+        (let ((pool (mongodb-pool-open '(:max-pool-size 1))))
           (setq events nil)
-          (should-error (mongo-pool-checkout pool) :type 'mongo-error)
+          (should-error (mongodb-pool-checkout pool) :type 'mongodb-error)
           (setq events (nreverse events))
           (should (equal (mapcar (lambda (event)
                                    (alist-get 'type event))
@@ -7503,105 +7503,105 @@
           (should (alist-get 'error (nth 3 events))))))))
 
 
-(ert-deftest mongo-test-pool-labels-hello-network-errors-with-backpressure ()
+(ert-deftest mongodb-test-pool-labels-hello-network-errors-with-backpressure ()
   "Connection setup hello network errors should receive CMAP backpressure labels."
   (let (events)
     (cl-letf (((symbol-function 'make-network-process)
-               (lambda (&rest _args) 'mongo-proc))
+               (lambda (&rest _args) 'mongodb-proc))
               ((symbol-function 'set-process-coding-system) #'ignore)
               ((symbol-function 'process-send-string) #'ignore)
-              ((symbol-function 'mongo--recv-handshake-message)
+              ((symbol-function 'mongodb--recv-handshake-message)
                (lambda (&rest _args)
-                 (signal 'mongo-error
+                 (signal 'mongodb-error
                          (list "Timed out waiting for MongoDB response"))))
               ((symbol-function 'process-live-p)
                (lambda (_proc) t))
               ((symbol-function 'delete-process) #'ignore))
-      (let ((mongo-pool-event-hook
+      (let ((mongodb-pool-event-hook
              (list (lambda (event)
                      (push event events)))))
-        (let* ((pool (mongo-pool-open '(:host "db.example.test"
+        (let* ((pool (mongodb-pool-open '(:host "db.example.test"
                                         :port 27017
                                         :database "app"
                                         :max-pool-size 1)))
-               (err (should-error (mongo-pool-checkout pool)
-                                  :type 'mongo-error)))
-          (should (mongo-error-has-label-p
-                   err mongo--system-overloaded-error-label))
-          (should (mongo-error-has-label-p
-                   err mongo--retryable-error-label))
+               (err (should-error (mongodb-pool-checkout pool)
+                                  :type 'mongodb-error)))
+          (should (mongodb-error-has-label-p
+                   err mongodb--system-overloaded-error-label))
+          (should (mongodb-error-has-label-p
+                   err mongodb--retryable-error-label))
           (let ((failure (car events)))
             (should (eq (alist-get 'type failure)
                         'connection-check-out-failed))
-            (should (mongo-error-has-label-p
+            (should (mongodb-error-has-label-p
                      (alist-get 'error failure)
-                     mongo--system-overloaded-error-label))
-            (should (mongo-error-has-label-p
+                     mongodb--system-overloaded-error-label))
+            (should (mongodb-error-has-label-p
                      (alist-get 'error failure)
-                     mongo--retryable-error-label))))))))
+                     mongodb--retryable-error-label))))))))
 
 
-(ert-deftest mongo-test-pool-does-not-label-socks5-errors-as-backpressure ()
+(ert-deftest mongodb-test-pool-does-not-label-socks5-errors-as-backpressure ()
   "SOCKS5 proxy errors should not receive CMAP backpressure labels."
   (cl-letf (((symbol-function 'make-network-process)
-             (lambda (&rest _args) 'mongo-proc))
+             (lambda (&rest _args) 'mongodb-proc))
             ((symbol-function 'set-process-coding-system) #'ignore)
-            ((symbol-function 'mongo--socks5-connect)
+            ((symbol-function 'mongodb--socks5-connect)
              (lambda (&rest _args)
-               (signal 'mongo-error
+               (signal 'mongodb-error
                        (list "MongoDB SOCKS5 CONNECT failed: connection refused"))))
             ((symbol-function 'process-live-p)
              (lambda (_proc) t))
             ((symbol-function 'delete-process) #'ignore))
-    (let* ((pool (mongo-pool-open '(:host "db.example.test"
+    (let* ((pool (mongodb-pool-open '(:host "db.example.test"
                                     :port 27017
                                     :database "app"
                                     :proxy-host "proxy.example"
                                     :proxy-port 1080
                                     :max-pool-size 1)))
-           (err (should-error (mongo-pool-checkout pool)
-                              :type 'mongo-error)))
-      (should-not (mongo-error-has-label-p
-                   err mongo--system-overloaded-error-label))
-      (should-not (mongo-error-has-label-p
-                   err mongo--retryable-error-label)))))
+           (err (should-error (mongodb-pool-checkout pool)
+                              :type 'mongodb-error)))
+      (should-not (mongodb-error-has-label-p
+                   err mongodb--system-overloaded-error-label))
+      (should-not (mongodb-error-has-label-p
+                   err mongodb--retryable-error-label)))))
 
 
-(ert-deftest mongo-test-pool-checkout-fails-when-cleared-while-waiting ()
+(ert-deftest mongodb-test-pool-checkout-fails-when-cleared-while-waiting ()
   "Pool clear should evict an in-flight checkout from the wait queue."
   (let ((created 0)
         events pool conn cleared disconnected)
-    (cl-letf (((symbol-function 'mongo-connect)
+    (cl-letf (((symbol-function 'mongodb-connect)
                (lambda (_params)
                  (cl-incf created)
-                 (make-mongo-conn :process
+                 (make-mongodb-conn :process
                                   (intern (format "proc-%d" created)))))
               ((symbol-function 'process-live-p)
                (lambda (_proc) t))
-              ((symbol-function 'mongo-disconnect)
+              ((symbol-function 'mongodb-disconnect)
                (lambda (wire)
                  (push wire disconnected)))
               ((symbol-function 'accept-process-output)
                (lambda (&rest _args)
                  (unless cleared
                    (setq cleared t)
-                   (mongo-pool-clear pool))
+                   (mongodb-pool-clear pool))
                  nil))
               ((symbol-function 'sit-for)
                (lambda (&rest _args) nil)))
-      (let ((mongo-pool-event-hook
+      (let ((mongodb-pool-event-hook
              (list (lambda (event)
                      (push event events)))))
-        (setq pool (mongo-pool-open '(:max-pool-size 1)))
-        (setq conn (mongo-pool-checkout pool))
+        (setq pool (mongodb-pool-open '(:max-pool-size 1)))
+        (setq conn (mongodb-pool-checkout pool))
         (setq events nil)
-        (let ((err (should-error (mongo-pool-checkout pool 5)
-                                 :type 'mongo-error)))
+        (let ((err (should-error (mongodb-pool-checkout pool 5)
+                                 :type 'mongodb-error)))
           (should (string-match-p
                    "connection pool was cleared"
                    (error-message-string err)))
-          (should (mongo-error-has-label-p
-                   err mongo--retryable-error-label)))
+          (should (mongodb-error-has-label-p
+                   err mongodb--retryable-error-label)))
         (should cleared)
         (let ((ordered (nreverse events)))
           (should (equal (mapcar (lambda (event)
@@ -7614,33 +7614,33 @@
           (should (eq (alist-get 'reason (caddr ordered))
                       'connection-error))
           (should (numberp (alist-get 'duration-ms (caddr ordered))))
-          (should (mongo-error-has-label-p
+          (should (mongodb-error-has-label-p
                    (alist-get 'error (caddr ordered))
-                   mongo--retryable-error-label)))
-        (mongo-pool-release pool conn)
+                   mongodb--retryable-error-label)))
+        (mongodb-pool-release pool conn)
         (should (equal disconnected (list conn)))))))
 
 
-(ert-deftest mongo-test-pool-emits-stale-connection-closed-event ()
+(ert-deftest mongodb-test-pool-emits-stale-connection-closed-event ()
   "MongoDB pools should emit connection-closed when stale connections return."
   (let ((created 0)
         events pool conn)
-    (cl-letf (((symbol-function 'mongo-connect)
+    (cl-letf (((symbol-function 'mongodb-connect)
                (lambda (_params)
                  (cl-incf created)
-                 (make-mongo-conn :process (intern (format "proc-%d" created)))))
+                 (make-mongodb-conn :process (intern (format "proc-%d" created)))))
               ((symbol-function 'process-live-p)
                (lambda (_proc) t))
-              ((symbol-function 'mongo-disconnect)
+              ((symbol-function 'mongodb-disconnect)
                (lambda (_conn) nil)))
-      (let ((mongo-pool-event-hook
+      (let ((mongodb-pool-event-hook
              (list (lambda (event)
                      (push event events)))))
-        (setq pool (mongo-pool-open '(:max-pool-size 1)))
-        (setq conn (mongo-pool-checkout pool))
+        (setq pool (mongodb-pool-open '(:max-pool-size 1)))
+        (setq conn (mongodb-pool-checkout pool))
         (setq events nil)
-        (mongo-pool-clear pool)
-        (mongo-pool-release pool conn)
+        (mongodb-pool-clear pool)
+        (mongodb-pool-release pool conn)
         (setq events (nreverse events))
         (should (equal (mapcar (lambda (event)
                                  (alist-get 'type event))
@@ -7652,32 +7652,32 @@
         (should (eq (alist-get 'reason (caddr events)) 'stale))))))
 
 
-(ert-deftest mongo-test-pool-clear-interrupts-in-use-connections ()
-  "mongo-pool-clear should optionally close checked-out connections."
+(ert-deftest mongodb-test-pool-clear-interrupts-in-use-connections ()
+  "mongodb-pool-clear should optionally close checked-out connections."
   (let ((created 0)
         disconnected closed-procs events pool conn)
-    (cl-letf (((symbol-function 'mongo-connect)
+    (cl-letf (((symbol-function 'mongodb-connect)
                (lambda (_params)
                  (cl-incf created)
-                 (make-mongo-conn
+                 (make-mongodb-conn
                   :process (intern (format "proc-%d" created)))))
               ((symbol-function 'process-live-p)
                (lambda (proc)
                  (not (memq proc closed-procs))))
-              ((symbol-function 'mongo-disconnect)
+              ((symbol-function 'mongodb-disconnect)
                (lambda (conn)
                  (push conn disconnected)
-                 (push (mongo-conn-process conn) closed-procs))))
-      (let ((mongo-pool-event-hook
+                 (push (mongodb-conn-process conn) closed-procs))))
+      (let ((mongodb-pool-event-hook
              (list (lambda (event)
                      (push event events)))))
-        (setq pool (mongo-pool-open '(:max-pool-size 1)))
-        (setq conn (mongo-pool-checkout pool))
+        (setq pool (mongodb-pool-open '(:max-pool-size 1)))
+        (setq conn (mongodb-pool-checkout pool))
         (setq events nil)
-        (mongo-pool-clear pool nil t)
-        (should (mongo-pool-paused pool))
+        (mongodb-pool-clear pool nil t)
+        (should (mongodb-pool-paused pool))
         (should (equal disconnected (list conn)))
-        (should-not (mongo--pool-connection-generation pool conn))
+        (should-not (mongodb--pool-connection-generation pool conn))
         (let ((ordered (nreverse events)))
           (should (equal (mapcar (lambda (event)
                                    (alist-get 'type event))
@@ -7690,166 +7690,166 @@
           (should (= (alist-get 'connection-id (cadr ordered)) 1))
           (should (eq (alist-get 'reason (cadr ordered)) 'stale)))
         (setq events nil)
-        (mongo-pool-release pool conn)
+        (mongodb-pool-release pool conn)
         (let ((ordered (nreverse events)))
           (should (equal (mapcar (lambda (event)
                                    (alist-get 'type event))
                                  ordered)
                          '(connection-checked-in)))
           (should (= (alist-get 'connection-id (car ordered)) 1)))
-        (should-not (mongo-pool-in-use pool))
+        (should-not (mongodb-pool-in-use pool))
         (should (equal disconnected (list conn)))))))
 
 
 
-(ert-deftest mongo-test-pool-enforces-max-pool-size ()
+(ert-deftest mongodb-test-pool-enforces-max-pool-size ()
   "MongoDB pools should wait and then fail when maxPoolSize is exhausted."
   (let ((created 0)
         pool conn)
-    (cl-letf (((symbol-function 'mongo-connect)
+    (cl-letf (((symbol-function 'mongodb-connect)
                (lambda (_params)
                  (cl-incf created)
-                 (make-mongo-conn :process (intern (format "proc-%d" created)))))
+                 (make-mongodb-conn :process (intern (format "proc-%d" created)))))
               ((symbol-function 'process-live-p)
                (lambda (_proc) t)))
-      (setq pool (mongo-pool-open '(:max-pool-size 1)))
-      (setq conn (mongo-pool-checkout pool))
-      (should-error (mongo-pool-checkout pool 0)
-                    :type 'mongo-error)
+      (setq pool (mongodb-pool-open '(:max-pool-size 1)))
+      (setq conn (mongodb-pool-checkout pool))
+      (should-error (mongodb-pool-checkout pool 0)
+                    :type 'mongodb-error)
       (should (= created 1))
-      (mongo-pool-release pool conn)
-      (should (= (length (mongo-pool-available pool)) 1)))))
+      (mongodb-pool-release pool conn)
+      (should (= (length (mongodb-pool-available pool)) 1)))))
 
 
-(ert-deftest mongo-test-pool-max-pool-size-zero-is-unbounded ()
+(ert-deftest mongodb-test-pool-max-pool-size-zero-is-unbounded ()
   "MongoDB maxPoolSize=0 should allow the pool to grow without a cap."
   (let ((created 0)
         pool conns)
-    (cl-letf (((symbol-function 'mongo-connect)
+    (cl-letf (((symbol-function 'mongodb-connect)
                (lambda (_params)
                  (cl-incf created)
-                 (make-mongo-conn :process
+                 (make-mongodb-conn :process
                                   (intern (format "proc-%d" created)))))
               ((symbol-function 'process-live-p)
                (lambda (_proc) t)))
-      (setq pool (mongo-pool-open '(:max-pool-size 0)))
-      (should-not (mongo-pool-max-size pool))
+      (setq pool (mongodb-pool-open '(:max-pool-size 0)))
+      (should-not (mongodb-pool-max-size pool))
       (dotimes (_ 3)
-        (push (mongo-pool-checkout pool 0) conns))
+        (push (mongodb-pool-checkout pool 0) conns))
       (should (= created 3))
-      (should (= (mongo--pool-total-size pool) 3))
-      (should (= (length (mongo-pool-in-use pool)) 3))
+      (should (= (mongodb--pool-total-size pool) 3))
+      (should (= (length (mongodb-pool-in-use pool)) 3))
       (dolist (conn conns)
-        (mongo-pool-release pool conn)))))
+        (mongodb-pool-release pool conn)))))
 
 
 
-(ert-deftest mongo-test-pool-tracks-connecting-during-open ()
+(ert-deftest mongodb-test-pool-tracks-connecting-during-open ()
   "MongoDB pools should count connections while they are being established."
-  (let* ((pool (make-mongo-pool
+  (let* ((pool (make-mongodb-pool
                 :params '(:host "127.0.0.1")
                 :max-connecting 2))
          observed)
-    (cl-letf (((symbol-function 'mongo-connect)
+    (cl-letf (((symbol-function 'mongodb-connect)
                (lambda (_params)
-                 (setq observed (mongo-pool-connecting pool))
+                 (setq observed (mongodb-pool-connecting pool))
                  'conn)))
-      (should (eq (mongo--pool-open-connection pool) 'conn))
+      (should (eq (mongodb--pool-open-connection pool) 'conn))
       (should (= observed 1))
-      (should (= (mongo-pool-connecting pool) 0)))))
+      (should (= (mongodb-pool-connecting pool) 0)))))
 
 
 
-(ert-deftest mongo-test-pool-decrements-connecting-on-open-error ()
+(ert-deftest mongodb-test-pool-decrements-connecting-on-open-error ()
   "MongoDB pools should clear connecting count when opening fails."
-  (let ((pool (make-mongo-pool
+  (let ((pool (make-mongodb-pool
                :params '(:host "127.0.0.1")
                :max-connecting 2)))
-    (cl-letf (((symbol-function 'mongo-connect)
+    (cl-letf (((symbol-function 'mongodb-connect)
                (lambda (_params)
-                 (signal 'mongo-error
+                 (signal 'mongodb-error
                          (list "open failed")))))
-      (should-error (mongo--pool-open-connection pool)
-                    :type 'mongo-error)
-      (should (= (mongo-pool-connecting pool) 0)))))
+      (should-error (mongodb--pool-open-connection pool)
+                    :type 'mongodb-error)
+      (should (= (mongodb-pool-connecting pool) 0)))))
 
 
 
-(ert-deftest mongo-test-pool-honors-max-connecting ()
+(ert-deftest mongodb-test-pool-honors-max-connecting ()
   "MongoDB pools should not open above maxConnecting."
-  (let ((pool (make-mongo-pool
+  (let ((pool (make-mongodb-pool
                :params '(:host "127.0.0.1")
                :max-size 5
                :min-size 0
                :max-connecting 1
                :connecting 1))
         opened)
-    (cl-letf (((symbol-function 'mongo--pool-open-connection)
+    (cl-letf (((symbol-function 'mongodb--pool-open-connection)
                (lambda (_pool)
                  (setq opened t)
                  'conn)))
-      (should-error (mongo-pool-checkout pool 0)
-                    :type 'mongo-error)
+      (should-error (mongodb-pool-checkout pool 0)
+                    :type 'mongodb-error)
       (should-not opened))))
 
 
 
-(ert-deftest mongo-test-pool-counts-connecting-against-max-pool-size ()
+(ert-deftest mongodb-test-pool-counts-connecting-against-max-pool-size ()
   "MongoDB pools should count connecting sockets against maxPoolSize."
-  (let ((pool (make-mongo-pool
+  (let ((pool (make-mongodb-pool
                :params '(:host "127.0.0.1")
                :max-size 1
                :min-size 0
                :max-connecting 2
                :connecting 1))
         opened)
-    (cl-letf (((symbol-function 'mongo--pool-open-connection)
+    (cl-letf (((symbol-function 'mongodb--pool-open-connection)
                (lambda (_pool)
                  (setq opened t)
                  'conn)))
-      (should-error (mongo-pool-checkout pool 0)
-                    :type 'mongo-error)
+      (should-error (mongodb-pool-checkout pool 0)
+                    :type 'mongodb-error)
       (should-not opened))))
 
 
 
-(ert-deftest mongo-test-pool-clear-closes-available-connections ()
-  "mongo-pool-clear should close idle connections and advance generation."
+(ert-deftest mongodb-test-pool-clear-closes-available-connections ()
+  "mongodb-pool-clear should close idle connections and advance generation."
   (let ((created 0)
         disconnected
         pool)
-    (cl-letf (((symbol-function 'mongo-connect)
+    (cl-letf (((symbol-function 'mongodb-connect)
                (lambda (_params)
                  (cl-incf created)
-                 (make-mongo-conn :process (intern (format "proc-%d" created)))))
-              ((symbol-function 'mongo-disconnect)
+                 (make-mongodb-conn :process (intern (format "proc-%d" created)))))
+              ((symbol-function 'mongodb-disconnect)
                (lambda (conn)
                  (push conn disconnected))))
-      (setq pool (mongo-pool-open '(:min-pool-size 2
+      (setq pool (mongodb-pool-open '(:min-pool-size 2
                                     :max-pool-size 4)))
-      (should (= (length (mongo-pool-available pool)) 2))
-      (should (= (mongo--pool-generation pool) 0))
-      (should (eq (mongo-pool-clear pool) pool))
-      (should (= (mongo--pool-generation pool) 1))
-      (should (mongo-pool-paused pool))
-      (should-not (mongo-pool-available pool))
-      (should-not (mongo-pool-conn-generations pool))
+      (should (= (length (mongodb-pool-available pool)) 2))
+      (should (= (mongodb--pool-generation pool) 0))
+      (should (eq (mongodb-pool-clear pool) pool))
+      (should (= (mongodb--pool-generation pool) 1))
+      (should (mongodb-pool-paused pool))
+      (should-not (mongodb-pool-available pool))
+      (should-not (mongodb-pool-conn-generations pool))
       (should (= (length disconnected) 2)))))
 
 
-(ert-deftest mongo-test-pool-clear-paused-does-not-emit-duplicate-event ()
+(ert-deftest mongodb-test-pool-clear-paused-does-not-emit-duplicate-event ()
   "Clearing an already paused pool should advance generation without events."
   (let (events)
-    (let ((mongo-pool-event-hook
+    (let ((mongodb-pool-event-hook
            (list (lambda (event)
                    (push event events)))))
-      (let ((pool (mongo-pool-open '(:max-pool-size 1))))
+      (let ((pool (mongodb-pool-open '(:max-pool-size 1))))
         (setq events nil)
-        (mongo-pool-clear pool)
-        (should (= (mongo--pool-generation pool) 1))
-        (should (mongo-pool-paused pool))
-        (mongo-pool-clear pool)
-        (should (= (mongo--pool-generation pool) 2))
+        (mongodb-pool-clear pool)
+        (should (= (mongodb--pool-generation pool) 1))
+        (should (mongodb-pool-paused pool))
+        (mongodb-pool-clear pool)
+        (should (= (mongodb--pool-generation pool) 2))
         (let ((ordered (nreverse events)))
           (should (equal (mapcar (lambda (event)
                                    (alist-get 'type event))
@@ -7858,59 +7858,59 @@
 
 
 
-(ert-deftest mongo-test-pool-clear-pauses-checkout-until-ready ()
-  "mongo-pool-clear should pause checkout until the pool is marked ready."
+(ert-deftest mongodb-test-pool-clear-pauses-checkout-until-ready ()
+  "mongodb-pool-clear should pause checkout until the pool is marked ready."
   (let ((created 0)
         pool opened)
-    (cl-letf (((symbol-function 'mongo-connect)
+    (cl-letf (((symbol-function 'mongodb-connect)
                (lambda (_params)
                  (cl-incf created)
-                 (make-mongo-conn :process (intern (format "proc-%d" created)))))
-              ((symbol-function 'mongo--pool-open-connection)
+                 (make-mongodb-conn :process (intern (format "proc-%d" created)))))
+              ((symbol-function 'mongodb--pool-open-connection)
                (lambda (_pool)
                  (setq opened t)
-                 (make-mongo-conn :process 'new-proc))))
-      (setq pool (mongo-pool-open '(:max-pool-size 2)))
-      (mongo-pool-clear pool)
-      (let ((err (should-error (mongo-pool-checkout pool)
-                               :type 'mongo-error)))
+                 (make-mongodb-conn :process 'new-proc))))
+      (setq pool (mongodb-pool-open '(:max-pool-size 2)))
+      (mongodb-pool-clear pool)
+      (let ((err (should-error (mongodb-pool-checkout pool)
+                               :type 'mongodb-error)))
         (should (string-match-p "connection pool was cleared"
                                 (error-message-string err)))
-        (should (mongo-error-has-label-p
-                 err mongo--retryable-error-label)))
+        (should (mongodb-error-has-label-p
+                 err mongodb--retryable-error-label)))
       (should-not opened)
-      (should (eq (mongo-pool-ready pool) pool))
-      (should-not (mongo-pool-paused pool))
-      (should (mongo-pool-checkout pool))
+      (should (eq (mongodb-pool-ready pool) pool))
+      (should-not (mongodb-pool-paused pool))
+      (should (mongodb-pool-checkout pool))
       (should opened))))
 
 
-(ert-deftest mongo-test-pool-monitor-success-readies-cleared-pool ()
+(ert-deftest mongodb-test-pool-monitor-success-readies-cleared-pool ()
   "Pool monitor heartbeats should mark a cleared pool ready."
   (let (events pool monitor-args)
-    (cl-letf (((symbol-function 'mongo-connect)
+    (cl-letf (((symbol-function 'mongodb-connect)
                (lambda (_params)
-                 (make-mongo-conn :process 'monitor-proc)))
+                 (make-mongodb-conn :process 'monitor-proc)))
               ((symbol-function 'process-live-p)
                (lambda (_proc) t))
-              ((symbol-function 'mongo-monitor-once)
+              ((symbol-function 'mongodb-monitor-once)
                (lambda (conn max-await timeout)
                  (setq monitor-args (list conn max-await timeout))
                  '(("ok" . 1)
                    ("maxWireVersion" . 17)))))
-      (let ((mongo-pool-event-hook
+      (let ((mongodb-pool-event-hook
              (list (lambda (event)
                      (push event events)))))
-        (setq pool (mongo-pool-open '(:max-pool-size 2)))
+        (setq pool (mongodb-pool-open '(:max-pool-size 2)))
         (setq events nil)
-        (mongo-pool-clear pool)
-        (should (mongo-pool-paused pool))
-        (should (equal (mongo-pool-monitor-once pool 250 3)
+        (mongodb-pool-clear pool)
+        (should (mongodb-pool-paused pool))
+        (should (equal (mongodb-pool-monitor-once pool 250 3)
                        '(("ok" . 1)
                          ("maxWireVersion" . 17))))
-        (should-not (mongo-pool-paused pool))
+        (should-not (mongodb-pool-paused pool))
         (should (eq (car monitor-args)
-                    (mongo-pool-monitor-conn pool)))
+                    (mongodb-pool-monitor-conn pool)))
         (should (equal (cdr monitor-args) '(250 3)))
         (should (equal (mapcar (lambda (event)
                                  (alist-get 'type event))
@@ -7919,38 +7919,38 @@
                          connection-pool-ready)))))))
 
 
-(ert-deftest mongo-test-pool-monitor-error-clears-pool ()
+(ert-deftest mongodb-test-pool-monitor-error-clears-pool ()
   "Pool monitor heartbeat failures should clear and pause the pool."
   (let ((created 0)
         disconnected events pool conn monitor-conn)
-    (cl-letf (((symbol-function 'mongo-connect)
+    (cl-letf (((symbol-function 'mongodb-connect)
                (lambda (_params)
                  (cl-incf created)
-                 (make-mongo-conn :process
+                 (make-mongodb-conn :process
                                   (intern (format "proc-%d" created)))))
               ((symbol-function 'process-live-p)
                (lambda (_proc) t))
-              ((symbol-function 'mongo-disconnect)
+              ((symbol-function 'mongodb-disconnect)
                (lambda (wire)
                  (push wire disconnected)))
-              ((symbol-function 'mongo-monitor-once)
+              ((symbol-function 'mongodb-monitor-once)
                (lambda (conn _max-await _timeout)
                  (setq monitor-conn conn)
-                 (signal 'mongo-error
+                 (signal 'mongodb-error
                          (list "heartbeat failed")))))
-      (let ((mongo-pool-event-hook
+      (let ((mongodb-pool-event-hook
              (list (lambda (event)
                      (push event events)))))
-        (setq pool (mongo-pool-open '(:max-pool-size 2)))
-        (setq conn (mongo-pool-checkout pool))
-        (mongo-pool-release pool conn)
+        (setq pool (mongodb-pool-open '(:max-pool-size 2)))
+        (setq conn (mongodb-pool-checkout pool))
+        (mongodb-pool-release pool conn)
         (setq events nil)
-        (should-error (mongo-pool-monitor-once pool 250 3)
-                      :type 'mongo-error)
-        (should (mongo-pool-paused pool))
-        (should (mongo-pool-monitor-error pool))
-        (should-not (mongo-pool-monitor-conn pool))
-        (should-not (mongo-pool-available pool))
+        (should-error (mongodb-pool-monitor-once pool 250 3)
+                      :type 'mongodb-error)
+        (should (mongodb-pool-paused pool))
+        (should (mongodb-pool-monitor-error pool))
+        (should-not (mongodb-pool-monitor-conn pool))
+        (should-not (mongodb-pool-available pool))
         (should (memq conn disconnected))
         (should (memq monitor-conn disconnected))
         (let ((ordered (nreverse events)))
@@ -7962,34 +7962,34 @@
           (should (eq (alist-get 'reason (cadr ordered)) 'stale)))))))
 
 
-(ert-deftest mongo-test-pool-monitor-load-balanced-is-noop ()
+(ert-deftest mongodb-test-pool-monitor-load-balanced-is-noop ()
   "Load-balanced pools should not open dedicated monitor connections."
-  (let* ((monitor (make-mongo-conn :process 'old-monitor-proc))
-         (pool (make-mongo-pool
+  (let* ((monitor (make-mongodb-conn :process 'old-monitor-proc))
+         (pool (make-mongodb-pool
                 :params '(:load-balanced t)
                 :monitor-conn monitor
-                :monitor-error '(mongo-error "old")))
+                :monitor-error '(mongodb-error "old")))
          disconnected)
-    (cl-letf (((symbol-function 'mongo-connect)
+    (cl-letf (((symbol-function 'mongodb-connect)
                (lambda (&rest _args)
                  (ert-fail
                   "load-balanced pool monitor should not open a connection")))
-              ((symbol-function 'mongo-monitor-once)
+              ((symbol-function 'mongodb-monitor-once)
                (lambda (&rest _args)
                  (ert-fail
                   "load-balanced pool monitor should not heartbeat")))
-              ((symbol-function 'mongo-disconnect)
+              ((symbol-function 'mongodb-disconnect)
                (lambda (conn)
                  (push conn disconnected))))
-      (should-not (mongo-pool-monitor-once pool 250 3)))
-    (should-not (mongo-pool-monitor-error pool))
-    (should-not (mongo-pool-monitor-conn pool))
+      (should-not (mongodb-pool-monitor-once pool 250 3)))
+    (should-not (mongodb-pool-monitor-error pool))
+    (should-not (mongodb-pool-monitor-conn pool))
     (should (equal disconnected (list monitor)))))
 
 
-(ert-deftest mongo-test-pool-start-stop-monitor-schedules-tick ()
+(ert-deftest mongodb-test-pool-start-stop-monitor-schedules-tick ()
   "Pool monitors should schedule SDAM heartbeat ticks and stop cleanly."
-  (let ((pool (make-mongo-pool
+  (let ((pool (make-mongodb-pool
                :params '(:heartbeat-frequency-ms 1500)))
         scheduled cancelled ticked)
     (cl-letf (((symbol-function 'run-at-time)
@@ -7999,26 +7999,26 @@
               ((symbol-function 'cancel-timer)
                (lambda (timer)
                  (push timer cancelled)))
-              ((symbol-function 'mongo-pool-monitor-once)
+              ((symbol-function 'mongodb-pool-monitor-once)
                (lambda (_pool max-await timeout)
                  (setq ticked (list max-await timeout))
                  '(("ok" . 1)))))
-      (should (eq (mongo-pool-start-monitor pool) pool))
-      (should (eq (mongo-pool-monitor-timer pool)
+      (should (eq (mongodb-pool-start-monitor pool) pool))
+      (should (eq (mongodb-pool-monitor-timer pool)
                   'fake-pool-monitor-timer))
       (should (equal (list (nth 0 scheduled) (nth 1 scheduled))
                      '(0 1.5)))
       (apply (nth 2 scheduled) (nth 3 scheduled))
       (should (equal ticked '(1500 2.5)))
-      (should (eq (mongo-pool-stop-monitor pool) pool))
-      (should-not (mongo-pool-monitor-timer pool))
+      (should (eq (mongodb-pool-stop-monitor pool) pool))
+      (should-not (mongodb-pool-monitor-timer pool))
       (should (equal cancelled '(fake-pool-monitor-timer))))))
 
 
-(ert-deftest mongo-test-pool-start-monitor-load-balanced-is-noop ()
+(ert-deftest mongodb-test-pool-start-monitor-load-balanced-is-noop ()
   "Load-balanced pools should not schedule SDAM monitor timers."
-  (let* ((monitor (make-mongo-conn :process 'old-monitor-proc))
-         (pool (make-mongo-pool
+  (let* ((monitor (make-mongodb-conn :process 'old-monitor-proc))
+         (pool (make-mongodb-pool
                 :params '(:load-balanced t)
                 :monitor-conn monitor
                 :monitor-timer 'old-pool-monitor-timer))
@@ -8026,69 +8026,69 @@
     (cl-letf (((symbol-function 'cancel-timer)
                (lambda (timer)
                  (push timer cancelled)))
-              ((symbol-function 'mongo-disconnect)
+              ((symbol-function 'mongodb-disconnect)
                (lambda (conn)
                  (push conn disconnected)))
               ((symbol-function 'run-at-time)
                (lambda (&rest _args)
                  (ert-fail
                   "load-balanced pool monitor should not schedule a timer"))))
-      (should (eq (mongo-pool-start-monitor pool) pool)))
-    (should-not (mongo-pool-monitor-timer pool))
-    (should-not (mongo-pool-monitor-conn pool))
+      (should (eq (mongodb-pool-start-monitor pool) pool)))
+    (should-not (mongodb-pool-monitor-timer pool))
+    (should-not (mongodb-pool-monitor-conn pool))
     (should (equal cancelled '(old-pool-monitor-timer)))
     (should (equal disconnected (list monitor)))))
 
 
-(ert-deftest mongo-test-pool-disconnect-stops-monitor ()
+(ert-deftest mongodb-test-pool-disconnect-stops-monitor ()
   "Disconnecting a pool should stop its monitor timer and connection."
-  (let* ((monitor (make-mongo-conn :process 'monitor-proc))
-         (pool (make-mongo-pool
+  (let* ((monitor (make-mongodb-conn :process 'monitor-proc))
+         (pool (make-mongodb-pool
                 :monitor-conn monitor
                 :monitor-timer 'fake-pool-monitor-timer))
          cancelled disconnected)
     (cl-letf (((symbol-function 'cancel-timer)
                (lambda (timer)
                  (push timer cancelled)))
-              ((symbol-function 'mongo-disconnect)
+              ((symbol-function 'mongodb-disconnect)
                (lambda (conn)
                  (push conn disconnected))))
-      (should (eq (mongo-pool-disconnect pool) pool))
-      (should-not (mongo-pool-monitor-timer pool))
-      (should-not (mongo-pool-monitor-conn pool))
+      (should (eq (mongodb-pool-disconnect pool) pool))
+      (should-not (mongodb-pool-monitor-timer pool))
+      (should-not (mongodb-pool-monitor-conn pool))
       (should (equal cancelled '(fake-pool-monitor-timer)))
       (should (equal disconnected (list monitor))))))
 
 
-(ert-deftest mongo-test-pool-disconnect-closes-checked-out-on-release ()
+(ert-deftest mongodb-test-pool-disconnect-closes-checked-out-on-release ()
   "Checked-out connections should close when released to a closed pool."
   (let (events pool conn disconnected)
-    (cl-letf (((symbol-function 'mongo-connect)
+    (cl-letf (((symbol-function 'mongodb-connect)
                (lambda (_params)
-                 (make-mongo-conn :process 'proc)))
+                 (make-mongodb-conn :process 'proc)))
               ((symbol-function 'process-live-p)
                (lambda (_proc) t))
-              ((symbol-function 'mongo-disconnect)
+              ((symbol-function 'mongodb-disconnect)
                (lambda (wire)
                  (push wire disconnected))))
-      (let ((mongo-pool-event-hook
+      (let ((mongodb-pool-event-hook
              (list (lambda (event)
                      (push event events)))))
-        (setq pool (mongo-pool-open '(:max-pool-size 1)))
-        (setq conn (mongo-pool-checkout pool))
+        (setq pool (mongodb-pool-open '(:max-pool-size 1)))
+        (setq conn (mongodb-pool-checkout pool))
         (setq events nil)
-        (should (eq (mongo-pool-disconnect pool) pool))
-        (should (mongo-pool-closed pool))
-        (should (memq conn (mongo-pool-in-use pool)))
+        (should (eq (mongodb-pool-disconnect pool) pool))
+        (should (mongodb-pool-closed pool))
+        (should (memq conn (mongodb-pool-in-use pool)))
         (should-not disconnected)
         (should (equal (mapcar (lambda (event)
                                  (alist-get 'type event))
                                (nreverse events))
                        '(connection-pool-closed)))
         (setq events nil)
-        (should (eq (mongo-pool-disconnect pool) pool))
+        (should (eq (mongodb-pool-disconnect pool) pool))
         (should-not events)
-        (mongo-pool-release pool conn)
+        (mongodb-pool-release pool conn)
         (let ((ordered (nreverse events)))
           (should (equal (mapcar (lambda (event)
                                    (alist-get 'type event))
@@ -8100,213 +8100,213 @@
           (should (eq (alist-get 'reason (cadr ordered))
                       'pool-closed)))
         (should (equal disconnected (list conn)))
-        (should-not (mongo-pool-in-use pool))
-        (should-not (mongo-pool-conn-ids pool))
-        (should-not (mongo-pool-conn-generations pool))))))
+        (should-not (mongodb-pool-in-use pool))
+        (should-not (mongodb-pool-conn-ids pool))
+        (should-not (mongodb-pool-conn-generations pool))))))
 
 
 
-(ert-deftest mongo-test-pool-release-after-clear-disconnects-stale-connection ()
+(ert-deftest mongodb-test-pool-release-after-clear-disconnects-stale-connection ()
   "Checked-out connections from old pool generations should not return to idle."
   (let ((created 0)
         disconnected
         pool conn)
-    (cl-letf (((symbol-function 'mongo-connect)
+    (cl-letf (((symbol-function 'mongodb-connect)
                (lambda (_params)
                  (cl-incf created)
-                 (make-mongo-conn :process (intern (format "proc-%d" created)))))
+                 (make-mongodb-conn :process (intern (format "proc-%d" created)))))
               ((symbol-function 'process-live-p)
                (lambda (_proc) t))
-              ((symbol-function 'mongo-disconnect)
+              ((symbol-function 'mongodb-disconnect)
                (lambda (wire)
                  (push wire disconnected))))
-      (setq pool (mongo-pool-open '(:max-pool-size 2)))
-      (setq conn (mongo-pool-checkout pool))
-      (should (= (length (mongo-pool-in-use pool)) 1))
-      (mongo-pool-clear pool)
+      (setq pool (mongodb-pool-open '(:max-pool-size 2)))
+      (setq conn (mongodb-pool-checkout pool))
+      (should (= (length (mongodb-pool-in-use pool)) 1))
+      (mongodb-pool-clear pool)
       (should-not disconnected)
-      (mongo-pool-release pool conn)
+      (mongodb-pool-release pool conn)
       (should (equal disconnected (list conn)))
-      (should-not (mongo-pool-in-use pool))
-      (should-not (mongo-pool-available pool))
-      (should-not (mongo-pool-conn-generations pool)))))
+      (should-not (mongodb-pool-in-use pool))
+      (should-not (mongodb-pool-available pool))
+      (should-not (mongodb-pool-conn-generations pool)))))
 
 
 
-(ert-deftest mongo-test-pool-checkout-after-clear-opens-new-generation ()
+(ert-deftest mongodb-test-pool-checkout-after-clear-opens-new-generation ()
   "MongoDB pools should open new-generation connections after clear."
   (let ((created 0)
         disconnected
         pool first second)
-    (cl-letf (((symbol-function 'mongo-connect)
+    (cl-letf (((symbol-function 'mongodb-connect)
                (lambda (_params)
                  (cl-incf created)
-                 (make-mongo-conn :process (intern (format "proc-%d" created)))))
+                 (make-mongodb-conn :process (intern (format "proc-%d" created)))))
               ((symbol-function 'process-live-p)
                (lambda (_proc) t))
-              ((symbol-function 'mongo-disconnect)
+              ((symbol-function 'mongodb-disconnect)
                (lambda (conn)
                  (push conn disconnected))))
-      (setq pool (mongo-pool-open '(:max-pool-size 2)))
-      (setq first (mongo-pool-checkout pool))
-      (mongo-pool-release pool first)
-      (mongo-pool-clear pool)
-      (should-error (mongo-pool-checkout pool)
-                    :type 'mongo-error)
-      (mongo-pool-ready pool)
-      (setq second (mongo-pool-checkout pool))
+      (setq pool (mongodb-pool-open '(:max-pool-size 2)))
+      (setq first (mongodb-pool-checkout pool))
+      (mongodb-pool-release pool first)
+      (mongodb-pool-clear pool)
+      (should-error (mongodb-pool-checkout pool)
+                    :type 'mongodb-error)
+      (mongodb-pool-ready pool)
+      (setq second (mongodb-pool-checkout pool))
       (should-not (eq first second))
       (should (= created 2))
       (should (equal disconnected (list first)))
-      (should (equal (mongo--pool-connection-generation pool second)
-                     (mongo--pool-generation-state pool second))))))
+      (should (equal (mongodb--pool-connection-generation pool second)
+                     (mongodb--pool-generation-state pool second))))))
 
 
 
-(ert-deftest mongo-test-pool-clear-service-id-closes-only-matching-available ()
-  "mongo-pool-clear with serviceId should only clear matching idle connections."
+(ert-deftest mongodb-test-pool-clear-service-id-closes-only-matching-available ()
+  "mongodb-pool-clear with serviceId should only clear matching idle connections."
   (let* ((service-a '(("$oid" . "64f0000000000000000000aa")))
          (service-b '(("$oid" . "64f0000000000000000000bb")))
-         (conn-a (make-mongo-conn :process 'proc-a :service-id service-a))
-         (conn-b (make-mongo-conn :process 'proc-b :service-id service-b))
-         (pool (make-mongo-pool :max-size 4
+         (conn-a (make-mongodb-conn :process 'proc-a :service-id service-a))
+         (conn-b (make-mongodb-conn :process 'proc-b :service-id service-b))
+         (pool (make-mongodb-pool :max-size 4
                                 :max-connecting 2))
          disconnected)
-    (mongo--pool-track-connection pool conn-a)
-    (mongo--pool-track-connection pool conn-b)
-    (setf (mongo-pool-available pool)
-          (list (make-mongo--pool-entry
+    (mongodb--pool-track-connection pool conn-a)
+    (mongodb--pool-track-connection pool conn-b)
+    (setf (mongodb-pool-available pool)
+          (list (make-mongodb--pool-entry
                  :conn conn-a
                  :idle-since (float-time)
                  :generation
-                 (mongo--pool-connection-generation pool conn-a))
-                (make-mongo--pool-entry
+                 (mongodb--pool-connection-generation pool conn-a))
+                (make-mongodb--pool-entry
                  :conn conn-b
                  :idle-since (float-time)
                  :generation
-                 (mongo--pool-connection-generation pool conn-b))))
-    (cl-letf (((symbol-function 'mongo-disconnect)
+                 (mongodb--pool-connection-generation pool conn-b))))
+    (cl-letf (((symbol-function 'mongodb-disconnect)
                (lambda (conn)
                  (push conn disconnected))))
-      (should (eq (mongo-pool-clear pool service-a) pool))
-      (should-not (mongo-pool-paused pool))
-      (should (= (mongo--pool-service-count pool service-a) 0))
-      (should-not (assoc service-a (mongo-pool-service-generations pool)))
-      (should (= (mongo--pool-service-generation pool service-b) 0))
-      (should (= (mongo--pool-service-count pool service-b) 1))
+      (should (eq (mongodb-pool-clear pool service-a) pool))
+      (should-not (mongodb-pool-paused pool))
+      (should (= (mongodb--pool-service-count pool service-a) 0))
+      (should-not (assoc service-a (mongodb-pool-service-generations pool)))
+      (should (= (mongodb--pool-service-generation pool service-b) 0))
+      (should (= (mongodb--pool-service-count pool service-b) 1))
       (should (equal disconnected (list conn-a)))
-      (should (equal (mapcar #'mongo--pool-entry-conn
-                             (mongo-pool-available pool))
+      (should (equal (mapcar #'mongodb--pool-entry-conn
+                             (mongodb-pool-available pool))
                      (list conn-b)))
-      (should (mongo--pool-current-generation-connection-p pool conn-b))
-      (should-not (mongo--pool-current-generation-connection-p pool conn-a)))))
+      (should (mongodb--pool-current-generation-connection-p pool conn-b))
+      (should-not (mongodb--pool-current-generation-connection-p pool conn-a)))))
 
 
 
-(ert-deftest mongo-test-pool-tracks-service-id-connection-counts ()
+(ert-deftest mongodb-test-pool-tracks-service-id-connection-counts ()
   "MongoDB load-balanced pools should account connections per serviceId."
   (let* ((service-a '(("$oid" . "64f0000000000000000000aa")))
          (service-b '(("$oid" . "64f0000000000000000000bb")))
-         (conn-a1 (make-mongo-conn :process 'proc-a1 :service-id service-a))
-         (conn-a2 (make-mongo-conn :process 'proc-a2 :service-id service-a))
-         (conn-b (make-mongo-conn :process 'proc-b :service-id service-b))
-         (pool (make-mongo-pool)))
-    (mongo--pool-track-connection pool conn-a1)
-    (mongo--pool-track-connection pool conn-a2)
-    (mongo--pool-track-connection pool conn-b)
-    (should (= (mongo--pool-service-count pool service-a) 2))
-    (should (= (mongo--pool-service-count pool service-b) 1))
-    (mongo--pool-set-service-generation pool service-a 3)
-    (mongo--pool-untrack-connection pool conn-a1)
-    (should (= (mongo--pool-service-count pool service-a) 1))
-    (should (= (mongo--pool-service-generation pool service-a) 3))
-    (mongo--pool-untrack-connection pool conn-a2)
-    (should (= (mongo--pool-service-count pool service-a) 0))
-    (should-not (assoc service-a (mongo-pool-service-generations pool)))
-    (should (= (mongo--pool-service-count pool service-b) 1))))
+         (conn-a1 (make-mongodb-conn :process 'proc-a1 :service-id service-a))
+         (conn-a2 (make-mongodb-conn :process 'proc-a2 :service-id service-a))
+         (conn-b (make-mongodb-conn :process 'proc-b :service-id service-b))
+         (pool (make-mongodb-pool)))
+    (mongodb--pool-track-connection pool conn-a1)
+    (mongodb--pool-track-connection pool conn-a2)
+    (mongodb--pool-track-connection pool conn-b)
+    (should (= (mongodb--pool-service-count pool service-a) 2))
+    (should (= (mongodb--pool-service-count pool service-b) 1))
+    (mongodb--pool-set-service-generation pool service-a 3)
+    (mongodb--pool-untrack-connection pool conn-a1)
+    (should (= (mongodb--pool-service-count pool service-a) 1))
+    (should (= (mongodb--pool-service-generation pool service-a) 3))
+    (mongodb--pool-untrack-connection pool conn-a2)
+    (should (= (mongodb--pool-service-count pool service-a) 0))
+    (should-not (assoc service-a (mongodb-pool-service-generations pool)))
+    (should (= (mongodb--pool-service-count pool service-b) 1))))
 
 
-(ert-deftest mongo-test-pool-retrack-uses-original-service-id-accounting ()
+(ert-deftest mongodb-test-pool-retrack-uses-original-service-id-accounting ()
   "Retracking a connection should decrement the previously recorded serviceId."
   (let* ((service-a '(("$oid" . "64f0000000000000000000aa")))
          (service-b '(("$oid" . "64f0000000000000000000bb")))
-         (conn (make-mongo-conn :process 'proc-a :service-id service-a))
-         (pool (make-mongo-pool)))
-    (mongo--pool-track-connection pool conn)
-    (setf (mongo-conn-service-id conn) service-b)
-    (mongo--pool-track-connection pool conn)
-    (should (= (mongo--pool-service-count pool service-a) 0))
-    (should (= (mongo--pool-service-count pool service-b) 1))
-    (mongo--pool-untrack-connection pool conn)
-    (should (= (mongo--pool-service-count pool service-b) 0))))
+         (conn (make-mongodb-conn :process 'proc-a :service-id service-a))
+         (pool (make-mongodb-pool)))
+    (mongodb--pool-track-connection pool conn)
+    (setf (mongodb-conn-service-id conn) service-b)
+    (mongodb--pool-track-connection pool conn)
+    (should (= (mongodb--pool-service-count pool service-a) 0))
+    (should (= (mongodb--pool-service-count pool service-b) 1))
+    (mongodb--pool-untrack-connection pool conn)
+    (should (= (mongodb--pool-service-count pool service-b) 0))))
 
 
 
-(ert-deftest mongo-test-pool-clear-service-id-stales-only-matching-in-use ()
-  "mongo-pool-clear with serviceId should stale only matching checked-out connections."
+(ert-deftest mongodb-test-pool-clear-service-id-stales-only-matching-in-use ()
+  "mongodb-pool-clear with serviceId should stale only matching checked-out connections."
   (let* ((service-a '(("$oid" . "64f0000000000000000000aa")))
          (service-b '(("$oid" . "64f0000000000000000000bb")))
-         (conn-a (make-mongo-conn :process 'proc-a :service-id service-a))
-         (conn-b (make-mongo-conn :process 'proc-b :service-id service-b))
-         (pool (make-mongo-pool :max-size 4
+         (conn-a (make-mongodb-conn :process 'proc-a :service-id service-a))
+         (conn-b (make-mongodb-conn :process 'proc-b :service-id service-b))
+         (pool (make-mongodb-pool :max-size 4
                                 :max-connecting 2
                                 :in-use (list conn-a conn-b)))
          disconnected)
-    (mongo--pool-track-connection pool conn-a)
-    (mongo--pool-track-connection pool conn-b)
+    (mongodb--pool-track-connection pool conn-a)
+    (mongodb--pool-track-connection pool conn-b)
     (cl-letf (((symbol-function 'process-live-p)
                (lambda (_proc) t))
-              ((symbol-function 'mongo-disconnect)
+              ((symbol-function 'mongodb-disconnect)
                (lambda (conn)
                  (push conn disconnected))))
-      (mongo-pool-clear pool service-a)
-      (should (= (mongo--pool-service-count pool service-a) 1))
-      (should (= (mongo--pool-service-generation pool service-a) 1))
-      (mongo-pool-release pool conn-a)
-      (mongo-pool-release pool conn-b)
+      (mongodb-pool-clear pool service-a)
+      (should (= (mongodb--pool-service-count pool service-a) 1))
+      (should (= (mongodb--pool-service-generation pool service-a) 1))
+      (mongodb-pool-release pool conn-a)
+      (mongodb-pool-release pool conn-b)
       (should (equal disconnected (list conn-a)))
-      (should-not (mongo-pool-in-use pool))
-      (should (equal (mapcar #'mongo--pool-entry-conn
-                             (mongo-pool-available pool))
+      (should-not (mongodb-pool-in-use pool))
+      (should (equal (mapcar #'mongodb--pool-entry-conn
+                             (mongodb-pool-available pool))
                      (list conn-b)))
-      (should-not (mongo--pool-connection-generation pool conn-a))
-      (should (= (mongo--pool-service-count pool service-a) 0))
-      (should-not (assoc service-a (mongo-pool-service-generations pool)))
-      (should (= (mongo--pool-service-count pool service-b) 1))
-      (should (mongo--pool-current-generation-connection-p pool conn-b)))))
+      (should-not (mongodb--pool-connection-generation pool conn-a))
+      (should (= (mongodb--pool-service-count pool service-a) 0))
+      (should-not (assoc service-a (mongodb-pool-service-generations pool)))
+      (should (= (mongodb--pool-service-count pool service-b) 1))
+      (should (mongodb--pool-current-generation-connection-p pool conn-b)))))
 
 
-(ert-deftest mongo-test-pool-clear-service-id-interrupts-only-matching-in-use ()
+(ert-deftest mongodb-test-pool-clear-service-id-interrupts-only-matching-in-use ()
   "serviceId pool clear should interrupt only matching checked-out connections."
   (let* ((service-a '(("$oid" . "64f0000000000000000000aa")))
          (service-b '(("$oid" . "64f0000000000000000000bb")))
-         (conn-a (make-mongo-conn :process 'proc-a :service-id service-a))
-         (conn-b (make-mongo-conn :process 'proc-b :service-id service-b))
-         (pool (make-mongo-pool :max-size 4
+         (conn-a (make-mongodb-conn :process 'proc-a :service-id service-a))
+         (conn-b (make-mongodb-conn :process 'proc-b :service-id service-b))
+         (pool (make-mongodb-pool :max-size 4
                                 :max-connecting 2
                                 :in-use (list conn-a conn-b)))
          disconnected closed-procs events)
-    (mongo--pool-record-connection-id pool conn-a 1)
-    (mongo--pool-record-connection-id pool conn-b 2)
-    (mongo--pool-track-connection pool conn-a)
-    (mongo--pool-track-connection pool conn-b)
+    (mongodb--pool-record-connection-id pool conn-a 1)
+    (mongodb--pool-record-connection-id pool conn-b 2)
+    (mongodb--pool-track-connection pool conn-a)
+    (mongodb--pool-track-connection pool conn-b)
     (cl-letf (((symbol-function 'process-live-p)
                (lambda (proc)
                  (not (memq proc closed-procs))))
-              ((symbol-function 'mongo-disconnect)
+              ((symbol-function 'mongodb-disconnect)
                (lambda (conn)
                  (push conn disconnected)
-                 (push (mongo-conn-process conn) closed-procs))))
-      (let ((mongo-pool-event-hook
+                 (push (mongodb-conn-process conn) closed-procs))))
+      (let ((mongodb-pool-event-hook
              (list (lambda (event)
                      (push event events)))))
-        (mongo-pool-clear pool service-a t)
-        (should-not (mongo-pool-paused pool))
+        (mongodb-pool-clear pool service-a t)
+        (should-not (mongodb-pool-paused pool))
         (should (equal disconnected (list conn-a)))
-        (should-not (mongo--pool-connection-generation pool conn-a))
-        (should (mongo--pool-current-generation-connection-p pool conn-b))
-        (should (= (mongo--pool-service-count pool service-a) 0))
-        (should (= (mongo--pool-service-count pool service-b) 1))
+        (should-not (mongodb--pool-connection-generation pool conn-a))
+        (should (mongodb--pool-current-generation-connection-p pool conn-b))
+        (should (= (mongodb--pool-service-count pool service-a) 0))
+        (should (= (mongodb--pool-service-count pool service-b) 1))
         (let ((ordered (nreverse events)))
           (should (equal (mapcar (lambda (event)
                                    (alist-get 'type event))
@@ -8320,8 +8320,8 @@
                       t))
           (should (= (alist-get 'connection-id (cadr ordered)) 1)))
         (setq events nil)
-        (mongo-pool-release pool conn-a)
-        (mongo-pool-release pool conn-b)
+        (mongodb-pool-release pool conn-a)
+        (mongodb-pool-release pool conn-b)
         (let ((ordered (nreverse events)))
           (should (equal (mapcar (lambda (event)
                                    (alist-get 'type event))
@@ -8331,29 +8331,29 @@
           (should (= (alist-get 'connection-id (car ordered)) 1))
           (should (= (alist-get 'connection-id (cadr ordered)) 2)))
         (should (equal disconnected (list conn-a)))
-        (should (equal (mapcar #'mongo--pool-entry-conn
-                               (mongo-pool-available pool))
+        (should (equal (mapcar #'mongodb--pool-entry-conn
+                               (mongodb-pool-available pool))
                        (list conn-b)))))))
 
 
 
-(ert-deftest mongo-test-pool-command-releases-connection ()
-  "mongo-pool-command should release its checked-out connection."
-  (let ((conn (make-mongo-conn :process 'proc))
+(ert-deftest mongodb-test-pool-command-releases-connection ()
+  "mongodb-pool-command should release its checked-out connection."
+  (let ((conn (make-mongodb-conn :process 'proc))
         pool command-conn)
-    (cl-letf (((symbol-function 'mongo-connect)
+    (cl-letf (((symbol-function 'mongodb-connect)
                (lambda (_params) conn))
               ((symbol-function 'process-live-p)
                (lambda (_proc) t))
-              ((symbol-function 'mongo-command)
+              ((symbol-function 'mongodb-command)
                (lambda (wire database command &optional timeout sequences)
                  (setq command-conn wire)
                  (list (cons "database" database)
                        (cons "command" command)
                        (cons "timeout" timeout)
                        (cons "sequences" sequences)))))
-      (setq pool (mongo-pool-open '(:max-pool-size 1)))
-      (should (equal (mongo-pool-command
+      (setq pool (mongodb-pool-open '(:max-pool-size 1)))
+      (should (equal (mongodb-pool-command
                       pool "app" '(("ping" . 1)) 2
                       '(("documents" . [])))
                      `(("database" . "app")
@@ -8361,42 +8361,42 @@
                        ("timeout" . 2)
                        ("sequences" . (("documents" . []))))))
       (should (eq command-conn conn))
-      (should-not (mongo-pool-in-use pool))
-      (should (= (length (mongo-pool-available pool)) 1)))))
+      (should-not (mongodb-pool-in-use pool))
+      (should (= (length (mongodb-pool-available pool)) 1)))))
 
 
-(ert-deftest mongo-test-pool-command-clears-pool-on-network-error ()
-  "mongo-pool-command should clear the pool after command network errors."
+(ert-deftest mongodb-test-pool-command-clears-pool-on-network-error ()
+  "mongodb-pool-command should clear the pool after command network errors."
   (let ((created 0)
         disconnected events pool)
-    (cl-letf (((symbol-function 'mongo-connect)
+    (cl-letf (((symbol-function 'mongodb-connect)
                (lambda (_params)
                  (cl-incf created)
-                 (make-mongo-conn
+                 (make-mongodb-conn
                   :process (intern (format "proc-%d" created)))))
               ((symbol-function 'process-live-p)
                (lambda (_proc) t))
-              ((symbol-function 'mongo-disconnect)
+              ((symbol-function 'mongodb-disconnect)
                (lambda (conn)
                  (push conn disconnected)))
-              ((symbol-function 'mongo-command)
+              ((symbol-function 'mongodb-command)
                (lambda (&rest _args)
-                 (signal 'mongo-error
+                 (signal 'mongodb-error
                          (list "connection closed while reading MongoDB response")))))
-      (let ((mongo-pool-event-hook
+      (let ((mongodb-pool-event-hook
              (list (lambda (event)
                      (push event events)))))
-        (setq pool (mongo-pool-open '(:min-pool-size 2
+        (setq pool (mongodb-pool-open '(:min-pool-size 2
                                       :max-pool-size 2)))
-        (should (= (length (mongo-pool-available pool)) 2))
+        (should (= (length (mongodb-pool-available pool)) 2))
         (should-error
-         (mongo-pool-command pool "app" '(("ping" . 1)))
-         :type 'mongo-error)
-        (should (mongo-pool-paused pool))
-        (should-not (mongo-pool-available pool))
-        (should-not (mongo-pool-in-use pool))
-        (should-not (mongo-pool-conn-generations pool))
-        (should (= (mongo--pool-generation pool) 1))
+         (mongodb-pool-command pool "app" '(("ping" . 1)))
+         :type 'mongodb-error)
+        (should (mongodb-pool-paused pool))
+        (should-not (mongodb-pool-available pool))
+        (should-not (mongodb-pool-in-use pool))
+        (should-not (mongodb-pool-conn-generations pool))
+        (should (= (mongodb--pool-generation pool) 1))
         (should (= (length disconnected) 2))
         (should (seq-some (lambda (event)
                             (eq (alist-get 'type event)
@@ -8404,34 +8404,34 @@
                           events))))))
 
 
-(ert-deftest mongo-test-pool-command-timeout-does-not-clear-pool ()
-  "mongo-pool-command should not clear the pool after command timeouts."
-  (let ((conn (make-mongo-conn :process 'proc))
+(ert-deftest mongodb-test-pool-command-timeout-does-not-clear-pool ()
+  "mongodb-pool-command should not clear the pool after command timeouts."
+  (let ((conn (make-mongodb-conn :process 'proc))
         disconnected events pool)
-    (cl-letf (((symbol-function 'mongo-connect)
+    (cl-letf (((symbol-function 'mongodb-connect)
                (lambda (_params) conn))
               ((symbol-function 'process-live-p)
                (lambda (_proc) t))
-              ((symbol-function 'mongo-disconnect)
+              ((symbol-function 'mongodb-disconnect)
                (lambda (conn)
                  (push conn disconnected)))
-              ((symbol-function 'mongo-command)
+              ((symbol-function 'mongodb-command)
                (lambda (&rest _args)
-                 (signal 'mongo-error
+                 (signal 'mongodb-error
                          (list "Timed out waiting for MongoDB response")))))
-      (let ((mongo-pool-event-hook
+      (let ((mongodb-pool-event-hook
              (list (lambda (event)
                      (push event events)))))
-        (setq pool (mongo-pool-open '(:max-pool-size 1)))
+        (setq pool (mongodb-pool-open '(:max-pool-size 1)))
         (should-error
-         (mongo-pool-command pool "app" '(("ping" . 1)))
-         :type 'mongo-error)
-        (should-not (mongo-pool-paused pool))
-        (should (= (mongo--pool-generation pool) 0))
+         (mongodb-pool-command pool "app" '(("ping" . 1)))
+         :type 'mongodb-error)
+        (should-not (mongodb-pool-paused pool))
+        (should (= (mongodb--pool-generation pool) 0))
         (should-not disconnected)
-        (should-not (mongo-pool-in-use pool))
-        (should (equal (mapcar #'mongo--pool-entry-conn
-                               (mongo-pool-available pool))
+        (should-not (mongodb-pool-in-use pool))
+        (should (equal (mapcar #'mongodb--pool-entry-conn
+                               (mongodb-pool-available pool))
                        (list conn)))
         (should-not (seq-some (lambda (event)
                                 (eq (alist-get 'type event)
@@ -8439,53 +8439,53 @@
                               events))))))
 
 
-(ert-deftest mongo-test-pool-command-load-balanced-clears-service-id ()
-  "mongo-pool-command should clear only the checked-out load-balanced serviceId."
+(ert-deftest mongodb-test-pool-command-load-balanced-clears-service-id ()
+  "mongodb-pool-command should clear only the checked-out load-balanced serviceId."
   (let* ((service-a '(("$oid" . "64f0000000000000000000aa")))
          (service-b '(("$oid" . "64f0000000000000000000bb")))
-         (conn-a (make-mongo-conn :process 'proc-a :service-id service-a))
-         (conn-b (make-mongo-conn :process 'proc-b :service-id service-b))
-         (pool (make-mongo-pool :max-size 4
+         (conn-a (make-mongodb-conn :process 'proc-a :service-id service-a))
+         (conn-b (make-mongodb-conn :process 'proc-b :service-id service-b))
+         (pool (make-mongodb-pool :max-size 4
                                 :max-connecting 2))
          disconnected events)
-    (mongo--pool-track-connection pool conn-a)
-    (mongo--pool-track-connection pool conn-b)
-    (setf (mongo-pool-available pool)
-          (list (make-mongo--pool-entry
+    (mongodb--pool-track-connection pool conn-a)
+    (mongodb--pool-track-connection pool conn-b)
+    (setf (mongodb-pool-available pool)
+          (list (make-mongodb--pool-entry
                  :conn conn-a
                  :idle-since (float-time)
                  :generation
-                 (mongo--pool-connection-generation pool conn-a))
-                (make-mongo--pool-entry
+                 (mongodb--pool-connection-generation pool conn-a))
+                (make-mongodb--pool-entry
                  :conn conn-b
                  :idle-since (float-time)
                  :generation
-                 (mongo--pool-connection-generation pool conn-b))))
+                 (mongodb--pool-connection-generation pool conn-b))))
     (cl-letf (((symbol-function 'process-live-p)
                (lambda (_proc) t))
-              ((symbol-function 'mongo-disconnect)
+              ((symbol-function 'mongodb-disconnect)
                (lambda (conn)
                  (push conn disconnected)))
-              ((symbol-function 'mongo-command)
+              ((symbol-function 'mongodb-command)
                (lambda (&rest _args)
-                 (signal 'mongo-error
+                 (signal 'mongodb-error
                          (list "connection closed while reading MongoDB response")))))
-      (let ((mongo-pool-event-hook
+      (let ((mongodb-pool-event-hook
              (list (lambda (event)
                      (push event events)))))
         (should-error
-         (mongo-pool-command pool "app" '(("ping" . 1)))
-         :type 'mongo-error)
-        (should-not (mongo-pool-paused pool))
-        (should-not (mongo-pool-in-use pool))
+         (mongodb-pool-command pool "app" '(("ping" . 1)))
+         :type 'mongodb-error)
+        (should-not (mongodb-pool-paused pool))
+        (should-not (mongodb-pool-in-use pool))
         (should (equal disconnected (list conn-a)))
-        (should (equal (mapcar #'mongo--pool-entry-conn
-                               (mongo-pool-available pool))
+        (should (equal (mapcar #'mongodb--pool-entry-conn
+                               (mongodb-pool-available pool))
                        (list conn-b)))
-        (should-not (assoc service-a (mongo-pool-service-generations pool)))
-        (should (= (mongo--pool-service-count pool service-a) 0))
-        (should (= (mongo--pool-service-count pool service-b) 1))
-        (should (mongo--pool-current-generation-connection-p pool conn-b))
+        (should-not (assoc service-a (mongodb-pool-service-generations pool)))
+        (should (= (mongodb--pool-service-count pool service-a) 0))
+        (should (= (mongodb--pool-service-count pool service-b) 1))
+        (should (mongodb--pool-current-generation-connection-p pool conn-b))
         (should
          (seq-some (lambda (event)
 	                     (and (eq (alist-get 'type event)
@@ -8496,19 +8496,19 @@
 
 
 
-(ert-deftest mongo-test-pool-cursor-results-pins-connection-until-drained ()
+(ert-deftest mongodb-test-pool-cursor-results-pins-connection-until-drained ()
   "Pooled cursor helpers should keep one connection checked out for getMore."
-  (let ((conn (make-mongo-conn :process 'proc))
+  (let ((conn (make-mongodb-conn :process 'proc))
         pool commands in-use-states purposes)
-    (cl-letf (((symbol-function 'mongo-connect)
+    (cl-letf (((symbol-function 'mongodb-connect)
                (lambda (_params) conn))
               ((symbol-function 'process-live-p)
                (lambda (_proc) t))
-              ((symbol-function 'mongo-command)
+              ((symbol-function 'mongodb-command)
                (lambda (wire database command &optional _timeout _sequences)
                  (push (list wire database command) commands)
-                 (push (memq conn (mongo-pool-in-use pool)) in-use-states)
-                 (push (mongo--pool-connection-purpose pool conn) purposes)
+                 (push (memq conn (mongodb-pool-in-use pool)) in-use-states)
+                 (push (mongodb--pool-connection-purpose pool conn) purposes)
                  (cond
                   ((assoc "find" command)
                    '(("cursor" . (("id" . 42)
@@ -8521,9 +8521,9 @@
                   (t
                    (ert-fail
                     (format "unexpected command: %S" command)))))))
-      (setq pool (mongo-pool-open '(:max-pool-size 1)))
+      (setq pool (mongodb-pool-open '(:max-pool-size 1)))
       (should (equal
-               (mongo-pool-cursor-results
+               (mongodb-pool-cursor-results
                 pool "app" "users"
                 '(("find" . "users")
                   ("filter" . (("active" . t))))
@@ -8541,37 +8541,37 @@
                      (list (list conn) (list conn))))
       (should (equal (nreverse purposes)
                      '(cursor cursor)))
-      (should-not (mongo-pool-in-use pool))
-      (should-not (mongo-pool-conn-purposes pool))
-      (should (equal (mapcar #'mongo--pool-entry-conn
-                             (mongo-pool-available pool))
+      (should-not (mongodb-pool-in-use pool))
+      (should-not (mongodb-pool-conn-purposes pool))
+      (should (equal (mapcar #'mongodb--pool-entry-conn
+                             (mongodb-pool-available pool))
                      (list conn))))))
 
 
-(ert-deftest mongo-test-pool-cursor-load-balanced-getmore-error-skips-kill ()
+(ert-deftest mongodb-test-pool-cursor-load-balanced-getmore-error-skips-kill ()
   "Load-balanced pooled cursors should not killCursors after getMore network errors."
   (let* ((service-id '(("$oid" . "64f0000000000000000000aa")))
-         (conn (make-mongo-conn :process 'proc
+         (conn (make-mongodb-conn :process 'proc
                                 :load-balanced t
                                 :service-id service-id))
-         (pool (make-mongo-pool :params '(:load-balanced t)
+         (pool (make-mongodb-pool :params '(:load-balanced t)
                                 :max-size 1
                                 :max-connecting 2))
          disconnected commands)
-    (mongo--pool-record-connection-id pool conn 1)
-    (mongo--pool-track-connection pool conn)
-    (setf (mongo-pool-available pool)
-          (list (make-mongo--pool-entry
+    (mongodb--pool-record-connection-id pool conn 1)
+    (mongodb--pool-track-connection pool conn)
+    (setf (mongodb-pool-available pool)
+          (list (make-mongodb--pool-entry
                  :conn conn
                  :idle-since (float-time)
                  :generation
-                 (mongo--pool-connection-generation pool conn))))
+                 (mongodb--pool-connection-generation pool conn))))
     (cl-letf (((symbol-function 'process-live-p)
                (lambda (_proc) t))
-              ((symbol-function 'mongo-disconnect)
+              ((symbol-function 'mongodb-disconnect)
                (lambda (wire)
                  (push wire disconnected)))
-              ((symbol-function 'mongo-command)
+              ((symbol-function 'mongodb-command)
                (lambda (_wire _database command &optional _timeout _sequences)
                  (push command commands)
                  (cond
@@ -8580,7 +8580,7 @@
                                   ("ns" . "app.users")
                                   ("firstBatch" . ((("n" . 1))))))))
                   ((assoc "getMore" command)
-                   (signal 'mongo-error
+                   (signal 'mongodb-error
                            (list "connection closed while reading MongoDB response")))
                   ((assoc "killCursors" command)
                    (ert-fail
@@ -8589,28 +8589,28 @@
                    (ert-fail
                     (format "unexpected command: %S" command)))))))
       (should-error
-       (mongo-pool-cursor-results
+       (mongodb-pool-cursor-results
         pool "app" "users"
         '(("find" . "users")) "firstBatch")
-       :type 'mongo-error)
-      (should-not (mongo-pool-paused pool))
-      (should-not (mongo-pool-in-use pool))
-      (should-not (mongo-pool-available pool))
+       :type 'mongodb-error)
+      (should-not (mongodb-pool-paused pool))
+      (should-not (mongodb-pool-in-use pool))
+      (should-not (mongodb-pool-available pool))
       (should (equal disconnected (list conn)))
-      (should (= (mongo--pool-service-count pool service-id) 0))
+      (should (= (mongodb--pool-service-count pool service-id) 0))
       (should (equal (mapcar #'caar (nreverse commands))
                      '("find" "getMore"))))))
 
 
-(ert-deftest mongo-test-pool-find-uses-pool-cursor-results ()
-  "mongo-pool-find should build a find command for pooled cursor draining."
+(ert-deftest mongodb-test-pool-find-uses-pool-cursor-results ()
+  "mongodb-pool-find should build a find command for pooled cursor draining."
   (let (captured)
-    (cl-letf (((symbol-function 'mongo-pool-cursor-results)
+    (cl-letf (((symbol-function 'mongodb-pool-cursor-results)
                (lambda (&rest args)
                  (setq captured args)
                  '((("name" . "Ann"))))))
       (should (equal
-               (mongo-pool-find
+               (mongodb-pool-find
                 'pool "app" "users"
                 '(("active" . t)) '(("name" . 1)) 5 2
                 '(("batchSize" . 3)))
@@ -8628,10 +8628,10 @@
 
 
 
-(ert-deftest mongo-test-bulk-write-command-builds-sequences ()
+(ert-deftest mongodb-test-bulk-write-command-builds-sequences ()
   "MongoDB bulkWrite should build command and OP_MSG sequences."
   (let* ((command-and-sequences
-          (mongo-bulk-write-command
+          (mongodb-bulk-write-command
            '((("insert" . "app.users")
               ("document" . (("name" . "Ann"))))
              (("update" . "app.users")
@@ -8658,7 +8658,7 @@
     (should (equal (aref ns-info 0) '(("ns" . "app.users"))))
     (should (equal (aref ns-info 1) '(("ns" . "app.audit"))))
     (should (equal (cdr (assoc "insert" (aref ops 0))) 0))
-    (should (mongo--document-has-field-p
+    (should (mongodb--document-has-field-p
              (cdr (assoc "document" (aref ops 0)))
              "_id"))
     (should (equal (cdr (assoc "update" (aref ops 1))) 0))
@@ -8666,45 +8666,45 @@
 
 
 
-(ert-deftest mongo-test-bulk-write-validates-inputs ()
+(ert-deftest mongodb-test-bulk-write-validates-inputs ()
   "MongoDB bulkWrite should reject invalid native helper inputs."
-  (should-error (mongo-bulk-write-command nil)
-                :type 'mongo-error)
+  (should-error (mongodb-bulk-write-command nil)
+                :type 'mongodb-error)
   (should-error
-   (mongo-bulk-write-command
+   (mongodb-bulk-write-command
     '((("insert" . "app.users")
        ("update" . "app.users")
        ("document" . (("name" . "Ann"))))))
-   :type 'mongo-error)
+   :type 'mongodb-error)
   (should-error
-   (mongo-bulk-write-command
+   (mongodb-bulk-write-command
     '((("insert" . "app.users"))))
-   :type 'mongo-error)
-  (let ((conn (make-mongo-conn
+   :type 'mongodb-error)
+  (let ((conn (make-mongodb-conn
                :write-concern
-               (make-mongo--write-concern :pairs '(("w" . 0))))))
+               (make-mongodb--write-concern :pairs '(("w" . 0))))))
     (should-error
-     (mongo-bulk-write
+     (mongodb-bulk-write
       conn
       '((("insert" . "app.users")
          ("document" . (("name" . "Ann"))))))
-     :type 'mongo-error)
+     :type 'mongodb-error)
     (should-error
-     (mongo-bulk-write
+     (mongodb-bulk-write
       conn
       '((("insert" . "app.users")
          ("document" . (("name" . "Ann")))))
       '(("ordered" . :false)
         ("verboseResults" . t)))
-     :type 'mongo-error)))
+     :type 'mongodb-error)))
 
 
 
-(ert-deftest mongo-test-bulk-write-sends-admin-command ()
-  "mongo-bulk-write should send admin bulkWrite and collect cursor results."
-  (let ((conn (make-mongo-conn :process 'proc))
+(ert-deftest mongodb-test-bulk-write-sends-admin-command ()
+  "mongodb-bulk-write should send admin bulkWrite and collect cursor results."
+  (let ((conn (make-mongodb-conn :process 'proc))
         captured-database captured-command captured-sequences)
-    (cl-letf (((symbol-function 'mongo-command)
+    (cl-letf (((symbol-function 'mongodb-command)
                (lambda (_conn database command &optional _timeout sequences)
                  (setq captured-database database
                        captured-command command
@@ -8717,7 +8717,7 @@
                       [(("ok" . 1)
                         ("idx" . 0))])))))))
       (let ((response
-             (mongo-bulk-write
+             (mongodb-bulk-write
               conn
               '((("insert" . "app.users")
                  ("document" . (("name" . "Ann")))))
@@ -8733,12 +8733,12 @@
                          ("idx" . 0))]))))))
 
 
-(ert-deftest mongo-test-bulk-write-splits-at-max-write-batch-size ()
-  "mongo-bulk-write should split batches and merge result indexes."
-  (let ((conn (make-mongo-conn :process 'proc
+(ert-deftest mongodb-test-bulk-write-splits-at-max-write-batch-size ()
+  "mongodb-bulk-write should split batches and merge result indexes."
+  (let ((conn (make-mongodb-conn :process 'proc
                                :max-write-batch-size 2))
         calls)
-    (cl-letf (((symbol-function 'mongo-command)
+    (cl-letf (((symbol-function 'mongodb-command)
                (lambda (_conn database command &optional _timeout sequences)
                  (let* ((ops (cdr (assoc "ops" sequences)))
                         (batch-results
@@ -8753,7 +8753,7 @@
                        ("ns" . "admin.$cmd.bulkWrite")
                        ("firstBatch" . ,(vconcat batch-results)))))))))
       (let ((response
-             (mongo-bulk-write
+             (mongodb-bulk-write
               conn
               '((("insert" . "app.users")
                  ("document" . (("name" . "Ann"))))
@@ -8776,12 +8776,12 @@
                         (("ok" . 1) ("idx" . 2))]))))))
 
 
-(ert-deftest mongo-test-bulk-write-ordered-stops-after-batch-error ()
-  "Ordered mongo-bulk-write should not send later batches after errors."
-  (let ((conn (make-mongo-conn :process 'proc
+(ert-deftest mongodb-test-bulk-write-ordered-stops-after-batch-error ()
+  "Ordered mongodb-bulk-write should not send later batches after errors."
+  (let ((conn (make-mongodb-conn :process 'proc
                                :max-write-batch-size 1))
         calls)
-    (cl-letf (((symbol-function 'mongo-command)
+    (cl-letf (((symbol-function 'mongodb-command)
                (lambda (_conn database command &optional _timeout sequences)
                  (push (list database command sequences) calls)
                  '(("ok" . 1)
@@ -8794,7 +8794,7 @@
                         ("idx" . 0)
                         ("code" . 11000))])))))))
       (let ((response
-             (mongo-bulk-write
+             (mongodb-bulk-write
               conn
               '((("insert" . "app.users")
                  ("document" . (("name" . "Ann"))))
@@ -8809,9 +8809,9 @@
 
 
 
-(ert-deftest mongo-test-command-refreshes-before-write-when-not-writable ()
+(ert-deftest mongodb-test-command-refreshes-before-write-when-not-writable ()
   "Write commands should refresh topology before sending if no writable server is known."
-  (let* ((conn (make-mongo-conn :host "seed-a"
+  (let* ((conn (make-mongodb-conn :host "seed-a"
                                 :port 27017
                                 :database "app"
                                 :process 'proc
@@ -8825,25 +8825,25 @@
                           ("setName" . "rs0")
                           ("isWritablePrimary" . t)))
          events)
-    (setf (mongo-conn-topology conn)
-          (mongo--topology-description-from-hello conn secondary-hello))
+    (setf (mongodb-conn-topology conn)
+          (mongodb--topology-description-from-hello conn secondary-hello))
     (cl-letf (((symbol-function 'process-live-p)
                (lambda (_proc) t))
-              ((symbol-function 'mongo-hello)
+              ((symbol-function 'mongodb-hello)
                (lambda (refresh-conn &optional _timeout)
                  (push :hello events)
-                 (setf (mongo-conn-topology refresh-conn)
-                       (mongo--topology-description-from-hello
+                 (setf (mongodb-conn-topology refresh-conn)
+                       (mongodb--topology-description-from-hello
                         refresh-conn primary-hello))
                  primary-hello))
-              ((symbol-function 'mongo--send-document)
+              ((symbol-function 'mongodb--send-document)
                (lambda (_conn document)
                  (push (list :send document) events)
                  1))
-              ((symbol-function 'mongo--recv-message)
+              ((symbol-function 'mongodb--recv-message)
                (lambda (&rest _args)
                  '(("ok" . 1)))))
-      (should (equal (mongo-command
+      (should (equal (mongodb-command
                       conn
                       "app"
                       '(("insert" . "users")
@@ -8852,13 +8852,13 @@
     (should (equal (car (last events))
                    :hello))
     (should (equal (caar events) :send))
-    (should (mongo-select-server conn 'write))))
+    (should (mongodb-select-server conn 'write))))
 
 
 
-(ert-deftest mongo-test-command-rejects-write-when-refresh-finds-no-primary ()
+(ert-deftest mongodb-test-command-rejects-write-when-refresh-finds-no-primary ()
   "Write commands should not be sent when refresh still finds no writable server."
-  (let* ((conn (make-mongo-conn :host "seed-a"
+  (let* ((conn (make-mongodb-conn :host "seed-a"
                                 :port 27017
                                 :database "app"
                                 :process 'proc
@@ -8868,33 +8868,33 @@
                             ("setName" . "rs0")
                             ("secondary" . t)))
          refreshed)
-    (setf (mongo-conn-topology conn)
-          (mongo--topology-description-from-hello conn secondary-hello))
+    (setf (mongodb-conn-topology conn)
+          (mongodb--topology-description-from-hello conn secondary-hello))
     (cl-letf (((symbol-function 'process-live-p)
                (lambda (_proc) t))
-              ((symbol-function 'mongo-hello)
+              ((symbol-function 'mongodb-hello)
                (lambda (_conn &optional _timeout)
                  (setq refreshed t)
                  secondary-hello))
-              ((symbol-function 'mongo--send-document)
+              ((symbol-function 'mongodb--send-document)
                (lambda (&rest _args)
                  (ert-fail "write command should not be sent"))))
       (let ((err (should-error
-                  (mongo-command
+                  (mongodb-command
                    conn
                    "app"
                    '(("insert" . "users")
                      ("documents" . [])))
-                  :type 'mongo-error)))
+                  :type 'mongodb-error)))
         (should refreshed)
         (should (string-match-p "No writable MongoDB server"
                                 (error-message-string err)))))))
 
 
 
-(ert-deftest mongo-test-command-refreshes-after-not-writable-error ()
+(ert-deftest mongodb-test-command-refreshes-after-not-writable-error ()
   "NotWritablePrimary errors should refresh cached topology before surfacing."
-  (let* ((conn (make-mongo-conn :host "seed-a"
+  (let* ((conn (make-mongodb-conn :host "seed-a"
                                 :port 27017
                                 :database "app"
                                 :process 'proc
@@ -8904,37 +8904,37 @@
                           ("setName" . "rs0")
                           ("isWritablePrimary" . t)))
          refreshed)
-    (setf (mongo-conn-topology conn)
-          (mongo--topology-description-from-hello conn primary-hello))
+    (setf (mongodb-conn-topology conn)
+          (mongodb--topology-description-from-hello conn primary-hello))
     (cl-letf (((symbol-function 'process-live-p)
                (lambda (_proc) t))
-              ((symbol-function 'mongo--send-document)
+              ((symbol-function 'mongodb--send-document)
                (lambda (&rest _args) 1))
-              ((symbol-function 'mongo--recv-message)
+              ((symbol-function 'mongodb--recv-message)
                (lambda (&rest _args)
                  '(("ok" . 0)
                    ("codeName" . "NotWritablePrimary")
                    ("errmsg" . "not writable primary"))))
-              ((symbol-function 'mongo-hello)
+              ((symbol-function 'mongodb-hello)
                (lambda (_conn &optional _timeout)
                  (setq refreshed t)
                  primary-hello)))
       (let ((err (should-error
-                  (mongo-command
+                  (mongodb-command
                    conn
                    "app"
                    '(("insert" . "users")
                      ("documents" . [])))
-                  :type 'mongo-error)))
+                  :type 'mongodb-error)))
         (should refreshed)
         (should (string-match-p "not writable primary"
                                 (error-message-string err)))))))
 
 
 
-(ert-deftest mongo-test-command-state-change-error-marks-unknown ()
+(ert-deftest mongodb-test-command-state-change-error-marks-unknown ()
   "Fresh state-change errors should mark the current server Unknown."
-  (let* ((conn (make-mongo-conn :host "seed-a"
+  (let* ((conn (make-mongodb-conn :host "seed-a"
                                 :port 27017
                                 :database "app"
                                 :process 'proc
@@ -8951,39 +8951,39 @@
                           ("setName" . "rs0")
                           ("isWritablePrimary" . t)
                           ("topologyVersion" . ,old-version))))
-    (setf (mongo-conn-topology conn)
-          (mongo--topology-description-from-hello conn primary-hello))
+    (setf (mongodb-conn-topology conn)
+          (mongodb--topology-description-from-hello conn primary-hello))
     (cl-letf (((symbol-function 'process-live-p)
                (lambda (_proc) t))
-              ((symbol-function 'mongo--send-document)
+              ((symbol-function 'mongodb--send-document)
                (lambda (&rest _args) 1))
-              ((symbol-function 'mongo--recv-message)
+              ((symbol-function 'mongodb--recv-message)
                (lambda (&rest _args)
                  `(("ok" . 0)
                    ("codeName" . "NotPrimaryOrSecondary")
                    ("errmsg" . "node is recovering")
                    ("topologyVersion" . ,new-version)))))
       (let ((err (should-error
-                  (mongo-command conn "app" '(("find" . "users")))
-                  :type 'mongo-error)))
+                  (mongodb-command conn "app" '(("find" . "users")))
+                  :type 'mongodb-error)))
         (should (string-match-p "node is recovering"
                                 (error-message-string err)))))
-    (let ((server (mongo--current-server-description conn)))
-      (should (eq (mongo-topology-description-type
-                   (mongo-conn-topology conn))
+    (let ((server (mongodb--current-server-description conn)))
+      (should (eq (mongodb-topology-description-type
+                   (mongodb-conn-topology conn))
                   'replica-set-no-primary))
-      (should (eq (mongo-server-description-type server) 'unknown))
-      (should (equal (mongo-server-description-topology-version server)
+      (should (eq (mongodb-server-description-type server) 'unknown))
+      (should (equal (mongodb-server-description-topology-version server)
                      new-version))
       (should (string-match-p
                "node is recovering"
-               (mongo-server-description-error server))))))
+               (mongodb-server-description-error server))))))
 
 
 
-(ert-deftest mongo-test-command-stale-state-change-error-is-ignored ()
+(ert-deftest mongodb-test-command-stale-state-change-error-is-ignored ()
   "Stale state-change errors should not overwrite a newer server description."
-  (let* ((conn (make-mongo-conn :host "seed-a"
+  (let* ((conn (make-mongodb-conn :host "seed-a"
                                 :port 27017
                                 :database "app"
                                 :process 'proc
@@ -8998,44 +8998,44 @@
                           ("isWritablePrimary" . t)
                           ("topologyVersion" . ,topology-version)))
          refreshed)
-    (setf (mongo-conn-topology conn)
-          (mongo--topology-description-from-hello conn primary-hello))
+    (setf (mongodb-conn-topology conn)
+          (mongodb--topology-description-from-hello conn primary-hello))
     (cl-letf (((symbol-function 'process-live-p)
                (lambda (_proc) t))
-              ((symbol-function 'mongo--send-document)
+              ((symbol-function 'mongodb--send-document)
                (lambda (&rest _args) 1))
-              ((symbol-function 'mongo--recv-message)
+              ((symbol-function 'mongodb--recv-message)
                (lambda (&rest _args)
                  `(("ok" . 0)
                    ("codeName" . "NotWritablePrimary")
                    ("errmsg" . "not writable primary")
                    ("topologyVersion" . ,topology-version))))
-              ((symbol-function 'mongo-hello)
+              ((symbol-function 'mongodb-hello)
                (lambda (&rest _args)
                  (setq refreshed t)
                  primary-hello)))
       (let ((err (should-error
-                  (mongo-command
+                  (mongodb-command
                    conn "app"
                    '(("insert" . "users")
                      ("documents" . [])))
-                  :type 'mongo-error)))
+                  :type 'mongodb-error)))
         (should (string-match-p "not writable primary"
                                 (error-message-string err)))))
     (should-not refreshed)
-    (let ((server (mongo--current-server-description conn)))
-      (should (eq (mongo-topology-description-type
-                   (mongo-conn-topology conn))
+    (let ((server (mongodb--current-server-description conn)))
+      (should (eq (mongodb-topology-description-type
+                   (mongodb-conn-topology conn))
                   'replica-set-with-primary))
-      (should (eq (mongo-server-description-type server) 'rs-primary))
-      (should (equal (mongo-server-description-topology-version server)
+      (should (eq (mongodb-server-description-type server) 'rs-primary))
+      (should (equal (mongodb-server-description-topology-version server)
                      topology-version)))))
 
 
 
-(ert-deftest mongo-test-command-state-change-without-version-marks ()
+(ert-deftest mongodb-test-command-state-change-without-version-marks ()
   "State-change errors without topologyVersion should still mark Unknown."
-  (let* ((conn (make-mongo-conn :host "seed-a"
+  (let* ((conn (make-mongodb-conn :host "seed-a"
                                 :port 27017
                                 :database "app"
                                 :process 'proc
@@ -9045,41 +9045,41 @@
                           ("maxWireVersion" . 17)
                           ("setName" . "rs0")
                           ("isWritablePrimary" . t))))
-    (setf (mongo-conn-topology conn)
-          (mongo--topology-description-from-hello conn primary-hello))
+    (setf (mongodb-conn-topology conn)
+          (mongodb--topology-description-from-hello conn primary-hello))
     (cl-letf (((symbol-function 'process-live-p)
                (lambda (_proc) t))
-              ((symbol-function 'mongo--send-document)
+              ((symbol-function 'mongodb--send-document)
                (lambda (&rest _args) 1))
-              ((symbol-function 'mongo--recv-message)
+              ((symbol-function 'mongodb--recv-message)
                (lambda (&rest _args)
                  '(("ok" . 0)
                    ("codeName" . "NotWritablePrimary")
                    ("errmsg" . "not writable primary"))))
-              ((symbol-function 'mongo-hello)
+              ((symbol-function 'mongodb-hello)
                (lambda (refresh-conn &rest _args)
                  (let ((hello '(("ok" . 1)
                                 ("maxWireVersion" . 17)
                                 ("setName" . "rs0")
                                 ("secondary" . t))))
-                   (setf (mongo-conn-topology refresh-conn)
-                         (mongo--topology-description-from-hello
+                   (setf (mongodb-conn-topology refresh-conn)
+                         (mongodb--topology-description-from-hello
                           refresh-conn hello))
                    hello))))
       (should-error
-       (mongo-command
+       (mongodb-command
         conn "app"
         '(("insert" . "users")
           ("documents" . [])))
-       :type 'mongo-error))
-    (let ((server (mongo--current-server-description conn)))
-      (should (eq (mongo-server-description-type server) 'rs-secondary)))))
+       :type 'mongodb-error))
+    (let ((server (mongodb--current-server-description conn)))
+      (should (eq (mongodb-server-description-type server) 'rs-secondary)))))
 
 
 
-(ert-deftest mongo-test-command-retries-read-network-error ()
+(ert-deftest mongodb-test-command-retries-read-network-error ()
   "Retryable read commands should retry once after a network read error."
-  (let* ((conn (make-mongo-conn :host "seed-a"
+  (let* ((conn (make-mongodb-conn :host "seed-a"
                                 :port 27017
                                 :database "app"
                                 :process 'proc
@@ -9093,32 +9093,32 @@
          sends
          (recv-count 0)
          reconnected)
-    (setf (mongo-conn-topology conn)
-          (mongo--topology-description-from-hello conn hello))
+    (setf (mongodb-conn-topology conn)
+          (mongodb--topology-description-from-hello conn hello))
     (cl-letf (((symbol-function 'process-live-p)
                (lambda (_proc) t))
-              ((symbol-function 'mongo--send-document)
+              ((symbol-function 'mongodb--send-document)
                (lambda (_conn document &optional _sequences)
                  (push document sends)
                  1))
-              ((symbol-function 'mongo--recv-message)
+              ((symbol-function 'mongodb--recv-message)
                (lambda (&rest _args)
                  (cl-incf recv-count)
                  (if (= recv-count 1)
-                     (signal 'mongo-error
+                     (signal 'mongodb-error
                              (list "Timed out waiting for MongoDB response"))
                    '(("ok" . 1)
                      ("cursor" .
                       (("id" . 0)
                        ("firstBatch" . [])))))))
-              ((symbol-function 'mongo--reconnect-current-server)
+              ((symbol-function 'mongodb--reconnect-current-server)
                (lambda (retry-conn)
                  (setq reconnected t)
-                 (setf (mongo-conn-topology retry-conn)
-                       (mongo--topology-description-from-hello
+                 (setf (mongodb-conn-topology retry-conn)
+                       (mongodb--topology-description-from-hello
                         retry-conn hello))
                  retry-conn)))
-      (should (equal (mongo-command conn "app" '(("find" . "users")))
+      (should (equal (mongodb-command conn "app" '(("find" . "users")))
                      '(("ok" . 1)
                        ("cursor" .
                         (("id" . 0)
@@ -9129,9 +9129,9 @@
 
 
 
-(ert-deftest mongo-test-command-retries-read-server-error ()
+(ert-deftest mongodb-test-command-retries-read-server-error ()
   "Retryable read commands should retry once after retryable server errors."
-  (let* ((conn (make-mongo-conn :host "seed-a"
+  (let* ((conn (make-mongodb-conn :host "seed-a"
                                 :port 27017
                                 :database "app"
                                 :process 'proc
@@ -9144,13 +9144,13 @@
                   ("isWritablePrimary" . t)))
          (recv-count 0)
          reconnected)
-    (setf (mongo-conn-topology conn)
-          (mongo--topology-description-from-hello conn hello))
+    (setf (mongodb-conn-topology conn)
+          (mongodb--topology-description-from-hello conn hello))
     (cl-letf (((symbol-function 'process-live-p)
                (lambda (_proc) t))
-              ((symbol-function 'mongo--send-document)
+              ((symbol-function 'mongodb--send-document)
                (lambda (&rest _args) 1))
-              ((symbol-function 'mongo--recv-message)
+              ((symbol-function 'mongodb--recv-message)
                (lambda (&rest _args)
                  (cl-incf recv-count)
                  (if (= recv-count 1)
@@ -9162,14 +9162,14 @@
                      ("cursor" .
                       (("id" . 0)
                        ("firstBatch" . [])))))))
-              ((symbol-function 'mongo--reconnect-current-server)
+              ((symbol-function 'mongodb--reconnect-current-server)
                (lambda (retry-conn)
                  (setq reconnected t)
-                 (setf (mongo-conn-topology retry-conn)
-                       (mongo--topology-description-from-hello
+                 (setf (mongodb-conn-topology retry-conn)
+                       (mongodb--topology-description-from-hello
                         retry-conn hello))
                  retry-conn)))
-      (should (equal (mongo-command conn "app" '(("find" . "users")))
+      (should (equal (mongodb-command conn "app" '(("find" . "users")))
                      '(("ok" . 1)
                        ("cursor" .
                         (("id" . 0)
@@ -9179,9 +9179,9 @@
 
 
 
-(ert-deftest mongo-test-command-honors-retry-reads-false ()
+(ert-deftest mongodb-test-command-honors-retry-reads-false ()
   "retryReads=false should leave read commands as a single attempt."
-  (let* ((conn (make-mongo-conn :host "seed-a"
+  (let* ((conn (make-mongodb-conn :host "seed-a"
                                 :port 27017
                                 :database "app"
                                 :process 'proc
@@ -9193,29 +9193,29 @@
                   ("setName" . "rs0")
                   ("isWritablePrimary" . t)))
          (recv-count 0))
-    (setf (mongo-conn-topology conn)
-          (mongo--topology-description-from-hello conn hello))
+    (setf (mongodb-conn-topology conn)
+          (mongodb--topology-description-from-hello conn hello))
     (cl-letf (((symbol-function 'process-live-p)
                (lambda (_proc) t))
-              ((symbol-function 'mongo--send-document)
+              ((symbol-function 'mongodb--send-document)
                (lambda (&rest _args) 1))
-              ((symbol-function 'mongo--recv-message)
+              ((symbol-function 'mongodb--recv-message)
                (lambda (&rest _args)
                  (cl-incf recv-count)
-                 (signal 'mongo-error
+                 (signal 'mongodb-error
                          (list "Timed out waiting for MongoDB response"))))
-              ((symbol-function 'mongo--reconnect-current-server)
+              ((symbol-function 'mongodb--reconnect-current-server)
                (lambda (&rest _args)
                  (ert-fail "retryReads=false should not reconnect"))))
-      (should-error (mongo-command conn "app" '(("find" . "users")))
-                    :type 'mongo-error))
+      (should-error (mongodb-command conn "app" '(("find" . "users")))
+                    :type 'mongodb-error))
     (should (= recv-count 1))))
 
 
 
-(ert-deftest mongo-test-command-does-not-retry-getmore ()
+(ert-deftest mongodb-test-command-does-not-retry-getmore ()
   "Cursor getMore should not be retried by retryable reads."
-  (let* ((conn (make-mongo-conn :host "seed-a"
+  (let* ((conn (make-mongodb-conn :host "seed-a"
                                 :port 27017
                                 :database "app"
                                 :process 'proc
@@ -9225,30 +9225,30 @@
          (recv-count 0))
     (cl-letf (((symbol-function 'process-live-p)
                (lambda (_proc) t))
-              ((symbol-function 'mongo--send-document)
+              ((symbol-function 'mongodb--send-document)
                (lambda (&rest _args) 1))
-              ((symbol-function 'mongo--recv-message)
+              ((symbol-function 'mongodb--recv-message)
                (lambda (&rest _args)
                  (cl-incf recv-count)
-                 (signal 'mongo-error
+                 (signal 'mongodb-error
                          (list "Timed out waiting for MongoDB response"))))
-              ((symbol-function 'mongo--reconnect-current-server)
+              ((symbol-function 'mongodb--reconnect-current-server)
                (lambda (&rest _args)
                  (ert-fail "getMore should not retry"))))
       (should-error
-       (mongo-command conn
+       (mongodb-command conn
                       "app"
                       '(("getMore" . 123)
                         ("collection" . "users")))
-       :type 'mongo-error))
+       :type 'mongodb-error))
     (should (= recv-count 1))))
 
 
 
-(ert-deftest mongo-test-transaction-first-and-next-command-fields ()
+(ert-deftest mongodb-test-transaction-first-and-next-command-fields ()
   "Transaction commands should add startTransaction only once."
-  (let* ((session-id `(("id" . ,(mongo-binary 4 "abcdefghijklmnop"))))
-         (conn (make-mongo-conn :host "mongos-a"
+  (let* ((session-id `(("id" . ,(mongodb-binary 4 "abcdefghijklmnop"))))
+         (conn (make-mongodb-conn :host "mongos-a"
                                 :port 27017
                                 :database "app"
                                 :process 'proc
@@ -9259,42 +9259,42 @@
          sends)
     (cl-letf (((symbol-function 'process-live-p)
                (lambda (_proc) t))
-              ((symbol-function 'mongo--send-document)
+              ((symbol-function 'mongodb--send-document)
                (lambda (_conn document &optional _sequences)
                  (push document sends)
                  1))
-              ((symbol-function 'mongo--recv-message)
+              ((symbol-function 'mongodb--recv-message)
                (lambda (&rest _args)
                  '(("ok" . 1)))))
-      (mongo-start-transaction
+      (mongodb-start-transaction
        conn
        '(("readConcern" . (("level" . "snapshot")))))
-      (should (eq (mongo-conn-transaction-state conn) 'starting))
-      (mongo-command conn "app" '(("ping" . 1)))
-      (should (eq (mongo-conn-transaction-state conn) 'in-progress))
-      (mongo-command conn "app" '(("ping" . 1))))
+      (should (eq (mongodb-conn-transaction-state conn) 'starting))
+      (mongodb-command conn "app" '(("ping" . 1)))
+      (should (eq (mongodb-conn-transaction-state conn) 'in-progress))
+      (mongodb-command conn "app" '(("ping" . 1))))
     (setq sends (nreverse sends))
     (should (equal (cdr (assoc "lsid" (nth 0 sends))) session-id))
     (should (equal (cdr (assoc "txnNumber" (nth 0 sends)))
-                   (mongo-int64 1)))
+                   (mongodb-int64 1)))
     (should (eq (cdr (assoc "autocommit" (nth 0 sends))) :false))
     (should (eq (cdr (assoc "startTransaction" (nth 0 sends))) t))
     (should (equal (cdr (assoc "readConcern" (nth 0 sends)))
                    '(("level" . "snapshot"))))
     (should (equal (cdr (assoc "txnNumber" (nth 1 sends)))
-                   (mongo-int64 1)))
+                   (mongodb-int64 1)))
     (should (eq (cdr (assoc "autocommit" (nth 1 sends))) :false))
 	    (should-not (assoc "startTransaction" (nth 1 sends)))
 	    (should-not (assoc "readConcern" (nth 1 sends)))))
 
 
 
-(ert-deftest mongo-test-transaction-recovery-token-commit ()
+(ert-deftest mongodb-test-transaction-recovery-token-commit ()
   "commitTransaction should include the latest transaction recoveryToken."
-  (let* ((session-id `(("id" . ,(mongo-binary 4 "abcdefghijklmnop"))))
+  (let* ((session-id `(("id" . ,(mongodb-binary 4 "abcdefghijklmnop"))))
          (token-a '(("shard" . "a")))
          (token-b '(("shard" . "b")))
-         (conn (make-mongo-conn :host "seed-a"
+         (conn (make-mongodb-conn :host "seed-a"
                                 :port 27017
                                 :database "app"
                                 :process 'proc
@@ -9306,11 +9306,11 @@
          (recv-count 0))
     (cl-letf (((symbol-function 'process-live-p)
                (lambda (_proc) t))
-              ((symbol-function 'mongo--send-document)
+              ((symbol-function 'mongodb--send-document)
                (lambda (_conn document &optional _sequences)
                  (push document sends)
                  1))
-              ((symbol-function 'mongo--recv-message)
+              ((symbol-function 'mongodb--recv-message)
                (lambda (&rest _args)
                  (cl-incf recv-count)
                  (cond
@@ -9322,32 +9322,32 @@
                      ("recoveryToken" . ,token-b)))
                   (t
                    '(("ok" . 1)))))))
-      (mongo-start-transaction conn)
-      (mongo-command conn "app" '(("ping" . 1)))
-      (should (equal (mongo-conn-transaction-recovery-token conn)
+      (mongodb-start-transaction conn)
+      (mongodb-command conn "app" '(("ping" . 1)))
+      (should (equal (mongodb-conn-transaction-recovery-token conn)
                      token-a))
-      (mongo-command conn "app" '(("ping" . 1)))
-      (should (equal (mongo-conn-transaction-recovery-token conn)
+      (mongodb-command conn "app" '(("ping" . 1)))
+      (should (equal (mongodb-conn-transaction-recovery-token conn)
                      token-b))
-      (mongo-commit-transaction conn))
+      (mongodb-commit-transaction conn))
     (setq sends (nreverse sends))
     (should (= (length sends) 3))
     (should-not (assoc "recoveryToken" (nth 0 sends)))
     (should-not (assoc "recoveryToken" (nth 1 sends)))
     (should (equal (cdr (assoc "recoveryToken" (nth 2 sends)))
                    token-b))
-    (should (eq (mongo-conn-transaction-state conn) 'committed))
-    (should (equal (mongo-conn-transaction-recovery-token conn)
+    (should (eq (mongodb-conn-transaction-state conn) 'committed))
+    (should (equal (mongodb-conn-transaction-recovery-token conn)
                    token-b))
-    (should-not (mongo-in-transaction-p conn))))
+    (should-not (mongodb-in-transaction-p conn))))
 
 
 
-(ert-deftest mongo-test-transaction-recovery-token-abort ()
+(ert-deftest mongodb-test-transaction-recovery-token-abort ()
   "abortTransaction should include cached transaction recoveryToken."
-  (let* ((session-id `(("id" . ,(mongo-binary 4 "abcdefghijklmnop"))))
+  (let* ((session-id `(("id" . ,(mongodb-binary 4 "abcdefghijklmnop"))))
          (token '(("shard" . "a") ("txn" . 1)))
-         (conn (make-mongo-conn :host "seed-a"
+         (conn (make-mongodb-conn :host "seed-a"
                                 :port 27017
                                 :database "app"
                                 :process 'proc
@@ -9359,54 +9359,54 @@
                   ("maxWireVersion" . 17)
                   ("msg" . "isdbgrid")))
          captured)
-    (setf (mongo-conn-topology conn)
-          (mongo--topology-description-from-hello conn hello))
+    (setf (mongodb-conn-topology conn)
+          (mongodb--topology-description-from-hello conn hello))
     (cl-letf (((symbol-function 'process-live-p)
                (lambda (_proc) t))
-              ((symbol-function 'mongo--send-document)
+              ((symbol-function 'mongodb--send-document)
                (lambda (_conn document &optional _sequences)
                  (setq captured document)
                  1))
-              ((symbol-function 'mongo--recv-message)
+              ((symbol-function 'mongodb--recv-message)
                (lambda (&rest _args)
                  '(("ok" . 1)))))
-      (mongo-start-transaction
+      (mongodb-start-transaction
        conn
        '(("writeConcern" . (("w" . "majority")))))
-      (setf (mongo-conn-transaction-state conn) 'in-progress)
-      (setf (mongo-conn-transaction-recovery-token conn) token)
-      (setf (mongo-conn-transaction-pinned-address conn) "seed-a:27017")
-      (mongo-abort-transaction conn))
+      (setf (mongodb-conn-transaction-state conn) 'in-progress)
+      (setf (mongodb-conn-transaction-recovery-token conn) token)
+      (setf (mongodb-conn-transaction-pinned-address conn) "seed-a:27017")
+      (mongodb-abort-transaction conn))
     (should (equal captured
                    `(("abortTransaction" . 1)
                      ("writeConcern" . (("w" . "majority")))
                      ("recoveryToken" . ,token)
                      ("$db" . "admin")
                      ("lsid" . ,session-id)
-                     ("txnNumber" . ,(mongo-int64 1))
+                     ("txnNumber" . ,(mongodb-int64 1))
                      ("autocommit" . :false))))
-    (should (eq (mongo-conn-transaction-state conn) 'aborted))
-    (should (equal (mongo-conn-transaction-recovery-token conn)
+    (should (eq (mongodb-conn-transaction-state conn) 'aborted))
+    (should (equal (mongodb-conn-transaction-recovery-token conn)
                    token))
-    (should-not (mongo-conn-transaction-pinned-address conn))
-    (should-not (mongo-in-transaction-p conn))))
+    (should-not (mongodb-conn-transaction-pinned-address conn))
+    (should-not (mongodb-in-transaction-p conn))))
 
 
 
-(ert-deftest mongo-test-transaction-recovery-token-retry-preserves ()
+(ert-deftest mongodb-test-transaction-recovery-token-retry-preserves ()
   "Transaction control retries should preserve cached recoveryToken."
   (let* ((token '(("shard" . "a")))
          (read-preference
-          (mongo--params-read-preference '(:read-preference primary)))
+          (mongodb--params-read-preference '(:read-preference primary)))
          (service-id '(("$oid" . "64f000000000000000000001")))
-         (conn (make-mongo-conn :host "seed-a"
+         (conn (make-mongodb-conn :host "seed-a"
                                 :port 27017
                                 :database "app"
                                 :process 'proc
                                 :closed nil
                                 :max-wire-version 17
                                 :transaction-state 'in-progress
-                                :transaction-number (mongo-int64 4)
+                                :transaction-number (mongodb-int64 4)
                                 :transaction-read-preference read-preference
                                 :transaction-read-concern
                                 '(("level" . "snapshot"))
@@ -9418,46 +9418,46 @@
                                 "seed-a:27017"
                                 :transaction-pinned-service-id service-id
                                 :transaction-commit-sent t)))
-    (cl-letf (((symbol-function 'mongo--retry-write-once)
+    (cl-letf (((symbol-function 'mongodb--retry-write-once)
                (lambda (retry-conn _err)
                  (should-not
-                  (mongo-conn-transaction-pinned-address retry-conn))
+                  (mongodb-conn-transaction-pinned-address retry-conn))
                  (should-not
-                  (mongo-conn-transaction-pinned-service-id retry-conn))
-                 (setf (mongo-conn-transaction-state retry-conn) nil)
-                 (setf (mongo-conn-transaction-number retry-conn) nil)
-                 (setf (mongo-conn-transaction-read-preference retry-conn)
+                  (mongodb-conn-transaction-pinned-service-id retry-conn))
+                 (setf (mongodb-conn-transaction-state retry-conn) nil)
+                 (setf (mongodb-conn-transaction-number retry-conn) nil)
+                 (setf (mongodb-conn-transaction-read-preference retry-conn)
                        nil)
-                 (setf (mongo-conn-transaction-read-concern retry-conn) nil)
-                 (setf (mongo-conn-transaction-write-concern retry-conn) nil)
-                 (setf (mongo-conn-transaction-max-commit-time-ms retry-conn)
+                 (setf (mongodb-conn-transaction-read-concern retry-conn) nil)
+                 (setf (mongodb-conn-transaction-write-concern retry-conn) nil)
+                 (setf (mongodb-conn-transaction-max-commit-time-ms retry-conn)
                        nil)
-                 (setf (mongo-conn-transaction-recovery-token retry-conn) nil)
-                 (setf (mongo-conn-transaction-commit-sent retry-conn) nil)
+                 (setf (mongodb-conn-transaction-recovery-token retry-conn) nil)
+                 (setf (mongodb-conn-transaction-commit-sent retry-conn) nil)
                  retry-conn)))
-      (mongo--retry-transaction-control-once
+      (mongodb--retry-transaction-control-once
        conn
-       (list 'mongo-error "network failure")))
-    (should (eq (mongo-conn-transaction-state conn) 'in-progress))
-    (should (equal (mongo-conn-transaction-number conn) (mongo-int64 4)))
-    (should (equal (mongo-conn-transaction-read-preference conn)
+       (list 'mongodb-error "network failure")))
+    (should (eq (mongodb-conn-transaction-state conn) 'in-progress))
+    (should (equal (mongodb-conn-transaction-number conn) (mongodb-int64 4)))
+    (should (equal (mongodb-conn-transaction-read-preference conn)
                    read-preference))
-    (should (equal (mongo-conn-transaction-read-concern conn)
+    (should (equal (mongodb-conn-transaction-read-concern conn)
                    '(("level" . "snapshot"))))
-    (should (equal (mongo-conn-transaction-write-concern conn)
+    (should (equal (mongodb-conn-transaction-write-concern conn)
                    '(("w" . "majority"))))
-    (should (= (mongo-conn-transaction-max-commit-time-ms conn) 2500))
-    (should (equal (mongo-conn-transaction-recovery-token conn) token))
-    (should-not (mongo-conn-transaction-pinned-address conn))
-    (should-not (mongo-conn-transaction-pinned-service-id conn))
-    (should (eq (mongo-conn-transaction-commit-sent conn) t))))
+    (should (= (mongodb-conn-transaction-max-commit-time-ms conn) 2500))
+    (should (equal (mongodb-conn-transaction-recovery-token conn) token))
+    (should-not (mongodb-conn-transaction-pinned-address conn))
+    (should-not (mongodb-conn-transaction-pinned-service-id conn))
+    (should (eq (mongodb-conn-transaction-commit-sent conn) t))))
 
 
 
-(ert-deftest mongo-test-transaction-pins-mongos-after-first-command ()
+(ert-deftest mongodb-test-transaction-pins-mongos-after-first-command ()
   "Sharded transactions should pin to the selected mongos."
-  (let* ((session-id `(("id" . ,(mongo-binary 4 "abcdefghijklmnop"))))
-         (conn (make-mongo-conn :host "mongos-a"
+  (let* ((session-id `(("id" . ,(mongodb-binary 4 "abcdefghijklmnop"))))
+         (conn (make-mongodb-conn :host "mongos-a"
                                 :port 27017
                                 :database "app"
                                 :process 'proc
@@ -9468,32 +9468,32 @@
          (hello '(("ok" . 1)
                   ("maxWireVersion" . 17)
                   ("msg" . "isdbgrid"))))
-    (setf (mongo-conn-topology conn)
-          (mongo--topology-description-from-hello conn hello))
+    (setf (mongodb-conn-topology conn)
+          (mongodb--topology-description-from-hello conn hello))
     (cl-letf (((symbol-function 'process-live-p)
                (lambda (_proc) t))
-              ((symbol-function 'mongo--send-document)
+              ((symbol-function 'mongodb--send-document)
                (lambda (&rest _args) 1))
-              ((symbol-function 'mongo--recv-message)
+              ((symbol-function 'mongodb--recv-message)
                (lambda (&rest _args)
                  '(("ok" . 1)))))
-      (mongo-start-transaction conn)
-      (mongo-command conn "app" '(("insert" . "users")))
-      (should (equal (mongo-conn-transaction-pinned-address conn)
+      (mongodb-start-transaction conn)
+      (mongodb-command conn "app" '(("insert" . "users")))
+      (should (equal (mongodb-conn-transaction-pinned-address conn)
                      "mongos-a:27017"))
-      (should-not (mongo-conn-transaction-pinned-service-id conn))
-      (mongo-commit-transaction conn))
-    (should (eq (mongo-conn-transaction-state conn) 'committed))
-    (should (equal (mongo-conn-transaction-pinned-address conn)
+      (should-not (mongodb-conn-transaction-pinned-service-id conn))
+      (mongodb-commit-transaction conn))
+    (should (eq (mongodb-conn-transaction-state conn) 'committed))
+    (should (equal (mongodb-conn-transaction-pinned-address conn)
                    "mongos-a:27017"))))
 
 
 
-(ert-deftest mongo-test-transaction-load-balanced-pins-service-id ()
+(ert-deftest mongodb-test-transaction-load-balanced-pins-service-id ()
   "Load-balanced transactions should pin to the selected serviceId."
-  (let* ((session-id `(("id" . ,(mongo-binary 4 "abcdefghijklmnop"))))
+  (let* ((session-id `(("id" . ,(mongodb-binary 4 "abcdefghijklmnop"))))
          (service-id '(("$oid" . "64f000000000000000000001")))
-         (conn (make-mongo-conn :host "lb"
+         (conn (make-mongodb-conn :host "lb"
                                 :port 27017
                                 :database "app"
                                 :process 'proc
@@ -9506,28 +9506,28 @@
          (hello `(("ok" . 1)
                   ("maxWireVersion" . 17)
                   ("serviceId" . ,service-id))))
-    (setf (mongo-conn-topology conn)
-          (mongo--topology-description-from-hello conn hello))
+    (setf (mongodb-conn-topology conn)
+          (mongodb--topology-description-from-hello conn hello))
     (cl-letf (((symbol-function 'process-live-p)
                (lambda (_proc) t))
-              ((symbol-function 'mongo--send-document)
+              ((symbol-function 'mongodb--send-document)
                (lambda (&rest _args) 1))
-              ((symbol-function 'mongo--recv-message)
+              ((symbol-function 'mongodb--recv-message)
                (lambda (&rest _args)
                  '(("ok" . 1)))))
-      (mongo-start-transaction conn)
-      (mongo-command conn "app" '(("insert" . "users"))))
-    (should (equal (mongo-conn-transaction-pinned-address conn)
+      (mongodb-start-transaction conn)
+      (mongodb-command conn "app" '(("insert" . "users"))))
+    (should (equal (mongodb-conn-transaction-pinned-address conn)
                    "lb:27017"))
-    (should (equal (mongo-conn-transaction-pinned-service-id conn)
+    (should (equal (mongodb-conn-transaction-pinned-service-id conn)
                    service-id))))
 
 
 
-(ert-deftest mongo-test-transaction-rejects-pinned-server-change ()
+(ert-deftest mongodb-test-transaction-rejects-pinned-server-change ()
   "Commands in a transaction should stay on the pinned mongos."
-  (let* ((session-id `(("id" . ,(mongo-binary 4 "abcdefghijklmnop"))))
-         (conn (make-mongo-conn :host "mongos-b"
+  (let* ((session-id `(("id" . ,(mongodb-binary 4 "abcdefghijklmnop"))))
+         (conn (make-mongodb-conn :host "mongos-b"
                                 :port 27017
                                 :database "app"
                                 :process 'proc
@@ -9535,31 +9535,31 @@
                                 :max-wire-version 17
                                 :session-id session-id
                                 :transaction-state 'in-progress
-                                :transaction-number (mongo-int64 1)
+                                :transaction-number (mongodb-int64 1)
                                 :transaction-pinned-address
                                 "mongos-a:27017"))
          (hello '(("ok" . 1)
                   ("maxWireVersion" . 17)
                   ("msg" . "isdbgrid"))))
-    (setf (mongo-conn-topology conn)
-          (mongo--topology-description-from-hello conn hello))
+    (setf (mongodb-conn-topology conn)
+          (mongodb--topology-description-from-hello conn hello))
     (cl-letf (((symbol-function 'process-live-p)
                (lambda (_proc) t))
-              ((symbol-function 'mongo--send-document)
+              ((symbol-function 'mongodb--send-document)
                (lambda (&rest _args)
                  (ert-fail "pinned server mismatch should fail before send"))))
       (let ((err (should-error
-                  (mongo-command conn "app" '(("insert" . "users")))
-                  :type 'mongo-error)))
+                  (mongodb-command conn "app" '(("insert" . "users")))
+                  :type 'mongodb-error)))
         (should (string-match-p "transaction is pinned"
                                 (error-message-string err)))))))
 
 
 
-(ert-deftest mongo-test-transaction-rejects-explicit-unacknowledged-write-concern ()
+(ert-deftest mongodb-test-transaction-rejects-explicit-unacknowledged-write-concern ()
   "Transactions should reject explicit unacknowledged writeConcern."
-  (let* ((session-id `(("id" . ,(mongo-binary 4 "abcdefghijklmnop"))))
-         (conn (make-mongo-conn :host "seed-a"
+  (let* ((session-id `(("id" . ,(mongodb-binary 4 "abcdefghijklmnop"))))
+         (conn (make-mongodb-conn :host "seed-a"
                                 :port 27017
                                 :database "app"
                                 :process 'proc
@@ -9570,22 +9570,22 @@
     (cl-letf (((symbol-function 'process-live-p)
                (lambda (_proc) t)))
       (let ((err (should-error
-                  (mongo-start-transaction
+                  (mongodb-start-transaction
                    conn
                    '(("writeConcern" . (("w" . 0)))))
-                  :type 'mongo-error)))
+                  :type 'mongodb-error)))
         (should (string-match-p
                  "transactions do not support unacknowledged write concerns"
                  (error-message-string err)))))
-    (should-not (mongo-conn-transaction-state conn))
-    (should (= (mongo-conn-txn-number conn) 0))))
+    (should-not (mongodb-conn-transaction-state conn))
+    (should (= (mongodb-conn-txn-number conn) 0))))
 
 
 
-(ert-deftest mongo-test-transaction-rejects-inherited-unacknowledged-write-concern ()
+(ert-deftest mongodb-test-transaction-rejects-inherited-unacknowledged-write-concern ()
   "Transactions should reject inherited unacknowledged writeConcern."
-  (let* ((session-id `(("id" . ,(mongo-binary 4 "abcdefghijklmnop"))))
-         (conn (make-mongo-conn :host "seed-a"
+  (let* ((session-id `(("id" . ,(mongodb-binary 4 "abcdefghijklmnop"))))
+         (conn (make-mongodb-conn :host "seed-a"
                                 :port 27017
                                 :database "app"
                                 :process 'proc
@@ -9594,23 +9594,23 @@
                                 :txn-number 0
                                 :session-id session-id
                                 :write-concern
-                                (mongo--params-write-concern '(:w 0)))))
+                                (mongodb--params-write-concern '(:w 0)))))
     (cl-letf (((symbol-function 'process-live-p)
                (lambda (_proc) t)))
       (let ((err (should-error
-                  (mongo-start-transaction conn)
-                  :type 'mongo-error)))
+                  (mongodb-start-transaction conn)
+                  :type 'mongodb-error)))
         (should (string-match-p
                  "transactions do not support unacknowledged write concerns"
                  (error-message-string err)))))
-    (should-not (mongo-conn-transaction-state conn))
-    (should (= (mongo-conn-txn-number conn) 0))))
+    (should-not (mongodb-conn-transaction-state conn))
+    (should (= (mongodb-conn-txn-number conn) 0))))
 
 
 
-(ert-deftest mongo-test-transaction-requires-logical-session-support ()
+(ert-deftest mongodb-test-transaction-requires-logical-session-support ()
   "Transactions should not create sessions when the server lacks support."
-  (let ((conn (make-mongo-conn :host "seed-a"
+  (let ((conn (make-mongodb-conn :host "seed-a"
                                :port 27017
                                :database "app"
                                :process 'proc
@@ -9620,20 +9620,20 @@
     (cl-letf (((symbol-function 'process-live-p)
                (lambda (_proc) t)))
       (let ((err (should-error
-                  (mongo-start-transaction conn)
-                  :type 'mongo-error)))
+                  (mongodb-start-transaction conn)
+                  :type 'mongodb-error)))
         (should (string-match-p
                  "logical session support"
                  (error-message-string err)))))
-    (should-not (mongo-conn-session-id conn))
-    (should-not (mongo-conn-transaction-state conn))
-    (should (= (mongo-conn-txn-number conn) 0))))
+    (should-not (mongodb-conn-session-id conn))
+    (should-not (mongodb-conn-transaction-state conn))
+    (should (= (mongodb-conn-txn-number conn) 0))))
 
 
 
-(ert-deftest mongo-test-transaction-creates-session-from-hello-support ()
+(ert-deftest mongodb-test-transaction-creates-session-from-hello-support ()
   "Transactions may create an lsid after hello reports session support."
-  (let ((conn (make-mongo-conn :host "seed-a"
+  (let ((conn (make-mongodb-conn :host "seed-a"
                                :port 27017
                                :database "app"
                                :process 'proc
@@ -9645,16 +9645,16 @@
                                  ("logicalSessionTimeoutMinutes" . 30)))))
     (cl-letf (((symbol-function 'process-live-p)
                (lambda (_proc) t)))
-      (mongo-start-transaction conn))
-    (should (mongo-conn-session-id conn))
-    (should (eq (mongo-conn-transaction-state conn) 'starting))
-    (should (equal (mongo-conn-transaction-number conn)
-                   (mongo-int64 1)))))
+      (mongodb-start-transaction conn))
+    (should (mongodb-conn-session-id conn))
+    (should (eq (mongodb-conn-transaction-state conn) 'starting))
+    (should (equal (mongodb-conn-transaction-number conn)
+                   (mongodb-int64 1)))))
 
 
-(ert-deftest mongo-test-transaction-load-balanced-creates-session ()
+(ert-deftest mongodb-test-transaction-load-balanced-creates-session ()
   "Load-balanced transactions should not require logicalSessionTimeoutMinutes."
-  (let ((conn (make-mongo-conn :host "lb"
+  (let ((conn (make-mongodb-conn :host "lb"
                                :port 27017
                                :database "app"
                                :process 'proc
@@ -9670,18 +9670,18 @@
                                   (("$oid" . "64f0000000000000000000aa")))))))
     (cl-letf (((symbol-function 'process-live-p)
                (lambda (_proc) t)))
-      (mongo-start-transaction conn))
-    (should (mongo-conn-session-id conn))
-    (should (eq (mongo-conn-transaction-state conn) 'starting))
-    (should (equal (mongo-conn-transaction-number conn)
-                   (mongo-int64 1)))))
+      (mongodb-start-transaction conn))
+    (should (mongodb-conn-session-id conn))
+    (should (eq (mongodb-conn-transaction-state conn) 'starting))
+    (should (equal (mongodb-conn-transaction-number conn)
+                   (mongodb-int64 1)))))
 
 
 
-(ert-deftest mongo-test-transaction-inherits-connection-write-concern ()
+(ert-deftest mongodb-test-transaction-inherits-connection-write-concern ()
   "Transactions should use connection writeConcern when no option overrides it."
-  (let* ((session-id `(("id" . ,(mongo-binary 4 "abcdefghijklmnop"))))
-         (conn (make-mongo-conn :host "seed-a"
+  (let* ((session-id `(("id" . ,(mongodb-binary 4 "abcdefghijklmnop"))))
+         (conn (make-mongodb-conn :host "seed-a"
                                 :port 27017
                                 :database "app"
                                 :process 'proc
@@ -9690,33 +9690,33 @@
                                 :txn-number 0
                                 :session-id session-id
                                 :write-concern
-                                (mongo--params-write-concern
+                                (mongodb--params-write-concern
                                  '(:w majority :w-timeout-ms 2500))))
          captured)
     (cl-letf (((symbol-function 'process-live-p)
                (lambda (_proc) t))
-              ((symbol-function 'mongo--send-document)
+              ((symbol-function 'mongodb--send-document)
                (lambda (_conn document &optional _sequences)
                  (setq captured document)
                  1))
-              ((symbol-function 'mongo--recv-message)
+              ((symbol-function 'mongodb--recv-message)
                (lambda (&rest _args)
                  '(("ok" . 1)))))
-      (mongo-start-transaction conn)
-      (setf (mongo-conn-transaction-state conn) 'in-progress)
-      (mongo-commit-transaction conn))
+      (mongodb-start-transaction conn)
+      (setf (mongodb-conn-transaction-state conn) 'in-progress)
+      (mongodb-commit-transaction conn))
     (should (equal (cdr (assoc "writeConcern" captured))
                    '(("w" . "majority")
                      ("wtimeout" . 2500))))
-    (should (eq (mongo-conn-transaction-state conn) 'committed))
-    (should-not (mongo-in-transaction-p conn))))
+    (should (eq (mongodb-conn-transaction-state conn) 'committed))
+    (should-not (mongodb-in-transaction-p conn))))
 
 
 
-(ert-deftest mongo-test-transaction-commit-uses-max-commit-time-ms ()
+(ert-deftest mongodb-test-transaction-commit-uses-max-commit-time-ms ()
   "commitTransaction should include transaction option maxCommitTimeMS as maxTimeMS."
-  (let* ((session-id `(("id" . ,(mongo-binary 4 "abcdefghijklmnop"))))
-         (conn (make-mongo-conn :host "seed-a"
+  (let* ((session-id `(("id" . ,(mongodb-binary 4 "abcdefghijklmnop"))))
+         (conn (make-mongodb-conn :host "seed-a"
                                 :port 27017
                                 :database "app"
                                 :process 'proc
@@ -9727,27 +9727,27 @@
          captured)
     (cl-letf (((symbol-function 'process-live-p)
                (lambda (_proc) t))
-              ((symbol-function 'mongo--send-document)
+              ((symbol-function 'mongodb--send-document)
                (lambda (_conn document &optional _sequences)
                  (setq captured document)
                  1))
-              ((symbol-function 'mongo--recv-message)
+              ((symbol-function 'mongodb--recv-message)
                (lambda (&rest _args)
                  '(("ok" . 1)))))
-      (mongo-start-transaction
+      (mongodb-start-transaction
        conn
        '(("maxCommitTimeMS" . 2500)))
-      (setf (mongo-conn-transaction-state conn) 'in-progress)
-      (mongo-commit-transaction conn))
+      (setf (mongodb-conn-transaction-state conn) 'in-progress)
+      (mongodb-commit-transaction conn))
     (should (= (cdr (assoc "maxTimeMS" captured)) 2500))
-    (should (eq (mongo-conn-transaction-state conn) 'committed))))
+    (should (eq (mongodb-conn-transaction-state conn) 'committed))))
 
 
 
-(ert-deftest mongo-test-transaction-commit-argument-overrides-max-commit-time-ms ()
-  "Explicit mongo-commit-transaction maxTimeMS should override maxCommitTimeMS."
-  (let* ((session-id `(("id" . ,(mongo-binary 4 "abcdefghijklmnop"))))
-         (conn (make-mongo-conn :host "seed-a"
+(ert-deftest mongodb-test-transaction-commit-argument-overrides-max-commit-time-ms ()
+  "Explicit mongodb-commit-transaction maxTimeMS should override maxCommitTimeMS."
+  (let* ((session-id `(("id" . ,(mongodb-binary 4 "abcdefghijklmnop"))))
+         (conn (make-mongodb-conn :host "seed-a"
                                 :port 27017
                                 :database "app"
                                 :process 'proc
@@ -9758,27 +9758,27 @@
          captured)
     (cl-letf (((symbol-function 'process-live-p)
                (lambda (_proc) t))
-              ((symbol-function 'mongo--send-document)
+              ((symbol-function 'mongodb--send-document)
                (lambda (_conn document &optional _sequences)
                  (setq captured document)
                  1))
-              ((symbol-function 'mongo--recv-message)
+              ((symbol-function 'mongodb--recv-message)
                (lambda (&rest _args)
                  '(("ok" . 1)))))
-      (mongo-start-transaction
+      (mongodb-start-transaction
        conn
        '(("maxCommitTimeMS" . 2500)))
-      (setf (mongo-conn-transaction-state conn) 'in-progress)
-      (mongo-commit-transaction conn 5000))
+      (setf (mongodb-conn-transaction-state conn) 'in-progress)
+      (mongodb-commit-transaction conn 5000))
     (should (= (cdr (assoc "maxTimeMS" captured)) 5000))
-    (should (eq (mongo-conn-transaction-state conn) 'committed))))
+    (should (eq (mongodb-conn-transaction-state conn) 'committed))))
 
 
 
-(ert-deftest mongo-test-transaction-rejects-negative-max-commit-time-ms ()
+(ert-deftest mongodb-test-transaction-rejects-negative-max-commit-time-ms ()
   "startTransaction should reject negative maxCommitTimeMS without changing state."
-  (let* ((session-id `(("id" . ,(mongo-binary 4 "abcdefghijklmnop"))))
-         (conn (make-mongo-conn :host "seed-a"
+  (let* ((session-id `(("id" . ,(mongodb-binary 4 "abcdefghijklmnop"))))
+         (conn (make-mongodb-conn :host "seed-a"
                                 :port 27017
                                 :database "app"
                                 :process 'proc
@@ -9789,21 +9789,21 @@
     (cl-letf (((symbol-function 'process-live-p)
                (lambda (_proc) t)))
       (let ((err (should-error
-                  (mongo-start-transaction
+                  (mongodb-start-transaction
                    conn
                    '(("maxCommitTimeMS" . -1)))
-                  :type 'mongo-error)))
+                  :type 'mongodb-error)))
         (should (string-match-p "maxCommitTimeMS"
                                 (error-message-string err)))))
-    (should-not (mongo-conn-transaction-state conn))
-    (should (= (mongo-conn-txn-number conn) 0))))
+    (should-not (mongodb-conn-transaction-state conn))
+    (should (= (mongodb-conn-txn-number conn) 0))))
 
 
 
-(ert-deftest mongo-test-transaction-rejects-negative-commit-max-time-ms ()
-  "mongo-commit-transaction should reject negative maxTimeMS without changing state."
-  (let* ((session-id `(("id" . ,(mongo-binary 4 "abcdefghijklmnop"))))
-         (conn (make-mongo-conn :host "seed-a"
+(ert-deftest mongodb-test-transaction-rejects-negative-commit-max-time-ms ()
+  "mongodb-commit-transaction should reject negative maxTimeMS without changing state."
+  (let* ((session-id `(("id" . ,(mongodb-binary 4 "abcdefghijklmnop"))))
+         (conn (make-mongodb-conn :host "seed-a"
                                 :port 27017
                                 :database "app"
                                 :process 'proc
@@ -9813,25 +9813,25 @@
                                 :session-id session-id)))
     (cl-letf (((symbol-function 'process-live-p)
                (lambda (_proc) t))
-              ((symbol-function 'mongo--send-document)
+              ((symbol-function 'mongodb--send-document)
                (lambda (&rest _args)
                  (ert-fail "invalid maxTimeMS should fail before send"))))
-      (mongo-start-transaction conn)
-      (setf (mongo-conn-transaction-state conn) 'in-progress)
+      (mongodb-start-transaction conn)
+      (setf (mongodb-conn-transaction-state conn) 'in-progress)
       (let ((err (should-error
-                  (mongo-commit-transaction conn -1)
-                  :type 'mongo-error)))
+                  (mongodb-commit-transaction conn -1)
+                  :type 'mongodb-error)))
         (should (string-match-p "maxTimeMS"
                                 (error-message-string err)))))
-    (should (eq (mongo-conn-transaction-state conn) 'in-progress))
-    (should (mongo-in-transaction-p conn))))
+    (should (eq (mongodb-conn-transaction-state conn) 'in-progress))
+    (should (mongodb-in-transaction-p conn))))
 
 
 
-(ert-deftest mongo-test-transaction-read-requires-primary-read-preference ()
+(ert-deftest mongodb-test-transaction-read-requires-primary-read-preference ()
   "Transaction read operations should reject non-primary readPreference."
-  (let* ((session-id `(("id" . ,(mongo-binary 4 "abcdefghijklmnop"))))
-         (conn (make-mongo-conn
+  (let* ((session-id `(("id" . ,(mongodb-binary 4 "abcdefghijklmnop"))))
+         (conn (make-mongodb-conn
                 :host "seed-a"
                 :port 27017
                 :database "app"
@@ -9841,27 +9841,27 @@
                 :txn-number 0
                 :session-id session-id
                 :read-preference
-                (mongo--params-read-preference
+                (mongodb--params-read-preference
                  '(:read-preference secondary)))))
     (cl-letf (((symbol-function 'process-live-p)
                (lambda (_proc) t))
-              ((symbol-function 'mongo--send-document)
+              ((symbol-function 'mongodb--send-document)
                (lambda (&rest _args)
                  (ert-fail "transaction read should fail before send"))))
-      (mongo-start-transaction conn)
+      (mongodb-start-transaction conn)
       (let ((err (should-error
-                  (mongo-command conn "app" '(("find" . "users")))
-                  :type 'mongo-error)))
+                  (mongodb-command conn "app" '(("find" . "users")))
+                  :type 'mongodb-error)))
         (should (string-match-p "read preference in a transaction must be primary"
                                 (error-message-string err))))
-      (should (eq (mongo-conn-transaction-state conn) 'starting)))))
+      (should (eq (mongodb-conn-transaction-state conn) 'starting)))))
 
 
 
-(ert-deftest mongo-test-transaction-read-preference-option-overrides-connection ()
+(ert-deftest mongodb-test-transaction-read-preference-option-overrides-connection ()
   "Transaction readPreference should override connection readPreference."
-  (let* ((session-id `(("id" . ,(mongo-binary 4 "abcdefghijklmnop"))))
-         (conn (make-mongo-conn
+  (let* ((session-id `(("id" . ,(mongodb-binary 4 "abcdefghijklmnop"))))
+         (conn (make-mongodb-conn
                 :host "seed-a"
                 :port 27017
                 :database "app"
@@ -9871,31 +9871,31 @@
                 :txn-number 0
                 :session-id session-id
                 :read-preference
-                (mongo--params-read-preference
+                (mongodb--params-read-preference
                  '(:read-preference secondary))))
          (primary-hello '(("ok" . 1)
                           ("maxWireVersion" . 17)
                           ("setName" . "rs0")
                           ("isWritablePrimary" . t)))
          captured)
-    (setf (mongo-conn-topology conn)
-          (mongo--topology-description-from-hello conn primary-hello))
+    (setf (mongodb-conn-topology conn)
+          (mongodb--topology-description-from-hello conn primary-hello))
     (cl-letf (((symbol-function 'process-live-p)
                (lambda (_proc) t))
-              ((symbol-function 'mongo--send-document)
+              ((symbol-function 'mongodb--send-document)
                (lambda (_conn document &optional _sequences)
                  (setq captured document)
                  1))
-              ((symbol-function 'mongo--recv-message)
+              ((symbol-function 'mongodb--recv-message)
                (lambda (&rest _args)
                  '(("ok" . 1)))))
-      (mongo-start-transaction
+      (mongodb-start-transaction
        conn
        '(("readPreference" . "primary")))
-      (mongo-command conn "app" '(("find" . "users"))))
-    (should (eq (mongo-conn-transaction-state conn) 'in-progress))
-    (should (equal (mongo--read-preference-mode
-                    (mongo-conn-transaction-read-preference conn))
+      (mongodb-command conn "app" '(("find" . "users"))))
+    (should (eq (mongodb-conn-transaction-state conn) 'in-progress))
+    (should (equal (mongodb--read-preference-mode
+                    (mongodb-conn-transaction-read-preference conn))
                    "primary"))
     (should (eq (cdr (assoc "startTransaction" captured)) t))
     (should (eq (cdr (assoc "autocommit" captured)) :false))
@@ -9903,10 +9903,10 @@
 
 
 
-(ert-deftest mongo-test-transaction-read-preference-option-rejects-non-primary-read ()
+(ert-deftest mongodb-test-transaction-read-preference-option-rejects-non-primary-read ()
   "Transaction readPreference=secondary should reject read operations."
-  (let* ((session-id `(("id" . ,(mongo-binary 4 "abcdefghijklmnop"))))
-         (conn (make-mongo-conn :host "seed-a"
+  (let* ((session-id `(("id" . ,(mongodb-binary 4 "abcdefghijklmnop"))))
+         (conn (make-mongodb-conn :host "seed-a"
                                 :port 27017
                                 :database "app"
                                 :process 'proc
@@ -9916,25 +9916,25 @@
                                 :session-id session-id)))
     (cl-letf (((symbol-function 'process-live-p)
                (lambda (_proc) t))
-              ((symbol-function 'mongo--send-document)
+              ((symbol-function 'mongodb--send-document)
                (lambda (&rest _args)
                  (ert-fail "non-primary transaction readPreference should fail before send"))))
-      (mongo-start-transaction
+      (mongodb-start-transaction
        conn
        '(("readPreference" . (("mode" . "secondary")))))
       (let ((err (should-error
-                  (mongo-command conn "app" '(("find" . "users")))
-                  :type 'mongo-error)))
+                  (mongodb-command conn "app" '(("find" . "users")))
+                  :type 'mongodb-error)))
         (should (string-match-p "read preference in a transaction must be primary"
                                 (error-message-string err)))))
-    (should (eq (mongo-conn-transaction-state conn) 'starting))))
+    (should (eq (mongodb-conn-transaction-state conn) 'starting))))
 
 
 
-(ert-deftest mongo-test-transaction-write-does-not-validate-read-preference ()
+(ert-deftest mongodb-test-transaction-write-does-not-validate-read-preference ()
   "Transaction write operations should not validate readPreference."
-  (let* ((session-id `(("id" . ,(mongo-binary 4 "abcdefghijklmnop"))))
-         (conn (make-mongo-conn
+  (let* ((session-id `(("id" . ,(mongodb-binary 4 "abcdefghijklmnop"))))
+         (conn (make-mongodb-conn
                 :host "seed-a"
                 :port 27017
                 :database "app"
@@ -9944,35 +9944,35 @@
                 :txn-number 0
                 :session-id session-id
                 :read-preference
-                (mongo--params-read-preference
+                (mongodb--params-read-preference
                  '(:read-preference secondary))))
          (primary-hello '(("ok" . 1)
                           ("maxWireVersion" . 17)
                           ("setName" . "rs0")
                           ("isWritablePrimary" . t)))
          captured)
-    (setf (mongo-conn-topology conn)
-          (mongo--topology-description-from-hello conn primary-hello))
+    (setf (mongodb-conn-topology conn)
+          (mongodb--topology-description-from-hello conn primary-hello))
     (cl-letf (((symbol-function 'process-live-p)
                (lambda (_proc) t))
-              ((symbol-function 'mongo--send-document)
+              ((symbol-function 'mongodb--send-document)
                (lambda (_conn document &optional _sequences)
                  (setq captured document)
                  1))
-              ((symbol-function 'mongo--recv-message)
+              ((symbol-function 'mongodb--recv-message)
                (lambda (&rest _args)
                  '(("ok" . 1)))))
-      (mongo-start-transaction conn)
-      (mongo-command conn "app" '(("insert" . "users"))))
+      (mongodb-start-transaction conn)
+      (mongodb-command conn "app" '(("insert" . "users"))))
     (should (eq (cdr (assoc "startTransaction" captured)) t))
     (should (eq (cdr (assoc "autocommit" captured)) :false))))
 
 
 
-(ert-deftest mongo-test-transaction-network-error-labels-transient ()
+(ert-deftest mongodb-test-transaction-network-error-labels-transient ()
   "Network errors inside a transaction should be labeled transient."
-  (let* ((session-id `(("id" . ,(mongo-binary 4 "abcdefghijklmnop"))))
-         (conn (make-mongo-conn :host "seed-a"
+  (let* ((session-id `(("id" . ,(mongodb-binary 4 "abcdefghijklmnop"))))
+         (conn (make-mongodb-conn :host "seed-a"
                                 :port 27017
                                 :database "app"
                                 :process 'proc
@@ -9983,34 +9983,34 @@
          (mongos-hello '(("ok" . 1)
                          ("maxWireVersion" . 17)
                          ("msg" . "isdbgrid"))))
-    (setf (mongo-conn-topology conn)
-          (mongo--topology-description-from-hello conn mongos-hello))
+    (setf (mongodb-conn-topology conn)
+          (mongodb--topology-description-from-hello conn mongos-hello))
     (cl-letf (((symbol-function 'process-live-p)
                (lambda (_proc) t))
-              ((symbol-function 'mongo--send-document)
+              ((symbol-function 'mongodb--send-document)
                (lambda (&rest _args) 1))
-              ((symbol-function 'mongo--recv-message)
+              ((symbol-function 'mongodb--recv-message)
                (lambda (&rest _args)
-                 (signal 'mongo-error
+                 (signal 'mongodb-error
                          (list "Timed out waiting for MongoDB response")))))
-      (mongo-start-transaction conn)
+      (mongodb-start-transaction conn)
       (let ((err (should-error
-                  (mongo-command conn "app" '(("insert" . "users")))
-                  :type 'mongo-error)))
+                  (mongodb-command conn "app" '(("insert" . "users")))
+                  :type 'mongodb-error)))
         (should
-         (mongo-error-has-label-p
+         (mongodb-error-has-label-p
           err "TransientTransactionError"))
         (should (string-match-p "Timed out waiting"
                                 (error-message-string err)))))
-    (should (eq (mongo-conn-transaction-state conn) 'in-progress))
-    (should-not (mongo-conn-transaction-pinned-address conn))))
+    (should (eq (mongodb-conn-transaction-state conn) 'in-progress))
+    (should-not (mongodb-conn-transaction-pinned-address conn))))
 
 
 
-(ert-deftest mongo-test-transaction-server-transient-label-unpins ()
+(ert-deftest mongodb-test-transaction-server-transient-label-unpins ()
   "Server TransientTransactionError labels should unpin the transaction."
-  (let* ((session-id `(("id" . ,(mongo-binary 4 "abcdefghijklmnop"))))
-         (conn (make-mongo-conn :host "mongos-a"
+  (let* ((session-id `(("id" . ,(mongodb-binary 4 "abcdefghijklmnop"))))
+         (conn (make-mongodb-conn :host "mongos-a"
                                 :port 27017
                                 :database "app"
                                 :process 'proc
@@ -10021,33 +10021,33 @@
          (hello '(("ok" . 1)
                   ("maxWireVersion" . 17)
                   ("msg" . "isdbgrid"))))
-    (setf (mongo-conn-topology conn)
-          (mongo--topology-description-from-hello conn hello))
+    (setf (mongodb-conn-topology conn)
+          (mongodb--topology-description-from-hello conn hello))
     (cl-letf (((symbol-function 'process-live-p)
                (lambda (_proc) t))
-              ((symbol-function 'mongo--send-document)
+              ((symbol-function 'mongodb--send-document)
                (lambda (&rest _args) 1))
-              ((symbol-function 'mongo--recv-message)
+              ((symbol-function 'mongodb--recv-message)
                (lambda (&rest _args)
                  '(("ok" . 0)
                    ("errmsg" . "write conflict")
                    ("errorLabels" . ["TransientTransactionError"])))))
-      (mongo-start-transaction conn)
+      (mongodb-start-transaction conn)
       (let ((err (should-error
-                  (mongo-command conn "app" '(("insert" . "users")))
-                  :type 'mongo-error)))
+                  (mongodb-command conn "app" '(("insert" . "users")))
+                  :type 'mongodb-error)))
         (should
-         (mongo-error-has-label-p
+         (mongodb-error-has-label-p
           err "TransientTransactionError"))))
-    (should (eq (mongo-conn-transaction-state conn) 'in-progress))
-    (should-not (mongo-conn-transaction-pinned-address conn))))
+    (should (eq (mongodb-conn-transaction-state conn) 'in-progress))
+    (should-not (mongodb-conn-transaction-pinned-address conn))))
 
 
 
-(ert-deftest mongo-test-transaction-selection-error-labels-transient ()
+(ert-deftest mongodb-test-transaction-selection-error-labels-transient ()
   "Server-selection errors inside a transaction should be labeled transient."
-  (let* ((session-id `(("id" . ,(mongo-binary 4 "abcdefghijklmnop"))))
-         (conn (make-mongo-conn :host "seed-a"
+  (let* ((session-id `(("id" . ,(mongodb-binary 4 "abcdefghijklmnop"))))
+         (conn (make-mongodb-conn :host "seed-a"
                                 :port 27017
                                 :database "app"
                                 :process 'proc
@@ -10059,34 +10059,34 @@
                             ("maxWireVersion" . 17)
                             ("setName" . "rs0")
                             ("secondary" . t))))
-    (setf (mongo-conn-topology conn)
-          (mongo--topology-description-from-hello conn secondary-hello))
+    (setf (mongodb-conn-topology conn)
+          (mongodb--topology-description-from-hello conn secondary-hello))
     (cl-letf (((symbol-function 'process-live-p)
                (lambda (_proc) t))
-              ((symbol-function 'mongo-hello)
+              ((symbol-function 'mongodb-hello)
                (lambda (_conn &optional _timeout)
                  secondary-hello))
-              ((symbol-function 'mongo--send-document)
+              ((symbol-function 'mongodb--send-document)
                (lambda (&rest _args)
                  (ert-fail "server-selection error should fail before send"))))
-      (mongo-start-transaction conn)
-      (setf (mongo-conn-transaction-state conn) 'in-progress)
+      (mongodb-start-transaction conn)
+      (setf (mongodb-conn-transaction-state conn) 'in-progress)
       (let ((err (should-error
-                  (mongo-command conn "app" '(("insert" . "users")))
-                  :type 'mongo-error)))
+                  (mongodb-command conn "app" '(("insert" . "users")))
+                  :type 'mongodb-error)))
         (should
-         (mongo-error-has-label-p
+         (mongodb-error-has-label-p
           err "TransientTransactionError"))
         (should (string-match-p "No writable MongoDB server"
                                 (error-message-string err)))))
-    (should (eq (mongo-conn-transaction-state conn) 'in-progress))))
+    (should (eq (mongodb-conn-transaction-state conn) 'in-progress))))
 
 
 
-(ert-deftest mongo-test-transaction-rejects-operation-concerns ()
+(ert-deftest mongodb-test-transaction-rejects-operation-concerns ()
   "Operations inside transactions should reject explicit concerns."
-  (let* ((session-id `(("id" . ,(mongo-binary 4 "abcdefghijklmnop"))))
-         (conn (make-mongo-conn :host "seed-a"
+  (let* ((session-id `(("id" . ,(mongodb-binary 4 "abcdefghijklmnop"))))
+         (conn (make-mongodb-conn :host "seed-a"
                                 :port 27017
                                 :database "app"
                                 :process 'proc
@@ -10096,34 +10096,34 @@
                                 :session-id session-id)))
     (cl-letf (((symbol-function 'process-live-p)
                (lambda (_proc) t))
-              ((symbol-function 'mongo--send-document)
+              ((symbol-function 'mongodb--send-document)
                (lambda (&rest _args)
                  (ert-fail "operation concerns should fail before send"))))
-      (mongo-start-transaction conn)
+      (mongodb-start-transaction conn)
       (let ((err (should-error
-                  (mongo-command
+                  (mongodb-command
                    conn "app"
                    '(("distinct" . "users")
                      ("key" . "email")
                      ("readConcern" . (("level" . "snapshot")))))
-                  :type 'mongo-error)))
+                  :type 'mongodb-error)))
         (should (string-match-p "Cannot set read concern"
                                 (error-message-string err))))
       (let ((err (should-error
-                  (mongo-command
+                  (mongodb-command
                    conn "app"
                    '(("insert" . "users")
                      ("writeConcern" . (("w" . 1)))))
-                  :type 'mongo-error)))
+                  :type 'mongodb-error)))
         (should (string-match-p "Cannot set write concern"
                                 (error-message-string err)))))))
 
 
 
-(ert-deftest mongo-test-transaction-commit-enters-committed-state ()
+(ert-deftest mongodb-test-transaction-commit-enters-committed-state ()
   "commitTransaction should use transaction metadata and enter committed state."
-  (let* ((session-id `(("id" . ,(mongo-binary 4 "abcdefghijklmnop"))))
-         (conn (make-mongo-conn :host "seed-a"
+  (let* ((session-id `(("id" . ,(mongodb-binary 4 "abcdefghijklmnop"))))
+         (conn (make-mongodb-conn :host "seed-a"
                                 :port 27017
                                 :database "app"
                                 :process 'proc
@@ -10134,37 +10134,37 @@
          captured)
     (cl-letf (((symbol-function 'process-live-p)
                (lambda (_proc) t))
-              ((symbol-function 'mongo--send-document)
+              ((symbol-function 'mongodb--send-document)
                (lambda (_conn document &optional _sequences)
                  (setq captured document)
                  1))
-              ((symbol-function 'mongo--recv-message)
+              ((symbol-function 'mongodb--recv-message)
                (lambda (&rest _args)
                  '(("ok" . 1)))))
-      (mongo-start-transaction
+      (mongodb-start-transaction
        conn
        '(("writeConcern" . (("w" . "majority")))))
-      (setf (mongo-conn-transaction-state conn) 'in-progress)
-      (mongo-commit-transaction conn 5000))
+      (setf (mongodb-conn-transaction-state conn) 'in-progress)
+      (mongodb-commit-transaction conn 5000))
     (should (equal captured
                    `(("commitTransaction" . 1)
                      ("writeConcern" . (("w" . "majority")))
                      ("maxTimeMS" . 5000)
                      ("$db" . "admin")
                      ("lsid" . ,session-id)
-                     ("txnNumber" . ,(mongo-int64 1))
+                     ("txnNumber" . ,(mongodb-int64 1))
                      ("autocommit" . :false))))
-    (should (eq (mongo-conn-transaction-state conn) 'committed))
-    (should (equal (mongo-conn-transaction-number conn)
-                   (mongo-int64 1)))
-    (should-not (mongo-in-transaction-p conn))))
+    (should (eq (mongodb-conn-transaction-state conn) 'committed))
+    (should (equal (mongodb-conn-transaction-number conn)
+                   (mongodb-int64 1)))
+    (should-not (mongodb-in-transaction-p conn))))
 
 
 
-(ert-deftest mongo-test-transaction-commit-empty-sends-no-command ()
+(ert-deftest mongodb-test-transaction-commit-empty-sends-no-command ()
   "commitTransaction should not send a command for an empty transaction."
-  (let* ((session-id `(("id" . ,(mongo-binary 4 "abcdefghijklmnop"))))
-         (conn (make-mongo-conn :host "seed-a"
+  (let* ((session-id `(("id" . ,(mongodb-binary 4 "abcdefghijklmnop"))))
+         (conn (make-mongodb-conn :host "seed-a"
                                 :port 27017
                                 :database "app"
                                 :process 'proc
@@ -10174,24 +10174,24 @@
                                 :session-id session-id)))
     (cl-letf (((symbol-function 'process-live-p)
                (lambda (_proc) t))
-              ((symbol-function 'mongo--send-document)
+              ((symbol-function 'mongodb--send-document)
                (lambda (&rest _args)
                  (ert-fail "empty transaction commit should not send"))))
-      (mongo-start-transaction conn)
-      (should (equal (mongo-commit-transaction conn)
+      (mongodb-start-transaction conn)
+      (should (equal (mongodb-commit-transaction conn)
                      '(("ok" . 1)))))
-    (should (eq (mongo-conn-transaction-state conn) 'committed))
-    (should (equal (mongo-conn-transaction-number conn)
-                   (mongo-int64 1)))
-    (should-not (mongo-conn-transaction-commit-sent conn))
-    (should-not (mongo-in-transaction-p conn))))
+    (should (eq (mongodb-conn-transaction-state conn) 'committed))
+    (should (equal (mongodb-conn-transaction-number conn)
+                   (mongodb-int64 1)))
+    (should-not (mongodb-conn-transaction-commit-sent conn))
+    (should-not (mongodb-in-transaction-p conn))))
 
 
 
-(ert-deftest mongo-test-transaction-commit-retries-network-error ()
+(ert-deftest mongodb-test-transaction-commit-retries-network-error ()
   "commitTransaction should retry once with majority writeConcern."
-  (let* ((session-id `(("id" . ,(mongo-binary 4 "abcdefghijklmnop"))))
-         (conn (make-mongo-conn :host "seed-a"
+  (let* ((session-id `(("id" . ,(mongodb-binary 4 "abcdefghijklmnop"))))
+         (conn (make-mongodb-conn :host "seed-a"
                                 :port 27017
                                 :database "app"
                                 :process 'proc
@@ -10204,27 +10204,27 @@
          (recv-count 0))
     (cl-letf (((symbol-function 'process-live-p)
                (lambda (_proc) t))
-              ((symbol-function 'mongo--send-document)
+              ((symbol-function 'mongodb--send-document)
                (lambda (_conn document &optional _sequences)
                  (push document sends)
                  1))
-              ((symbol-function 'mongo--recv-message)
+              ((symbol-function 'mongodb--recv-message)
                (lambda (&rest _args)
                  (cl-incf recv-count)
                  (if (= recv-count 1)
-                     (signal 'mongo-error
+                     (signal 'mongodb-error
                              (list "Timed out waiting for MongoDB response"))
                    '(("ok" . 1)))))
-              ((symbol-function 'mongo--retry-transaction-control-once)
+              ((symbol-function 'mongodb--retry-transaction-control-once)
                (lambda (retry-conn _err)
                  (setq retried t)
                  retry-conn)))
-      (mongo-start-transaction
+      (mongodb-start-transaction
        conn
        '(("writeConcern" . (("w" . 1)))
          ("maxCommitTimeMS" . 750)))
-      (setf (mongo-conn-transaction-state conn) 'in-progress)
-      (should (equal (mongo-commit-transaction conn)
+      (setf (mongodb-conn-transaction-state conn) 'in-progress)
+      (should (equal (mongodb-commit-transaction conn)
                      '(("ok" . 1)))))
     (setq sends (nreverse sends))
     (should retried)
@@ -10238,21 +10238,21 @@
     (should (= (cdr (assoc "maxTimeMS" (nth 0 sends))) 750))
     (should (= (cdr (assoc "maxTimeMS" (nth 1 sends))) 750))
     (should (equal (cdr (assoc "txnNumber" (nth 0 sends)))
-                   (mongo-int64 1)))
+                   (mongodb-int64 1)))
     (should (equal (cdr (assoc "txnNumber" (nth 1 sends)))
-                   (mongo-int64 1)))
-    (should (eq (mongo-conn-transaction-state conn) 'committed))
-    (should (equal (mongo-conn-transaction-number conn)
-                   (mongo-int64 1)))
-    (should (eq (mongo-conn-transaction-commit-sent conn) t))
-    (should-not (mongo-in-transaction-p conn))))
+                   (mongodb-int64 1)))
+    (should (eq (mongodb-conn-transaction-state conn) 'committed))
+    (should (equal (mongodb-conn-transaction-number conn)
+                   (mongodb-int64 1)))
+    (should (eq (mongodb-conn-transaction-commit-sent conn) t))
+    (should-not (mongodb-in-transaction-p conn))))
 
 
 
-(ert-deftest mongo-test-transaction-commit-labels-unknown-result ()
+(ert-deftest mongodb-test-transaction-commit-labels-unknown-result ()
   "commitTransaction write concern timeouts should be labeled unknown."
-  (let* ((session-id `(("id" . ,(mongo-binary 4 "abcdefghijklmnop"))))
-         (conn (make-mongo-conn :host "seed-a"
+  (let* ((session-id `(("id" . ,(mongodb-binary 4 "abcdefghijklmnop"))))
+         (conn (make-mongodb-conn :host "seed-a"
                                 :port 27017
                                 :database "app"
                                 :process 'proc
@@ -10263,42 +10263,42 @@
          (mongos-hello '(("ok" . 1)
                          ("maxWireVersion" . 17)
                          ("msg" . "isdbgrid"))))
-    (setf (mongo-conn-topology conn)
-          (mongo--topology-description-from-hello conn mongos-hello))
+    (setf (mongodb-conn-topology conn)
+          (mongodb--topology-description-from-hello conn mongos-hello))
     (cl-letf (((symbol-function 'process-live-p)
                (lambda (_proc) t))
-              ((symbol-function 'mongo--send-document)
+              ((symbol-function 'mongodb--send-document)
                (lambda (&rest _args) 1))
-              ((symbol-function 'mongo--recv-message)
+              ((symbol-function 'mongodb--recv-message)
                (lambda (&rest _args)
                  '(("ok" . 1)
                    ("writeConcernError" .
                     (("code" . 64)
                      ("codeName" . "WriteConcernFailed")
                      ("errmsg" . "waiting for replication timed out")))))))
-      (mongo-start-transaction conn)
-      (setf (mongo-conn-transaction-state conn) 'in-progress)
+      (mongodb-start-transaction conn)
+      (setf (mongodb-conn-transaction-state conn) 'in-progress)
       (let ((err (should-error
-                  (mongo-commit-transaction conn)
-                  :type 'mongo-error)))
+                  (mongodb-commit-transaction conn)
+                  :type 'mongodb-error)))
         (should
-         (mongo-error-has-label-p
+         (mongodb-error-has-label-p
           err "UnknownTransactionCommitResult"))
         (should (string-match-p "write concern"
                                 (error-message-string err)))))
-    (should (eq (mongo-conn-transaction-state conn) 'committed))
-    (should (equal (mongo-conn-transaction-number conn)
-                   (mongo-int64 1)))
-    (should (eq (mongo-conn-transaction-commit-sent conn) t))
-    (should-not (mongo-conn-transaction-pinned-address conn))
-    (should-not (mongo-in-transaction-p conn))))
+    (should (eq (mongodb-conn-transaction-state conn) 'committed))
+    (should (equal (mongodb-conn-transaction-number conn)
+                   (mongodb-int64 1)))
+    (should (eq (mongodb-conn-transaction-commit-sent conn) t))
+    (should-not (mongodb-conn-transaction-pinned-address conn))
+    (should-not (mongodb-in-transaction-p conn))))
 
 
 
-(ert-deftest mongo-test-transaction-abort-empty-sends-no-command ()
+(ert-deftest mongodb-test-transaction-abort-empty-sends-no-command ()
   "abortTransaction should not send a command for an empty transaction."
-  (let* ((session-id `(("id" . ,(mongo-binary 4 "abcdefghijklmnop"))))
-         (conn (make-mongo-conn :host "seed-a"
+  (let* ((session-id `(("id" . ,(mongodb-binary 4 "abcdefghijklmnop"))))
+         (conn (make-mongodb-conn :host "seed-a"
                                 :port 27017
                                 :database "app"
                                 :process 'proc
@@ -10308,23 +10308,23 @@
                                 :session-id session-id)))
     (cl-letf (((symbol-function 'process-live-p)
                (lambda (_proc) t))
-              ((symbol-function 'mongo--send-document)
+              ((symbol-function 'mongodb--send-document)
                (lambda (&rest _args)
                  (ert-fail "empty transaction abort should not send"))))
-      (mongo-start-transaction conn)
-      (should (equal (mongo-abort-transaction conn)
+      (mongodb-start-transaction conn)
+      (should (equal (mongodb-abort-transaction conn)
                      '(("ok" . 1)))))
-    (should (eq (mongo-conn-transaction-state conn) 'aborted))
-    (should (equal (mongo-conn-transaction-number conn)
-                   (mongo-int64 1)))
-    (should-not (mongo-in-transaction-p conn))))
+    (should (eq (mongodb-conn-transaction-state conn) 'aborted))
+    (should (equal (mongodb-conn-transaction-number conn)
+                   (mongodb-int64 1)))
+    (should-not (mongodb-in-transaction-p conn))))
 
 
 
-(ert-deftest mongo-test-transaction-abort-retries-network-error ()
+(ert-deftest mongodb-test-transaction-abort-retries-network-error ()
   "abortTransaction should retry once and ignore final command errors."
-  (let* ((session-id `(("id" . ,(mongo-binary 4 "abcdefghijklmnop"))))
-         (conn (make-mongo-conn :host "seed-a"
+  (let* ((session-id `(("id" . ,(mongodb-binary 4 "abcdefghijklmnop"))))
+         (conn (make-mongodb-conn :host "seed-a"
                                 :port 27017
                                 :database "app"
                                 :process 'proc
@@ -10337,29 +10337,29 @@
          (recv-count 0))
     (cl-letf (((symbol-function 'process-live-p)
                (lambda (_proc) t))
-              ((symbol-function 'mongo--send-document)
+              ((symbol-function 'mongodb--send-document)
                (lambda (_conn document &optional _sequences)
                  (push document sends)
                  1))
-              ((symbol-function 'mongo--recv-message)
+              ((symbol-function 'mongodb--recv-message)
                (lambda (&rest _args)
                  (cl-incf recv-count)
                  (if (= recv-count 1)
-                     (signal 'mongo-error
+                     (signal 'mongodb-error
                              (list "Timed out waiting for MongoDB response"))
                    '(("ok" . 0)
                      ("code" . 11000)
                      ("codeName" . "DuplicateKey")
                      ("errmsg" . "non-retryable abort error")))))
-              ((symbol-function 'mongo--retry-transaction-control-once)
+              ((symbol-function 'mongodb--retry-transaction-control-once)
                (lambda (retry-conn _err)
                  (setq retried t)
                  retry-conn)))
-      (mongo-start-transaction
+      (mongodb-start-transaction
        conn
        '(("writeConcern" . (("w" . "majority")))))
-      (setf (mongo-conn-transaction-state conn) 'in-progress)
-      (should (equal (mongo-abort-transaction conn)
+      (setf (mongodb-conn-transaction-state conn) 'in-progress)
+      (should (equal (mongodb-abort-transaction conn)
                      '(("ok" . 0)
                        ("code" . 11000)
                        ("codeName" . "DuplicateKey")
@@ -10373,18 +10373,18 @@
     (should (equal (cdr (assoc "writeConcern" (nth 1 sends)))
                    '(("w" . "majority"))))
     (should (equal (cdr (assoc "txnNumber" (nth 0 sends)))
-                   (mongo-int64 1)))
+                   (mongodb-int64 1)))
     (should (equal (cdr (assoc "txnNumber" (nth 1 sends)))
-                   (mongo-int64 1)))
-    (should (eq (mongo-conn-transaction-state conn) 'aborted))
-    (should-not (mongo-in-transaction-p conn))))
+                   (mongodb-int64 1)))
+    (should (eq (mongodb-conn-transaction-state conn) 'aborted))
+    (should-not (mongodb-in-transaction-p conn))))
 
 
 
-(ert-deftest mongo-test-transaction-repeat-commit-reruns-with-majority ()
+(ert-deftest mongodb-test-transaction-repeat-commit-reruns-with-majority ()
   "Calling commitTransaction again after committed should rerun with majority."
-  (let* ((session-id `(("id" . ,(mongo-binary 4 "abcdefghijklmnop"))))
-         (conn (make-mongo-conn :host "seed-a"
+  (let* ((session-id `(("id" . ,(mongodb-binary 4 "abcdefghijklmnop"))))
+         (conn (make-mongodb-conn :host "seed-a"
                                 :port 27017
                                 :database "app"
                                 :process 'proc
@@ -10395,20 +10395,20 @@
          sends)
     (cl-letf (((symbol-function 'process-live-p)
                (lambda (_proc) t))
-              ((symbol-function 'mongo--send-document)
+              ((symbol-function 'mongodb--send-document)
                (lambda (_conn document &optional _sequences)
                  (push document sends)
                  1))
-              ((symbol-function 'mongo--recv-message)
+              ((symbol-function 'mongodb--recv-message)
                (lambda (&rest _args)
                  '(("ok" . 1)))))
-      (mongo-start-transaction
+      (mongodb-start-transaction
        conn
        '(("writeConcern" . (("w" . 1)))))
-      (setf (mongo-conn-transaction-state conn) 'in-progress)
-      (mongo-commit-transaction conn)
-      (should (eq (mongo-conn-transaction-state conn) 'committed))
-      (mongo-commit-transaction conn))
+      (setf (mongodb-conn-transaction-state conn) 'in-progress)
+      (mongodb-commit-transaction conn)
+      (should (eq (mongodb-conn-transaction-state conn) 'committed))
+      (mongodb-commit-transaction conn))
     (setq sends (nreverse sends))
     (should (= (length sends) 2))
     (should (equal (cdr (assoc "writeConcern" (nth 0 sends)))
@@ -10417,16 +10417,16 @@
                    '(("w" . "majority")
                      ("wtimeout" . 10000))))
     (should (equal (cdr (assoc "txnNumber" (nth 1 sends)))
-                   (mongo-int64 1)))
-    (should (eq (mongo-conn-transaction-state conn) 'committed))
-    (should-not (mongo-in-transaction-p conn))))
+                   (mongodb-int64 1)))
+    (should (eq (mongodb-conn-transaction-state conn) 'committed))
+    (should-not (mongodb-in-transaction-p conn))))
 
 
 
-(ert-deftest mongo-test-transaction-repeat-empty-commit-does-not-send ()
+(ert-deftest mongodb-test-transaction-repeat-empty-commit-does-not-send ()
   "Repeating commitTransaction for an empty committed transaction should not send."
-  (let* ((session-id `(("id" . ,(mongo-binary 4 "abcdefghijklmnop"))))
-         (conn (make-mongo-conn :host "seed-a"
+  (let* ((session-id `(("id" . ,(mongodb-binary 4 "abcdefghijklmnop"))))
+         (conn (make-mongodb-conn :host "seed-a"
                                 :port 27017
                                 :database "app"
                                 :process 'proc
@@ -10436,23 +10436,23 @@
                                 :session-id session-id)))
     (cl-letf (((symbol-function 'process-live-p)
                (lambda (_proc) t))
-              ((symbol-function 'mongo--send-document)
+              ((symbol-function 'mongodb--send-document)
                (lambda (&rest _args)
                  (ert-fail "empty committed transaction should not send"))))
-      (mongo-start-transaction conn)
-      (should (equal (mongo-commit-transaction conn)
+      (mongodb-start-transaction conn)
+      (should (equal (mongodb-commit-transaction conn)
                      '(("ok" . 1))))
-      (should (equal (mongo-commit-transaction conn)
+      (should (equal (mongodb-commit-transaction conn)
                      '(("ok" . 1)))))
-    (should (eq (mongo-conn-transaction-state conn) 'committed))
-    (should-not (mongo-in-transaction-p conn))))
+    (should (eq (mongodb-conn-transaction-state conn) 'committed))
+    (should-not (mongodb-in-transaction-p conn))))
 
 
 
-(ert-deftest mongo-test-transaction-abort-state-errors ()
+(ert-deftest mongodb-test-transaction-abort-state-errors ()
   "Invalid commit/abort calls should preserve committed/aborted state."
-  (let* ((session-id `(("id" . ,(mongo-binary 4 "abcdefghijklmnop"))))
-         (conn (make-mongo-conn :host "seed-a"
+  (let* ((session-id `(("id" . ,(mongodb-binary 4 "abcdefghijklmnop"))))
+         (conn (make-mongodb-conn :host "seed-a"
                                 :port 27017
                                 :database "app"
                                 :process 'proc
@@ -10462,30 +10462,30 @@
                                 :session-id session-id)))
     (cl-letf (((symbol-function 'process-live-p)
                (lambda (_proc) t))
-              ((symbol-function 'mongo--send-document)
+              ((symbol-function 'mongodb--send-document)
                (lambda (&rest _args)
                  (ert-fail "invalid state transition should fail before send"))))
-      (mongo-start-transaction conn)
-      (mongo-abort-transaction conn)
+      (mongodb-start-transaction conn)
+      (mongodb-abort-transaction conn)
       (let ((err (should-error
-                  (mongo-abort-transaction conn)
-                  :type 'mongo-error)))
+                  (mongodb-abort-transaction conn)
+                  :type 'mongodb-error)))
         (should (string-match-p "Cannot call abortTransaction twice"
                                 (error-message-string err))))
       (let ((err (should-error
-                  (mongo-commit-transaction conn)
-                  :type 'mongo-error)))
+                  (mongodb-commit-transaction conn)
+                  :type 'mongodb-error)))
         (should (string-match-p
                  "Cannot call commitTransaction after calling abortTransaction"
                  (error-message-string err)))))
-    (should (eq (mongo-conn-transaction-state conn) 'aborted))))
+    (should (eq (mongodb-conn-transaction-state conn) 'aborted))))
 
 
 
-(ert-deftest mongo-test-transaction-committed-state-rejects-abort ()
+(ert-deftest mongodb-test-transaction-committed-state-rejects-abort ()
   "abortTransaction should fail after commitTransaction."
-  (let* ((session-id `(("id" . ,(mongo-binary 4 "abcdefghijklmnop"))))
-         (conn (make-mongo-conn :host "seed-a"
+  (let* ((session-id `(("id" . ,(mongodb-binary 4 "abcdefghijklmnop"))))
+         (conn (make-mongodb-conn :host "seed-a"
                                 :port 27017
                                 :database "app"
                                 :process 'proc
@@ -10495,26 +10495,26 @@
                                 :session-id session-id)))
     (cl-letf (((symbol-function 'process-live-p)
                (lambda (_proc) t))
-              ((symbol-function 'mongo--send-document)
+              ((symbol-function 'mongodb--send-document)
                (lambda (&rest _args)
                  (ert-fail "empty commit and invalid abort should not send"))))
-      (mongo-start-transaction conn)
-      (mongo-commit-transaction conn)
+      (mongodb-start-transaction conn)
+      (mongodb-commit-transaction conn)
       (let ((err (should-error
-                  (mongo-abort-transaction conn)
-                  :type 'mongo-error)))
+                  (mongodb-abort-transaction conn)
+                  :type 'mongodb-error)))
         (should (string-match-p
                  "Cannot call abortTransaction after calling commitTransaction"
                  (error-message-string err)))))
-    (should (eq (mongo-conn-transaction-state conn) 'committed))))
+    (should (eq (mongodb-conn-transaction-state conn) 'committed))))
 
 
 
-(ert-deftest mongo-test-transaction-ended-state-clears-on-next-command ()
+(ert-deftest mongodb-test-transaction-ended-state-clears-on-next-command ()
   "The next non-control command after committed/aborted should clear transaction state."
-  (let* ((session-id `(("id" . ,(mongo-binary 4 "abcdefghijklmnop"))))
+  (let* ((session-id `(("id" . ,(mongodb-binary 4 "abcdefghijklmnop"))))
          (token '(("shard" . "a")))
-         (conn (make-mongo-conn :host "seed-a"
+         (conn (make-mongodb-conn :host "seed-a"
                                 :port 27017
                                 :database "app"
                                 :process 'proc
@@ -10524,48 +10524,48 @@
                                 :txn-number 4
                                 :session-id session-id
                                 :transaction-state 'committed
-                                :transaction-number (mongo-int64 4)
+                                :transaction-number (mongodb-int64 4)
                                 :transaction-recovery-token token
                                 :transaction-pinned-address "seed-a:27017"
                                 :transaction-commit-sent t))
          captured)
-    (setf (mongo-conn-topology conn)
-          (make-mongo-topology-description
+    (setf (mongodb-conn-topology conn)
+          (make-mongodb-topology-description
            :type 'replica-set-with-primary
            :primary-address "seed-a:27017"
            :compatible t
            :servers
            `(("seed-a:27017" .
-              ,(make-mongo-server-description
+              ,(make-mongodb-server-description
                 :address "seed-a:27017"
                 :type 'rs-primary
                 :max-wire-version 17)))))
     (cl-letf (((symbol-function 'process-live-p)
                (lambda (_proc) t))
-              ((symbol-function 'mongo--retryable-reads-supported-p)
+              ((symbol-function 'mongodb--retryable-reads-supported-p)
                (lambda (_conn) t))
-              ((symbol-function 'mongo--send-document)
+              ((symbol-function 'mongodb--send-document)
                (lambda (_conn document &optional _sequences)
                  (setq captured document)
                  1))
-              ((symbol-function 'mongo--recv-message)
+              ((symbol-function 'mongodb--recv-message)
                (lambda (&rest _args)
                  '(("ok" . 1)))))
-      (mongo-command conn "app" '(("find" . "users"))))
-    (should-not (mongo-conn-transaction-state conn))
-    (should-not (mongo-conn-transaction-number conn))
-    (should-not (mongo-conn-transaction-recovery-token conn))
-    (should-not (mongo-conn-transaction-pinned-address conn))
+      (mongodb-command conn "app" '(("find" . "users"))))
+    (should-not (mongodb-conn-transaction-state conn))
+    (should-not (mongodb-conn-transaction-number conn))
+    (should-not (mongodb-conn-transaction-recovery-token conn))
+    (should-not (mongodb-conn-transaction-pinned-address conn))
     (should-not (assoc "txnNumber" captured))
     (should-not (assoc "autocommit" captured))
     (should (equal (cdr (assoc "lsid" captured)) session-id))))
 
 
 
-(ert-deftest mongo-test-transaction-disables-retryable-writes ()
+(ert-deftest mongodb-test-transaction-disables-retryable-writes ()
   "Writes inside transactions should not use retryable-write retry logic."
-  (let* ((session-id `(("id" . ,(mongo-binary 4 "abcdefghijklmnop"))))
-         (conn (make-mongo-conn :host "seed-a"
+  (let* ((session-id `(("id" . ,(mongodb-binary 4 "abcdefghijklmnop"))))
+         (conn (make-mongodb-conn :host "seed-a"
                                 :port 27017
                                 :database "app"
                                 :process 'proc
@@ -10578,40 +10578,40 @@
          (recv-count 0))
     (cl-letf (((symbol-function 'process-live-p)
                (lambda (_proc) t))
-              ((symbol-function 'mongo--send-document)
+              ((symbol-function 'mongodb--send-document)
                (lambda (_conn document &optional _sequences)
                  (setq captured document)
                  1))
-              ((symbol-function 'mongo--recv-message)
+              ((symbol-function 'mongodb--recv-message)
                (lambda (&rest _args)
                  (cl-incf recv-count)
-                 (signal 'mongo-error
+                 (signal 'mongodb-error
                          (list "Timed out waiting for MongoDB response"))))
-              ((symbol-function 'mongo--reconnect-current-server)
+              ((symbol-function 'mongodb--reconnect-current-server)
                (lambda (&rest _args)
                  (ert-fail "transaction writes should not use retryWrites"))))
-      (mongo-start-transaction conn)
-      (let ((mongo--retryable-write-context t))
+      (mongodb-start-transaction conn)
+      (let ((mongodb--retryable-write-context t))
         (should-error
-         (mongo-command
+         (mongodb-command
           conn
           "app"
           '(("insert" . "users"))
           nil
-          `(("documents" . [,(mongo-document '(("_id" . "a")))])))
-         :type 'mongo-error)))
+          `(("documents" . [,(mongodb-document '(("_id" . "a")))])))
+         :type 'mongodb-error)))
     (should (= recv-count 1))
     (should (eq (cdr (assoc "startTransaction" captured)) t))
     (should (eq (cdr (assoc "autocommit" captured)) :false))
     (should (equal (cdr (assoc "txnNumber" captured))
-                   (mongo-int64 1)))))
+                   (mongodb-int64 1)))))
 
 
 
-(ert-deftest mongo-test-command-adds-txn-number-for-retryable-write ()
+(ert-deftest mongodb-test-command-adds-txn-number-for-retryable-write ()
   "Retryable write helper context should add lsid and txnNumber."
-  (let* ((session-id `(("id" . ,(mongo-binary 4 "abcdefghijklmnop"))))
-         (conn (make-mongo-conn :host "seed-a"
+  (let* ((session-id `(("id" . ,(mongodb-binary 4 "abcdefghijklmnop"))))
+         (conn (make-mongodb-conn :host "seed-a"
                                 :port 27017
                                 :database "app"
                                 :process 'proc
@@ -10626,34 +10626,34 @@
                   ("setName" . "rs0")
                   ("isWritablePrimary" . t)))
          captured)
-    (setf (mongo-conn-topology conn)
-          (mongo--topology-description-from-hello conn hello))
+    (setf (mongodb-conn-topology conn)
+          (mongodb--topology-description-from-hello conn hello))
     (cl-letf (((symbol-function 'process-live-p)
                (lambda (_proc) t))
-              ((symbol-function 'mongo--send-document)
+              ((symbol-function 'mongodb--send-document)
                (lambda (_conn document &optional _sequences)
                  (setq captured document)
                  1))
-              ((symbol-function 'mongo--recv-message)
+              ((symbol-function 'mongodb--recv-message)
                (lambda (&rest _args)
                  '(("ok" . 1)))))
-      (let ((mongo--retryable-write-context t))
-        (mongo-command
+      (let ((mongodb--retryable-write-context t))
+        (mongodb-command
          conn
          "app"
          '(("insert" . "users"))
          nil
-         `(("documents" . [,(mongo-document '(("_id" . "a")))])))))
+         `(("documents" . [,(mongodb-document '(("_id" . "a")))])))))
     (should (equal (cdr (assoc "lsid" captured)) session-id))
     (should (equal (cdr (assoc "txnNumber" captured))
-                   (mongo-int64 1)))
-    (should (= (mongo-conn-txn-number conn) 1))))
+                   (mongodb-int64 1)))
+    (should (= (mongodb-conn-txn-number conn) 1))))
 
 
-(ert-deftest mongo-test-command-skips-retryable-write-without-session-timeout ()
+(ert-deftest mongodb-test-command-skips-retryable-write-without-session-timeout ()
   "Servers without logicalSessionTimeoutMinutes should not use retryable writes."
-  (let* ((session-id `(("id" . ,(mongo-binary 4 "abcdefghijklmnop"))))
-         (conn (make-mongo-conn :host "seed-a"
+  (let* ((session-id `(("id" . ,(mongodb-binary 4 "abcdefghijklmnop"))))
+         (conn (make-mongodb-conn :host "seed-a"
                                 :port 27017
                                 :database "app"
                                 :process 'proc
@@ -10668,41 +10668,41 @@
                   ("isWritablePrimary" . t)))
          captured
          (recv-count 0))
-    (setf (mongo-conn-topology conn)
-          (mongo--topology-description-from-hello conn hello))
+    (setf (mongodb-conn-topology conn)
+          (mongodb--topology-description-from-hello conn hello))
     (cl-letf (((symbol-function 'process-live-p)
                (lambda (_proc) t))
-              ((symbol-function 'mongo--send-document)
+              ((symbol-function 'mongodb--send-document)
                (lambda (_conn document &optional _sequences)
                  (setq captured document)
                  1))
-              ((symbol-function 'mongo--recv-message)
+              ((symbol-function 'mongodb--recv-message)
                (lambda (&rest _args)
                  (cl-incf recv-count)
-                 (signal 'mongo-error
+                 (signal 'mongodb-error
                          (list "Timed out waiting for MongoDB response"))))
-              ((symbol-function 'mongo--reconnect-current-server)
+              ((symbol-function 'mongodb--reconnect-current-server)
                (lambda (&rest _args)
                  (ert-fail "server without session timeout should not retry"))))
-      (let ((mongo--retryable-write-context t))
+      (let ((mongodb--retryable-write-context t))
         (should-error
-         (mongo-command
+         (mongodb-command
           conn
           "app"
           '(("insert" . "users"))
           nil
-          `(("documents" . [,(mongo-document '(("_id" . "a")))])))
-         :type 'mongo-error)))
+          `(("documents" . [,(mongodb-document '(("_id" . "a")))])))
+         :type 'mongodb-error)))
     (should (= recv-count 1))
     (should-not (assoc "txnNumber" captured))
-    (should (= (mongo-conn-txn-number conn) 0))))
+    (should (= (mongodb-conn-txn-number conn) 0))))
 
 
 
-(ert-deftest mongo-test-command-retries-write-network-error ()
+(ert-deftest mongodb-test-command-retries-write-network-error ()
   "Retryable write commands should retry once with the same txnNumber."
-  (let* ((session-id `(("id" . ,(mongo-binary 4 "abcdefghijklmnop"))))
-         (conn (make-mongo-conn :host "seed-a"
+  (let* ((session-id `(("id" . ,(mongodb-binary 4 "abcdefghijklmnop"))))
+         (conn (make-mongodb-conn :host "seed-a"
                                 :port 27017
                                 :database "app"
                                 :process 'proc
@@ -10719,51 +10719,51 @@
          sends
          (recv-count 0)
          reconnected)
-    (setf (mongo-conn-topology conn)
-          (mongo--topology-description-from-hello conn hello))
+    (setf (mongodb-conn-topology conn)
+          (mongodb--topology-description-from-hello conn hello))
     (cl-letf (((symbol-function 'process-live-p)
                (lambda (_proc) t))
-              ((symbol-function 'mongo--send-document)
+              ((symbol-function 'mongodb--send-document)
                (lambda (_conn document &optional _sequences)
                  (push document sends)
                  1))
-              ((symbol-function 'mongo--recv-message)
+              ((symbol-function 'mongodb--recv-message)
                (lambda (&rest _args)
                  (cl-incf recv-count)
                  (if (= recv-count 1)
-                     (signal 'mongo-error
+                     (signal 'mongodb-error
                              (list "Timed out waiting for MongoDB response"))
                    '(("ok" . 1)))))
-              ((symbol-function 'mongo--reconnect-current-server)
+              ((symbol-function 'mongodb--reconnect-current-server)
                (lambda (retry-conn)
                  (setq reconnected t)
-                 (setf (mongo-conn-topology retry-conn)
-                       (mongo--topology-description-from-hello
+                 (setf (mongodb-conn-topology retry-conn)
+                       (mongodb--topology-description-from-hello
                         retry-conn hello))
                  retry-conn)))
-      (let ((mongo--retryable-write-context t))
-        (mongo-command
+      (let ((mongodb--retryable-write-context t))
+        (mongodb-command
          conn
          "app"
          '(("insert" . "users"))
          nil
-         `(("documents" . [,(mongo-document '(("_id" . "a")))])))))
+         `(("documents" . [,(mongodb-document '(("_id" . "a")))])))))
     (setq sends (nreverse sends))
     (should reconnected)
     (should (= recv-count 2))
     (should (= (length sends) 2))
     (should (equal (cdr (assoc "txnNumber" (nth 0 sends)))
-                   (mongo-int64 1)))
+                   (mongodb-int64 1)))
     (should (equal (cdr (assoc "txnNumber" (nth 1 sends)))
-                   (mongo-int64 1)))
-    (should (= (mongo-conn-txn-number conn) 1))))
+                   (mongodb-int64 1)))
+    (should (= (mongodb-conn-txn-number conn) 1))))
 
 
 
-(ert-deftest mongo-test-command-retries-write-concern-error ()
+(ert-deftest mongodb-test-command-retries-write-concern-error ()
   "Retryable writeConcernError responses should retry before surfacing."
-  (let* ((session-id `(("id" . ,(mongo-binary 4 "abcdefghijklmnop"))))
-         (conn (make-mongo-conn :host "seed-a"
+  (let* ((session-id `(("id" . ,(mongodb-binary 4 "abcdefghijklmnop"))))
+         (conn (make-mongodb-conn :host "seed-a"
                                 :port 27017
                                 :database "app"
                                 :process 'proc
@@ -10779,13 +10779,13 @@
                   ("isWritablePrimary" . t)))
          (recv-count 0)
          reconnected)
-    (setf (mongo-conn-topology conn)
-          (mongo--topology-description-from-hello conn hello))
+    (setf (mongodb-conn-topology conn)
+          (mongodb--topology-description-from-hello conn hello))
     (cl-letf (((symbol-function 'process-live-p)
                (lambda (_proc) t))
-              ((symbol-function 'mongo--send-document)
+              ((symbol-function 'mongodb--send-document)
                (lambda (&rest _args) 1))
-              ((symbol-function 'mongo--recv-message)
+              ((symbol-function 'mongodb--recv-message)
                (lambda (&rest _args)
                  (cl-incf recv-count)
                  (if (= recv-count 1)
@@ -10795,20 +10795,20 @@
                          ("codeName" . "ShutdownInProgress")
                          ("errmsg" . "shutdown"))))
                    '(("ok" . 1)))))
-              ((symbol-function 'mongo--reconnect-current-server)
+              ((symbol-function 'mongodb--reconnect-current-server)
                (lambda (retry-conn)
                  (setq reconnected t)
-                 (setf (mongo-conn-topology retry-conn)
-                       (mongo--topology-description-from-hello
+                 (setf (mongodb-conn-topology retry-conn)
+                       (mongodb--topology-description-from-hello
                         retry-conn hello))
                  retry-conn)))
-      (let ((mongo--retryable-write-context t))
-        (mongo-command
+      (let ((mongodb--retryable-write-context t))
+        (mongodb-command
          conn
          "app"
          '(("update" . "users"))
          nil
-         `(("updates" . [,(mongo-document
+         `(("updates" . [,(mongodb-document
                            '(("q" . (("_id" . "a")))
                              ("u" . (("$set" . (("seen" . t)))))
                              ("multi" . :false)))])))))
@@ -10817,10 +10817,10 @@
 
 
 
-(ert-deftest mongo-test-command-does-not-retry-write-outside-helper-context ()
+(ert-deftest mongodb-test-command-does-not-retry-write-outside-helper-context ()
   "Generic command execution should not add txnNumber for writes."
-  (let* ((session-id `(("id" . ,(mongo-binary 4 "abcdefghijklmnop"))))
-         (conn (make-mongo-conn :host "seed-a"
+  (let* ((session-id `(("id" . ,(mongodb-binary 4 "abcdefghijklmnop"))))
+         (conn (make-mongodb-conn :host "seed-a"
                                 :port 27017
                                 :database "app"
                                 :process 'proc
@@ -10835,32 +10835,32 @@
                   ("setName" . "rs0")
                   ("isWritablePrimary" . t)))
          captured)
-    (setf (mongo-conn-topology conn)
-          (mongo--topology-description-from-hello conn hello))
+    (setf (mongodb-conn-topology conn)
+          (mongodb--topology-description-from-hello conn hello))
     (cl-letf (((symbol-function 'process-live-p)
                (lambda (_proc) t))
-              ((symbol-function 'mongo--send-document)
+              ((symbol-function 'mongodb--send-document)
                (lambda (_conn document &optional _sequences)
                  (setq captured document)
                  1))
-              ((symbol-function 'mongo--recv-message)
+              ((symbol-function 'mongodb--recv-message)
                (lambda (&rest _args)
                  '(("ok" . 1)))))
-      (mongo-command
+      (mongodb-command
        conn
        "app"
        '(("insert" . "users"))
        nil
-       `(("documents" . [,(mongo-document '(("_id" . "a")))]))))
+       `(("documents" . [,(mongodb-document '(("_id" . "a")))]))))
     (should-not (assoc "txnNumber" captured))
-    (should (= (mongo-conn-txn-number conn) 0))))
+    (should (= (mongodb-conn-txn-number conn) 0))))
 
 
 
-(ert-deftest mongo-test-command-does-not-retry-unsafe-update-many ()
+(ert-deftest mongodb-test-command-does-not-retry-unsafe-update-many ()
   "updateMany-style statements should not be retryable writes."
-  (let* ((session-id `(("id" . ,(mongo-binary 4 "abcdefghijklmnop"))))
-         (conn (make-mongo-conn :host "seed-a"
+  (let* ((session-id `(("id" . ,(mongodb-binary 4 "abcdefghijklmnop"))))
+         (conn (make-mongodb-conn :host "seed-a"
                                 :port 27017
                                 :database "app"
                                 :process 'proc
@@ -10875,41 +10875,41 @@
                   ("setName" . "rs0")
                   ("isWritablePrimary" . t)))
          captured)
-    (setf (mongo-conn-topology conn)
-          (mongo--topology-description-from-hello conn hello))
+    (setf (mongodb-conn-topology conn)
+          (mongodb--topology-description-from-hello conn hello))
     (cl-letf (((symbol-function 'process-live-p)
                (lambda (_proc) t))
-              ((symbol-function 'mongo--send-document)
+              ((symbol-function 'mongodb--send-document)
                (lambda (_conn document &optional _sequences)
                  (setq captured document)
                  1))
-              ((symbol-function 'mongo--recv-message)
+              ((symbol-function 'mongodb--recv-message)
                (lambda (&rest _args)
-                 (signal 'mongo-error
+                 (signal 'mongodb-error
                          (list "Timed out waiting for MongoDB response"))))
-              ((symbol-function 'mongo--reconnect-current-server)
+              ((symbol-function 'mongodb--reconnect-current-server)
                (lambda (&rest _args)
                  (ert-fail "updateMany should not retry"))))
-      (let ((mongo--retryable-write-context t))
+      (let ((mongodb--retryable-write-context t))
         (should-error
-         (mongo-command
+         (mongodb-command
           conn
           "app"
           '(("update" . "users"))
           nil
-          `(("updates" . [,(mongo-document
+          `(("updates" . [,(mongodb-document
                             '(("q" . (("active" . t)))
                               ("u" . (("$inc" . (("n" . 1)))))
                               ("multi" . t)))])))
-         :type 'mongo-error)))
+         :type 'mongodb-error)))
     (should-not (assoc "txnNumber" captured))
-    (should (= (mongo-conn-txn-number conn) 0))))
+    (should (= (mongodb-conn-txn-number conn) 0))))
 
 
 
-(ert-deftest mongo-test-generic-command-preserves-write-errors-with-ok ()
+(ert-deftest mongodb-test-generic-command-preserves-write-errors-with-ok ()
   "Generic command replies with ok:1 and writeErrors should be returned."
-  (let* ((conn (make-mongo-conn :host "seed-a"
+  (let* ((conn (make-mongodb-conn :host "seed-a"
                                 :port 27017
                                 :database "app"
                                 :process 'proc
@@ -10918,13 +10918,13 @@
                           ("maxWireVersion" . 17)
                           ("setName" . "rs0")
                           ("isWritablePrimary" . t))))
-    (setf (mongo-conn-topology conn)
-          (mongo--topology-description-from-hello conn primary-hello))
+    (setf (mongodb-conn-topology conn)
+          (mongodb--topology-description-from-hello conn primary-hello))
     (cl-letf (((symbol-function 'process-live-p)
                (lambda (_proc) t))
-              ((symbol-function 'mongo--send-document)
+              ((symbol-function 'mongodb--send-document)
                (lambda (&rest _args) 1))
-              ((symbol-function 'mongo--recv-message)
+              ((symbol-function 'mongodb--recv-message)
                (lambda (&rest _args)
                  '(("ok" . 1)
                    ("writeErrors" .
@@ -10932,16 +10932,16 @@
                       ("code" . 11000)
                       ("codeName" . "DuplicateKey")
                       ("errmsg" . "E11000 duplicate key error"))))))))
-      (let* ((response (mongo-command conn "app" '(("insert" . "users"))))
+      (let* ((response (mongodb-command conn "app" '(("insert" . "users"))))
              (write-error (car (cdr (assoc "writeErrors" response)))))
         (should (equal (cdr (assoc "codeName" write-error))
                        "DuplicateKey"))))))
 
 
 
-(ert-deftest mongo-test-insert-rejects-write-errors-with-ok ()
+(ert-deftest mongodb-test-insert-rejects-write-errors-with-ok ()
   "Insert helper replies with ok:1 and writeErrors should still signal."
-  (let* ((conn (make-mongo-conn :host "seed-a"
+  (let* ((conn (make-mongodb-conn :host "seed-a"
                                 :port 27017
                                 :database "app"
                                 :process 'proc
@@ -10950,13 +10950,13 @@
                           ("maxWireVersion" . 17)
                           ("setName" . "rs0")
                           ("isWritablePrimary" . t))))
-    (setf (mongo-conn-topology conn)
-          (mongo--topology-description-from-hello conn primary-hello))
+    (setf (mongodb-conn-topology conn)
+          (mongodb--topology-description-from-hello conn primary-hello))
     (cl-letf (((symbol-function 'process-live-p)
                (lambda (_proc) t))
-              ((symbol-function 'mongo--send-document)
+              ((symbol-function 'mongodb--send-document)
                (lambda (&rest _args) 1))
-              ((symbol-function 'mongo--recv-message)
+              ((symbol-function 'mongodb--recv-message)
                (lambda (&rest _args)
                  '(("ok" . 1)
                    ("writeErrors" .
@@ -10965,10 +10965,10 @@
                       ("codeName" . "DuplicateKey")
                       ("errmsg" . "E11000 duplicate key error"))))))))
       (let ((err (should-error
-                  (mongo-insert
+                  (mongodb-insert
                    conn "app" "users"
-                   (vector (mongo-document '(("name" . "Ann")))))
-                  :type 'mongo-error)))
+                   (vector (mongodb-document '(("name" . "Ann")))))
+                  :type 'mongodb-error)))
         (should (string-match-p "DuplicateKey"
                                 (error-message-string err)))
         (should (string-match-p "duplicate key"
@@ -10976,58 +10976,58 @@
 
 
 
-(ert-deftest mongo-test-command-rejects-oversized-sequence-document ()
+(ert-deftest mongodb-test-command-rejects-oversized-sequence-document ()
   "MongoDB command execution should reject oversized OP_MSG sequence documents."
   (let* ((sequence-document
-          (mongo-document
+          (mongodb-document
            '(("q" . (("active" . t)))
              ("u" . (("$set" . (("payload" . "aaaaaaaaaa")))))
              ("multi" . :false))))
-         (conn (make-mongo-conn :host "seed-a"
+         (conn (make-mongodb-conn :host "seed-a"
                                 :port 27017
                                 :database "app"
                                 :process 'proc
                                 :closed nil
                                 :max-bson-object-size
                                 (1- (length
-                                     (mongo--encode-document
+                                     (mongodb--encode-document
                                       sequence-document)))
                                 :max-message-size-bytes 48000000))
          (primary-hello '(("ok" . 1)
                           ("maxWireVersion" . 17)
                           ("setName" . "rs0")
                           ("isWritablePrimary" . t))))
-    (setf (mongo-conn-topology conn)
-          (mongo--topology-description-from-hello conn primary-hello))
+    (setf (mongodb-conn-topology conn)
+          (mongodb--topology-description-from-hello conn primary-hello))
     (cl-letf (((symbol-function 'process-live-p)
                (lambda (_proc) t))
               ((symbol-function 'process-send-string)
                (lambda (&rest _args)
                  (ert-fail "oversized sequence document should not be sent"))))
       (should-error
-       (mongo-command
+       (mongodb-command
         conn "app"
         '(("update" . "users"))
         nil
         `(("updates" . [,sequence-document])))
-       :type 'mongo-error))))
+       :type 'mongodb-error))))
 
 
 
-(ert-deftest mongo-test-command-rejects-oversized-sequence-message ()
+(ert-deftest mongodb-test-command-rejects-oversized-sequence-message ()
   "MongoDB command execution should reject oversized OP_MSG sequence messages."
   (let* ((command '(("delete" . "users")))
-         (first (mongo-document '(("q" . (("_id" . "a")))
+         (first (mongodb-document '(("q" . (("_id" . "a")))
                                   ("limit" . 1))))
-         (second (mongo-document '(("q" . (("_id" . "b")))
+         (second (mongodb-document '(("q" . (("_id" . "b")))
                                    ("limit" . 1))))
-         (document (mongo--command-with-db command "app"))
+         (document (mongodb--command-with-db command "app"))
          (message-size
-          (+ (length (mongo--make-op-msg 1 document nil nil nil))
-             (mongo--document-sequence-overhead-bytes "deletes")
-             (length (mongo--encode-document first))
-             (length (mongo--encode-document second))))
-         (conn (make-mongo-conn :host "seed-a"
+          (+ (length (mongodb--make-op-msg 1 document nil nil nil))
+             (mongodb--document-sequence-overhead-bytes "deletes")
+             (length (mongodb--encode-document first))
+             (length (mongodb--encode-document second))))
+         (conn (make-mongodb-conn :host "seed-a"
                                 :port 27017
                                 :database "app"
                                 :process 'proc
@@ -11038,26 +11038,26 @@
                           ("maxWireVersion" . 17)
                           ("setName" . "rs0")
                           ("isWritablePrimary" . t))))
-    (setf (mongo-conn-topology conn)
-          (mongo--topology-description-from-hello conn primary-hello))
+    (setf (mongodb-conn-topology conn)
+          (mongodb--topology-description-from-hello conn primary-hello))
     (cl-letf (((symbol-function 'process-live-p)
                (lambda (_proc) t))
               ((symbol-function 'process-send-string)
                (lambda (&rest _args)
                  (ert-fail "oversized sequence message should not be sent"))))
       (should-error
-       (mongo-command
+       (mongodb-command
         conn "app"
         command
         nil
         `(("deletes" . [,first ,second])))
-       :type 'mongo-error))))
+       :type 'mongodb-error))))
 
 
 
-(ert-deftest mongo-test-generic-command-preserves-write-concern-error-with-ok ()
+(ert-deftest mongodb-test-generic-command-preserves-write-concern-error-with-ok ()
   "Generic command replies with ok:1 and writeConcernError should be returned."
-  (let* ((conn (make-mongo-conn :host "seed-a"
+  (let* ((conn (make-mongodb-conn :host "seed-a"
                                 :port 27017
                                 :database "app"
                                 :process 'proc
@@ -11066,13 +11066,13 @@
                           ("maxWireVersion" . 17)
                           ("setName" . "rs0")
                           ("isWritablePrimary" . t))))
-    (setf (mongo-conn-topology conn)
-          (mongo--topology-description-from-hello conn primary-hello))
+    (setf (mongodb-conn-topology conn)
+          (mongodb--topology-description-from-hello conn primary-hello))
     (cl-letf (((symbol-function 'process-live-p)
                (lambda (_proc) t))
-              ((symbol-function 'mongo--send-document)
+              ((symbol-function 'mongodb--send-document)
                (lambda (&rest _args) 1))
-              ((symbol-function 'mongo--recv-message)
+              ((symbol-function 'mongodb--recv-message)
                (lambda (&rest _args)
                  '(("ok" . 1)
                    ("writeConcernError" .
@@ -11082,16 +11082,16 @@
       (should (equal (cdr (assoc "codeName"
                                  (cdr (assoc
                                        "writeConcernError"
-                                       (mongo-command
+                                       (mongodb-command
                                         conn "app"
                                         '(("update" . "users")))))))
                      "WriteConcernFailed")))))
 
 
 
-(ert-deftest mongo-test-update-rejects-write-concern-error-with-ok ()
+(ert-deftest mongodb-test-update-rejects-write-concern-error-with-ok ()
   "Update helper replies with ok:1 and writeConcernError should signal."
-  (let* ((conn (make-mongo-conn :host "seed-a"
+  (let* ((conn (make-mongodb-conn :host "seed-a"
                                 :port 27017
                                 :database "app"
                                 :process 'proc
@@ -11100,13 +11100,13 @@
                           ("maxWireVersion" . 17)
                           ("setName" . "rs0")
                           ("isWritablePrimary" . t))))
-    (setf (mongo-conn-topology conn)
-          (mongo--topology-description-from-hello conn primary-hello))
+    (setf (mongodb-conn-topology conn)
+          (mongodb--topology-description-from-hello conn primary-hello))
     (cl-letf (((symbol-function 'process-live-p)
                (lambda (_proc) t))
-              ((symbol-function 'mongo--send-document)
+              ((symbol-function 'mongodb--send-document)
                (lambda (&rest _args) 1))
-              ((symbol-function 'mongo--recv-message)
+              ((symbol-function 'mongodb--recv-message)
                (lambda (&rest _args)
                  '(("ok" . 1)
                    ("writeConcernError" .
@@ -11114,11 +11114,11 @@
                      ("codeName" . "WriteConcernFailed")
                      ("errmsg" . "waiting for replication timed out")))))))
       (let ((err (should-error
-                  (mongo-update
+                  (mongodb-update
                    conn "app" "users"
-                   (mongo-document '(("_id" . "a")))
-                   (mongo-document '(("$set" . (("seen" . t))))))
-                  :type 'mongo-error)))
+                   (mongodb-document '(("_id" . "a")))
+                   (mongodb-document '(("$set" . (("seen" . t))))))
+                  :type 'mongodb-error)))
         (should (string-match-p "WriteConcernFailed"
                                 (error-message-string err)))
         (should (string-match-p "replication timed out"
@@ -11126,9 +11126,9 @@
 
 
 
-(ert-deftest mongo-test-command-preserves-error-labels ()
+(ert-deftest mongodb-test-command-preserves-error-labels ()
   "Command errors should expose server-returned errorLabels."
-  (let* ((conn (make-mongo-conn :host "seed-a"
+  (let* ((conn (make-mongodb-conn :host "seed-a"
                                 :port 27017
                                 :database "app"
                                 :process 'proc
@@ -11137,33 +11137,33 @@
                           ("maxWireVersion" . 17)
                           ("setName" . "rs0")
                           ("isWritablePrimary" . t))))
-    (setf (mongo-conn-topology conn)
-          (mongo--topology-description-from-hello conn primary-hello))
+    (setf (mongodb-conn-topology conn)
+          (mongodb--topology-description-from-hello conn primary-hello))
     (cl-letf (((symbol-function 'process-live-p)
                (lambda (_proc) t))
-              ((symbol-function 'mongo--send-document)
+              ((symbol-function 'mongodb--send-document)
                (lambda (&rest _args) 1))
-              ((symbol-function 'mongo--recv-message)
+              ((symbol-function 'mongodb--recv-message)
                (lambda (&rest _args)
                  '(("ok" . 0)
                    ("errmsg" . "transaction conflict")
                    ("errorLabels" .
                     ["TransientTransactionError"])))))
       (let ((err (should-error
-                  (mongo-command conn "app" '(("insert" . "users")))
-                  :type 'mongo-error)))
+                  (mongodb-command conn "app" '(("insert" . "users")))
+                  :type 'mongodb-error)))
         (should
-         (mongo-error-has-label-p
+         (mongodb-error-has-label-p
           err "TransientTransactionError"))
         (should (string-match-p "transaction conflict"
                                 (error-message-string err)))))))
 
 
 
-(ert-deftest mongo-test-connect-direct-replica-set-uses-endpoint ()
-  "Native mongo.el directConnection should use the requested host directly."
+(ert-deftest mongodb-test-connect-direct-replica-set-uses-endpoint ()
+  "Native mongodb.el directConnection should use the requested host directly."
   (let (calls)
-    (cl-letf (((symbol-function 'mongo--connect-endpoint)
+    (cl-letf (((symbol-function 'mongodb--connect-endpoint)
                (lambda (_params host port database _credential authenticate)
                  (push (list host port database authenticate) calls)
                  (cons 'direct-conn
@@ -11171,7 +11171,7 @@
                          ("maxWireVersion" . 17)
                          ("setName" . "rs0")
                          ("isWritablePrimary" . :false))))))
-      (should (eq (mongo-connect
+      (should (eq (mongodb-connect
                    '(:url "mongodb://seed-a:27018/app?replicaSet=rs0&directConnection=true"))
                   'direct-conn)))
     (should (equal calls
@@ -11179,28 +11179,28 @@
 
 
 
-(ert-deftest mongo-test-connect-caps-single-host-timeout-by-server-selection ()
+(ert-deftest mongodb-test-connect-caps-single-host-timeout-by-server-selection ()
   "Single-host connect should cap connect timeout by serverSelectionTimeoutMS."
   (let (captured-params)
-    (cl-letf (((symbol-function 'mongo--connect-endpoint)
+    (cl-letf (((symbol-function 'mongodb--connect-endpoint)
                (lambda (params _host _port _database _credential _authenticate)
                  (setq captured-params params)
                  (cons 'single-conn nil))))
-      (should (eq (mongo-connect
+      (should (eq (mongodb-connect
                    '(:url "mongodb://seed-a:27018/app?connectTimeoutMS=7000&serverSelectionTimeoutMS=2500"))
                   'single-conn)))
     (should (= (plist-get captured-params :connect-timeout) 2.5))))
 
 
 
-(ert-deftest mongo-test-connect-stores-socket-timeout-from-uri ()
-  "Native mongo.el should store socketTimeoutMS on the connection."
+(ert-deftest mongodb-test-connect-stores-socket-timeout-from-uri ()
+  "Native mongodb.el should store socketTimeoutMS on the connection."
   (let (conn)
     (cl-letf (((symbol-function 'make-network-process)
-               (lambda (&rest _args) 'mongo-proc))
+               (lambda (&rest _args) 'mongodb-proc))
               ((symbol-function 'set-process-coding-system) #'ignore)
               ((symbol-function 'process-send-string) #'ignore)
-              ((symbol-function 'mongo--recv-handshake-message)
+              ((symbol-function 'mongodb--recv-handshake-message)
                (lambda (&rest _args)
                  '(("ok" . 1)
                    ("maxWireVersion" . 17))))
@@ -11210,22 +11210,22 @@
       (unwind-protect
           (progn
             (setq conn
-                  (mongo-connect
+                  (mongodb-connect
                    '(:url "mongodb://seed-a:27018/app?socketTimeoutMS=1500")))
-            (should (= (mongo-conn-socket-timeout conn) 1.5)))
+            (should (= (mongodb-conn-socket-timeout conn) 1.5)))
         (when conn
-          (mongo-disconnect conn))))))
+          (mongodb-disconnect conn))))))
 
 
 
-(ert-deftest mongo-test-connect-stores-operation-timeout-from-uri ()
-  "Native mongo.el should store timeoutMS on the connection."
+(ert-deftest mongodb-test-connect-stores-operation-timeout-from-uri ()
+  "Native mongodb.el should store timeoutMS on the connection."
   (let (conn)
     (cl-letf (((symbol-function 'make-network-process)
-               (lambda (&rest _args) 'mongo-proc))
+               (lambda (&rest _args) 'mongodb-proc))
               ((symbol-function 'set-process-coding-system) #'ignore)
               ((symbol-function 'process-send-string) #'ignore)
-              ((symbol-function 'mongo--recv-handshake-message)
+              ((symbol-function 'mongodb--recv-handshake-message)
                (lambda (&rest _args)
                  '(("ok" . 1)
                    ("maxWireVersion" . 17))))
@@ -11235,22 +11235,22 @@
       (unwind-protect
           (progn
             (setq conn
-                  (mongo-connect
+                  (mongodb-connect
                    '(:url "mongodb://seed-a:27018/app?timeoutMS=2500")))
-            (should (= (mongo-conn-operation-timeout conn) 2.5)))
+            (should (= (mongodb-conn-operation-timeout conn) 2.5)))
         (when conn
-          (mongo-disconnect conn))))))
+          (mongodb-disconnect conn))))))
 
 
 
-(ert-deftest mongo-test-connect-stores-monitoring-options-from-uri ()
-  "Native mongo.el should store MongoDB monitoring URI options."
+(ert-deftest mongodb-test-connect-stores-monitoring-options-from-uri ()
+  "Native mongodb.el should store MongoDB monitoring URI options."
   (let (conn)
     (cl-letf (((symbol-function 'make-network-process)
-               (lambda (&rest _args) 'mongo-proc))
+               (lambda (&rest _args) 'mongodb-proc))
               ((symbol-function 'set-process-coding-system) #'ignore)
               ((symbol-function 'process-send-string) #'ignore)
-              ((symbol-function 'mongo--recv-handshake-message)
+              ((symbol-function 'mongodb--recv-handshake-message)
                (lambda (&rest _args)
                  '(("ok" . 1)
                    ("maxWireVersion" . 17))))
@@ -11260,27 +11260,27 @@
       (unwind-protect
           (progn
             (setq conn
-                  (mongo-connect
+                  (mongodb-connect
                    '(:url
                      "mongodb://seed-a:27018/app?heartbeatFrequencyMS=1500&serverMonitoringMode=poll&localThresholdMS=25")))
-            (should (= (mongo-conn-local-threshold conn) 0.025))
-            (should (= (mongo-conn-heartbeat-frequency conn) 1.5))
-            (should (eq (mongo-conn-server-monitoring-mode conn) 'poll)))
+            (should (= (mongodb-conn-local-threshold conn) 0.025))
+            (should (= (mongodb-conn-heartbeat-frequency conn) 1.5))
+            (should (eq (mongodb-conn-server-monitoring-mode conn) 'poll)))
         (when conn
-          (mongo-disconnect conn))))))
+          (mongodb-disconnect conn))))))
 
 
 
-(ert-deftest mongo-test-connect-opens-unix-socket-endpoint ()
-  "Native mongo.el should open UNIX-domain socket endpoints with local family."
+(ert-deftest mongodb-test-connect-opens-unix-socket-endpoint ()
+  "Native mongodb.el should open UNIX-domain socket endpoints with local family."
   (let (conn captured-args)
     (cl-letf (((symbol-function 'make-network-process)
                (lambda (&rest args)
                  (setq captured-args args)
-                 'mongo-proc))
+                 'mongodb-proc))
               ((symbol-function 'set-process-coding-system) #'ignore)
               ((symbol-function 'process-send-string) #'ignore)
-              ((symbol-function 'mongo--recv-handshake-message)
+              ((symbol-function 'mongodb--recv-handshake-message)
                (lambda (&rest _args)
                  '(("ok" . 1)
                    ("maxWireVersion" . 17))))
@@ -11290,98 +11290,98 @@
       (unwind-protect
           (progn
             (setq conn
-                  (mongo-connect
+                  (mongodb-connect
                    '(:url "mongodb://%2Ftmp%2Fmongodb-27017.sock/app")))
-            (should (equal (mongo-conn-host conn)
+            (should (equal (mongodb-conn-host conn)
                            "/tmp/mongodb-27017.sock"))
-            (should-not (mongo-conn-port conn))
+            (should-not (mongodb-conn-port conn))
             (should (eq (plist-get captured-args :family) 'local))
             (should (equal (plist-get captured-args :service)
                            "/tmp/mongodb-27017.sock"))
             (should-not (plist-member captured-args :host)))
         (when conn
-          (mongo-disconnect conn))))))
+          (mongodb-disconnect conn))))))
 
 
 
-(ert-deftest mongo-test-connect-rejects-tls-over-unix-socket ()
-  "Native mongo.el should reject TLS over UNIX-domain socket endpoints."
+(ert-deftest mongodb-test-connect-rejects-tls-over-unix-socket ()
+  "Native mongodb.el should reject TLS over UNIX-domain socket endpoints."
   (cl-letf (((symbol-function 'make-network-process)
              (lambda (&rest _args)
                (ert-fail "TLS over local socket should fail before opening"))))
     (let ((err (should-error
-                (mongo-connect
+                (mongodb-connect
                  '(:url "mongodb://%2Ftmp%2Fmongodb-27017.sock/app?tls=true"))
-                :type 'mongo-error)))
+                :type 'mongodb-error)))
       (should (string-match-p "UNIX-domain sockets"
                               (error-message-string err))))))
 
 
 
-(ert-deftest mongo-test-connect-caps-replica-attempt-timeout-by-server-selection ()
+(ert-deftest mongodb-test-connect-caps-replica-attempt-timeout-by-server-selection ()
   "Replica discovery attempts should respect remaining serverSelectionTimeoutMS."
   (let ((primary-hello '(("ok" . 1)
                          ("maxWireVersion" . 17)
                          ("setName" . "rs0")
                          ("isWritablePrimary" . t)))
         captured-params)
-    (cl-letf (((symbol-function 'mongo--connect-endpoint)
+    (cl-letf (((symbol-function 'mongodb--connect-endpoint)
                (lambda (params host port database _credential _authenticate)
                  (setq captured-params params)
-                 (cons (make-mongo-conn :host host
+                 (cons (make-mongodb-conn :host host
                                         :port port
                                         :database database
                                         :process nil
                                         :closed nil)
                        primary-hello))))
-      (should (mongo-conn-p
-               (mongo-connect
+      (should (mongodb-conn-p
+               (mongodb-connect
                 '(:url "mongodb://seed-a:27018/app?replicaSet=rs0&connectTimeoutMS=7000&serverSelectionTimeoutMS=2500")))))
     (should (<= (plist-get captured-params :connect-timeout) 2.5))
     (should (> (plist-get captured-params :connect-timeout) 0))))
 
 
 
-(ert-deftest mongo-test-connect-upgrades-tls-before-handshake ()
-  "Native mongo.el should negotiate TLS before sending MongoDB handshake bytes."
+(ert-deftest mongodb-test-connect-upgrades-tls-before-handshake ()
+  "Native mongodb.el should negotiate TLS before sending MongoDB handshake bytes."
   (let (events conn)
     (cl-letf (((symbol-function 'make-network-process)
                (lambda (&rest _args)
                  (push :open events)
-                 'mongo-proc))
+                 'mongodb-proc))
               ((symbol-function 'set-process-coding-system) #'ignore)
-              ((symbol-function 'mongo--upgrade-to-tls)
+              ((symbol-function 'mongodb--upgrade-to-tls)
                (lambda (_proc _host _params _timeout)
                  (push :tls events)))
               ((symbol-function 'process-send-string)
                (lambda (_proc _data)
                  (push :handshake events)))
-              ((symbol-function 'mongo--recv-handshake-message)
+              ((symbol-function 'mongodb--recv-handshake-message)
                (lambda (&rest _args)
                  '(("maxWireVersion" . 17) ("ok" . 1))))
               ((symbol-function 'process-live-p)
                (lambda (_proc) t))
               ((symbol-function 'delete-process) #'ignore))
       (unwind-protect
-          (setq conn (mongo-connect '(:host "db.example.test"
+          (setq conn (mongodb-connect '(:host "db.example.test"
                                       :port 27017
                                       :database "app"
                                       :tls t)))
         (when conn
-          (mongo-disconnect conn))))
+          (mongodb-disconnect conn))))
     (should (equal (nreverse events)
                    '(:open :tls :handshake)))))
 
 
 
-(ert-deftest mongo-test-connect-uses-socks5-proxy ()
-  "Native mongo.el should tunnel TCP connections through SOCKS5 proxies."
+(ert-deftest mongodb-test-connect-uses-socks5-proxy ()
+  "Native mongodb.el should tunnel TCP connections through SOCKS5 proxies."
   (let (captured-args captured-buffer sent conn)
     (cl-letf (((symbol-function 'make-network-process)
                (lambda (&rest args)
                  (setq captured-args args)
                  (setq captured-buffer (plist-get args :buffer))
-                 'mongo-proc))
+                 'mongodb-proc))
               ((symbol-function 'set-process-coding-system) #'ignore)
               ((symbol-function 'process-send-string)
                (lambda (_proc data)
@@ -11394,11 +11394,11 @@
                             (concat (unibyte-string #x05 #x01 #x00 #x03
                                                     15)
                                     "db.example.test"
-                                    (mongo--pack-uint16-be 27017)))
+                                    (mongodb--pack-uint16-be 27017)))
                      (insert (unibyte-string #x05 #x00 #x00 #x01
                                              0 0 0 0
                                              0 0)))))))
-              ((symbol-function 'mongo--send-initial-handshake)
+              ((symbol-function 'mongodb--send-initial-handshake)
                (lambda (&rest _args)
                  '(("ok" . 1)
                    ("maxWireVersion" . 17))))
@@ -11407,27 +11407,27 @@
               ((symbol-function 'delete-process) #'ignore))
       (unwind-protect
           (setq conn
-                (mongo-connect
+                (mongodb-connect
                  '(:url
                    "mongodb://db.example.test:27017/app?proxyHost=proxy.example&proxyPort=1081")))
         (when conn
-          (mongo-disconnect conn))))
+          (mongodb-disconnect conn))))
     (should (equal (plist-get captured-args :host) "proxy.example"))
     (should (= (plist-get captured-args :service) 1081))
-    (should (equal (mongo-conn-host conn) "db.example.test"))
-    (should (= (mongo-conn-port conn) 27017))
+    (should (equal (mongodb-conn-host conn) "db.example.test"))
+    (should (= (mongodb-conn-port conn) 27017))
     (should (equal (nreverse sent)
                    (list (unibyte-string #x05 #x01 #x00)
                          (concat (unibyte-string #x05 #x01 #x00 #x03
                                                  15)
                                  "db.example.test"
-                                 (mongo--pack-uint16-be 27017)))))))
+                                 (mongodb--pack-uint16-be 27017)))))))
 
 
 
-(ert-deftest mongo-test-connect-socks5-proxy-authenticates ()
-  "Native mongo.el should support SOCKS5 username/password auth."
-  (let ((buffer (generate-new-buffer " *mongo-socks-test*"))
+(ert-deftest mongodb-test-connect-socks5-proxy-authenticates ()
+  "Native mongodb.el should support SOCKS5 username/password auth."
+  (let ((buffer (generate-new-buffer " *mongodb-socks-test*"))
         sent)
     (unwind-protect
         (progn
@@ -11446,13 +11446,13 @@
                                   (concat (unibyte-string #x05 #x01 #x00 #x03
                                                           15)
                                           "db.example.test"
-                                          (mongo--pack-uint16-be 27017)))
+                                          (mongodb--pack-uint16-be 27017)))
                            (insert (unibyte-string #x05 #x00 #x00 #x03
                                                    0 0 0)))))))
                     ((symbol-function 'process-live-p)
                      (lambda (_proc) t)))
-            (mongo--socks5-connect
-             'mongo-proc
+            (mongodb--socks5-connect
+             'mongodb-proc
              buffer
              "db.example.test"
              27017
@@ -11467,51 +11467,51 @@
                                (concat (unibyte-string #x05 #x01 #x00 #x03
                                                        15)
                                        "db.example.test"
-                                       (mongo--pack-uint16-be 27017))))))
+                                       (mongodb--pack-uint16-be 27017))))))
       (when (buffer-live-p buffer)
         (kill-buffer buffer)))))
 
 
 
-(ert-deftest mongo-test-connect-rejects-socks5-proxy-over-unix-socket ()
-  "Native mongo.el should reject SOCKS5 proxies for UNIX-domain endpoints."
+(ert-deftest mongodb-test-connect-rejects-socks5-proxy-over-unix-socket ()
+  "Native mongodb.el should reject SOCKS5 proxies for UNIX-domain endpoints."
   (cl-letf (((symbol-function 'make-network-process)
              (lambda (&rest _args)
                (ert-fail "SOCKS5 over local socket should fail before opening"))))
     (let ((err (should-error
-                (mongo-connect
+                (mongodb-connect
                  '(:url
                    "mongodb://%2Ftmp%2Fmongodb-27017.sock/app?proxyHost=proxy.example"))
-                :type 'mongo-error)))
+                :type 'mongodb-error)))
       (should (string-match-p "SOCKS5 proxy"
                               (error-message-string err))))))
 
 
 
-(ert-deftest mongo-test-connect-uses-modern-hello-after-legacy-handshake ()
+(ert-deftest mongodb-test-connect-uses-modern-hello-after-legacy-handshake ()
   "Ordinary connections should switch to OP_MSG hello after helloOk."
   (let (events initial-command probe-command conn)
     (cl-letf (((symbol-function 'make-network-process)
                (lambda (&rest _args)
                  (push :open events)
-                 'mongo-proc))
+                 'mongodb-proc))
               ((symbol-function 'set-process-coding-system) #'ignore)
-              ((symbol-function 'mongo--send-handshake)
+              ((symbol-function 'mongodb--send-handshake)
                (lambda (_conn document)
                  (setq initial-command document)
                  (push :legacy-hello events)
                  1))
-              ((symbol-function 'mongo--recv-handshake-message)
+              ((symbol-function 'mongodb--recv-handshake-message)
                (lambda (&rest _args)
                  '(("maxWireVersion" . 17)
                    ("helloOk" . t)
                    ("ok" . 1))))
-              ((symbol-function 'mongo--send-document)
+              ((symbol-function 'mongodb--send-document)
                (lambda (_conn document)
                  (setq probe-command document)
                  (push :op-msg-hello events)
                  2))
-              ((symbol-function 'mongo--recv-message)
+              ((symbol-function 'mongodb--recv-message)
                (lambda (&rest _args)
                  '(("ok" . 1)
                    ("isWritablePrimary" . t))))
@@ -11520,86 +11520,86 @@
               ((symbol-function 'delete-process) #'ignore))
       (unwind-protect
           (progn
-            (setq conn (mongo-connect '(:host "db.example.test"
+            (setq conn (mongodb-connect '(:host "db.example.test"
                                         :port 27017
                                         :database "app")))
-            (setf (mongo-conn-session-id conn)
+            (setf (mongodb-conn-session-id conn)
                   '(("id" . "session")))
-            (should (equal (mongo-hello conn)
+            (should (equal (mongodb-hello conn)
                            '(("ok" . 1)
                              ("isWritablePrimary" . t))))
-            (setf (mongo-conn-session-id conn) nil))
+            (setf (mongodb-conn-session-id conn) nil))
         (when conn
-          (mongo-disconnect conn))))
+          (mongodb-disconnect conn))))
     (should (equal (nreverse events)
                    '(:open :legacy-hello :op-msg-hello)))
     (should (equal (cdr (assoc "isMaster" initial-command)) 1))
     (should (eq (cdr (assoc "helloOk" initial-command)) t))
-    (should (equal (mongo-conn-hello-command conn) "hello"))
+    (should (equal (mongodb-conn-hello-command conn) "hello"))
     (should (equal probe-command
                    '(("hello" . 1)
                      ("$db" . "admin"))))))
 
 
 
-(ert-deftest mongo-test-connect-keeps-legacy-hello-without-hello-ok ()
+(ert-deftest mongodb-test-connect-keeps-legacy-hello-without-hello-ok ()
   "Connections should retain legacy hello when the server does not return helloOk."
   (let (conn)
     (cl-letf (((symbol-function 'make-network-process)
-               (lambda (&rest _args) 'mongo-proc))
+               (lambda (&rest _args) 'mongodb-proc))
               ((symbol-function 'set-process-coding-system) #'ignore)
-              ((symbol-function 'mongo--send-handshake)
+              ((symbol-function 'mongodb--send-handshake)
                (lambda (&rest _args) 1))
-              ((symbol-function 'mongo--recv-handshake-message)
+              ((symbol-function 'mongodb--recv-handshake-message)
                (lambda (&rest _args)
                  '(("maxWireVersion" . 17) ("ok" . 1))))
               ((symbol-function 'process-live-p)
                (lambda (_proc) t))
               ((symbol-function 'delete-process) #'ignore))
       (unwind-protect
-          (setq conn (mongo-connect '(:host "db.example.test"
+          (setq conn (mongodb-connect '(:host "db.example.test"
                                       :port 27017
                                       :database "app")))
         (when conn
-          (mongo-disconnect conn))))
-    (should (equal (mongo-conn-hello-command conn) "isMaster"))))
+          (mongodb-disconnect conn))))
+    (should (equal (mongodb-conn-hello-command conn) "isMaster"))))
 
 
 
-(ert-deftest mongo-test-connect-uses-op-msg-hello-for-stable-api ()
+(ert-deftest mongodb-test-connect-uses-op-msg-hello-for-stable-api ()
   "Stable API connections should send the initial hello through OP_MSG."
   (let (events captured-command conn)
     (cl-letf (((symbol-function 'make-network-process)
                (lambda (&rest _args)
                  (push :open events)
-                 'mongo-proc))
+                 'mongodb-proc))
               ((symbol-function 'set-process-coding-system) #'ignore)
-              ((symbol-function 'mongo--send-document)
+              ((symbol-function 'mongodb--send-document)
                (lambda (_conn document)
                  (setq captured-command document)
                  (push :op-msg-hello events)
                  1))
-              ((symbol-function 'mongo--send-handshake)
+              ((symbol-function 'mongodb--send-handshake)
                (lambda (&rest _args)
                  (push :legacy-hello events)
                  1))
-              ((symbol-function 'mongo--recv-message)
+              ((symbol-function 'mongodb--recv-message)
                (lambda (&rest _args)
                  '(("maxWireVersion" . 17) ("ok" . 1))))
-              ((symbol-function 'mongo--recv-handshake-message)
+              ((symbol-function 'mongodb--recv-handshake-message)
                (lambda (&rest _args)
                  (ert-fail "Stable API must not use legacy handshake receive")))
               ((symbol-function 'process-live-p)
                (lambda (_proc) t))
               ((symbol-function 'delete-process) #'ignore))
       (unwind-protect
-          (setq conn (mongo-connect '(:host "db.example.test"
+          (setq conn (mongodb-connect '(:host "db.example.test"
                                       :port 27017
                                       :database "app"
                                       :server-api "1"
                                       :api-strict t)))
         (when conn
-          (mongo-disconnect conn))))
+          (mongodb-disconnect conn))))
     (should (equal (nreverse events)
                    '(:open :op-msg-hello)))
     (should (equal (cdr (assoc "hello" captured-command)) 1))
@@ -11607,21 +11607,21 @@
     (should (equal (cdr (assoc "$db" captured-command)) "admin"))
     (should (equal (cdr (assoc "apiVersion" captured-command)) "1"))
     (should (eq (cdr (assoc "apiStrict" captured-command)) t))
-    (should (equal (mongo--server-api-version
-                    (mongo-conn-server-api conn))
+    (should (equal (mongodb--server-api-version
+                    (mongodb-conn-server-api conn))
                    "1"))))
 
 
 
-(ert-deftest mongo-test-connect-uses-op-msg-hello-for-load-balanced ()
+(ert-deftest mongodb-test-connect-uses-op-msg-hello-for-load-balanced ()
   "Load-balanced connections should send OP_MSG hello and store serviceId."
   (let (events captured-command conn)
     (cl-letf (((symbol-function 'make-network-process)
                (lambda (&rest _args)
                  (push :open events)
-                 'mongo-proc))
+                 'mongodb-proc))
               ((symbol-function 'set-process-coding-system) #'ignore)
-              ((symbol-function 'mongo--send-document)
+              ((symbol-function 'mongodb--send-document)
                (lambda (_conn document)
                  (cond
                   ((assoc "hello" document)
@@ -11632,59 +11632,59 @@
                   (t
                    (push :op-msg-command events)))
                  1))
-              ((symbol-function 'mongo--send-handshake)
+              ((symbol-function 'mongodb--send-handshake)
                (lambda (&rest _args)
                  (push :legacy-hello events)
                  1))
-              ((symbol-function 'mongo--recv-message)
+              ((symbol-function 'mongodb--recv-message)
                (lambda (&rest _args)
                  '(("maxWireVersion" . 17)
                    ("serviceId" . (("$oid" . "64f000000000000000000001")))
                    ("ok" . 1))))
-              ((symbol-function 'mongo--recv-handshake-message)
+              ((symbol-function 'mongodb--recv-handshake-message)
                (lambda (&rest _args)
                  (ert-fail "loadBalanced must not use legacy handshake receive")))
               ((symbol-function 'process-live-p)
                (lambda (_proc) t))
               ((symbol-function 'delete-process) #'ignore))
       (unwind-protect
-          (setq conn (mongo-connect '(:host "lb.example.test"
+          (setq conn (mongodb-connect '(:host "lb.example.test"
                                       :port 27017
                                       :database "app"
                                       :load-balanced t)))
         (when conn
-          (mongo-disconnect conn))))
+          (mongodb-disconnect conn))))
     (should (equal (nreverse events)
                    '(:open :op-msg-hello :end-sessions)))
     (should (equal (cdr (assoc "hello" captured-command)) 1))
     (should (eq (cdr (assoc "loadBalanced" captured-command)) t))
-    (should (mongo-conn-load-balanced conn))
-    (should (equal (mongo-conn-service-id conn)
+    (should (mongodb-conn-load-balanced conn))
+    (should (equal (mongodb-conn-service-id conn)
                    '(("$oid" . "64f000000000000000000001"))))))
 
 
 
-(ert-deftest mongo-test-connect-load-balanced-requires-service-id ()
+(ert-deftest mongodb-test-connect-load-balanced-requires-service-id ()
   "Load-balanced hello responses must include serviceId."
   (cl-letf (((symbol-function 'make-network-process)
-             (lambda (&rest _args) 'mongo-proc))
+             (lambda (&rest _args) 'mongodb-proc))
             ((symbol-function 'set-process-coding-system) #'ignore)
-            ((symbol-function 'mongo--send-document)
+            ((symbol-function 'mongodb--send-document)
              (lambda (&rest _args) 1))
-            ((symbol-function 'mongo--recv-message)
+            ((symbol-function 'mongodb--recv-message)
              (lambda (&rest _args)
                '(("maxWireVersion" . 17) ("ok" . 1))))
             ((symbol-function 'process-live-p)
              (lambda (_proc) t))
             ((symbol-function 'delete-process) #'ignore))
     (let ((err (should-error
-                (mongo-connect '(:host "lb.example.test"
+                (mongodb-connect '(:host "lb.example.test"
                                   :database "app"
                                   :load-balanced t))
-                :type 'mongo-error)))
+                :type 'mongodb-error)))
       (should (string-match-p "server does not support this mode"
                               (error-message-string err))))))
 
-(provide 'mongo-test)
+(provide 'mongodb-test)
 
-;;; mongo-test.el ends here
+;;; mongodb-test.el ends here

@@ -1,9 +1,9 @@
-# mongo.el Development Guide
+# mongodb.el Development Guide
 
 Elisp best practices for the native MongoDB protocol client.  This repository
 is the standalone protocol package used by Clutch's MongoDB backend.
 
-Treat this file as the development contract for future `mongo.el` work.  When
+Treat this file as the development contract for future `mongodb.el` work.  When
 code, tests, or docs drift from these rules, fix the drift in the same change
 or update this guide with the new boundary and the reason for it.
 
@@ -70,7 +70,7 @@ boundary in the guides before adding code.
 - **Errors must surface, not hide**: Do not add fallback/default returns that
   silently swallow protocol failures.
 - **Catch at the boundary, nowhere else**: Only public API boundaries should
-  translate low-level failures into `mongo-error`.  Internal logic should not
+  translate low-level failures into `mongodb-error`.  Internal logic should not
   `condition-case` around bugs.
 - **Robustness is not defensive programming**: Prefer clear ownership, fewer
   states and branches, explicit error boundaries, and verifiable invariants.
@@ -95,16 +95,16 @@ boundary in the guides before adding code.
 
 ## Architecture and Implementation
 
-- **Protocol package only**: `mongo.el` has no UI, query console, result grid,
+- **Protocol package only**: `mongodb.el` has no UI, query console, result grid,
   SQL Interface routing, or MongoDB Shell JavaScript evaluator.  Those belong
   in caller applications such as Clutch.
 - **Native client, not shell or JDBC**: The ordinary path is
-  `mongo.el -> mongod/mongos` through native MongoDB commands.  Do not route the
+  `mongodb.el -> mongod/mongos` through native MongoDB commands.  Do not route the
   document surface through `mongosh`, JavaScript subprocesses, JDBC, or the
   MongoDB SQL Interface.
 - **SQL translation is a companion concern**: Non-JDBC SQL support, if pursued,
   must live in a separate package or caller application that parses SQL and
-  emits MongoDB commands or aggregation pipelines through public `mongo-` APIs.
+  emits MongoDB commands or aggregation pipelines through public `mongodb-` APIs.
   Do not add a SQL parser, relational planner, BI Connector / `mongosqld`
   client, or SQL query console to this protocol package.
 - **External dependency boundaries stay explicit**: Do not add dependencies on
@@ -114,8 +114,8 @@ boundary in the guides before adding code.
   symbols such as `clutch--*`, `mysql--*`, `pg--*`, or `tramp-rpc--*`.  If this
   package needs behavior that only exists behind a private helper, add or
   request a public API in that package.
-- **Public entry point stays `mongo.el`**: External consumers load
-  `(require 'mongo)`.  Split files are implementation modules assembled by the
+- **Public entry point stays `mongodb.el`**: External consumers load
+  `(require 'mongodb)`.  Split files are implementation modules assembled by the
   entry file.
 - **Split by stable protocol boundaries**: Prefer complete responsibilities
   such as BSON codecs, wire message framing, URI/connection parameters, auth,
@@ -138,11 +138,11 @@ boundary in the guides before adding code.
   plain `defvar` for shared constants or caches, `defvar-local` only for
   buffer state in tests or caller-facing utilities, and `defcustom` for user
   options.
-- **Public naming**: `mongo-` for supported public API.  No double dash for
+- **Public naming**: `mongodb-` for supported public API.  No double dash for
   public API.
-- **Private naming**: `mongo--` inside this package.  Do not ask callers to use
+- **Private naming**: `mongodb--` inside this package.  Do not ask callers to use
   private symbols; promote a real public API when external code needs one.
-  Clutch and other callers must use only public `mongo-` symbols.
+  Clutch and other callers must use only public `mongodb-` symbols.
 - **Predicates**: Multi-word predicate names end in `-p`.
 - **Unused args**: Prefix with `_`.
 - **Prefer flat control flow**: Avoid deep `let` -> `if` -> `let` nesting.  Use
@@ -151,7 +151,7 @@ boundary in the guides before adding code.
   destructure lists and plists instead of repeated `nth` or `plist-get` calls.
 - **Prefer `cl-loop` for non-trivial accumulation**: Use it instead of
   `dolist` plus manual accumulators or over-clever folds.
-- **Use the right error type**: `mongo-error` for protocol/client failures,
+- **Use the right error type**: `mongodb-error` for protocol/client failures,
   `user-error` for caller-caused interactive problems, and `error` for
   programmer bugs.
 - **Do not wrap stdlib errors without semantics**: Use built-in errors directly
@@ -174,38 +174,38 @@ boundary in the guides before adding code.
 - Clutch owns MongoDB Shell/MQL helper parsing, query console mode, completion,
   result-grid rendering, connection prompts, auth-source/pass resolution, and
   SQL Interface surface selection.
-- `mongo.el` owns BSON values, URI/params normalization, sockets, TLS, wire
+- `mongodb.el` owns BSON values, URI/params normalization, sockets, TLS, wire
   compression, OP_MSG/legacy response framing, server selection, auth, sessions,
   transactions, cursors, command helpers, and pooling.
 - Ordinary MongoDB support is native wire protocol.  MongoDB SQL Interface is a
   separate JDBC surface owned by caller applications; it must not influence this
   package's protocol API, naming, tests, or dependencies.
-- When Clutch needs new protocol behavior, add it to `mongo.el` as a public
-  `mongo-` API and update Clutch to call that API.  Do not work around missing
-  protocol APIs by calling `mongo--*` from Clutch.
+- When Clutch needs new protocol behavior, add it to `mongodb.el` as a public
+  `mongodb-` API and update Clutch to call that API.  Do not work around missing
+  protocol APIs by calling `mongodb--*` from Clutch.
 - Caller applications should be able to pass structured connection plists or
-  `mongodb://` / `mongodb+srv://` URLs directly to `mongo-connect`.  If a caller
+  `mongodb://` / `mongodb+srv://` URLs directly to `mongodb-connect`.  If a caller
   needs effective connection facts such as selected database, topology, server
-  address, or negotiated options, expose them through public `mongo-` accessors
+  address, or negotiated options, expose them through public `mongodb-` accessors
   instead of making the caller parse MongoDB URLs or duplicate parameter
   normalization.
 - Do not migrate Clutch's MQL helper reader, shell-like query snippets,
   completion tables, result-grid shaping, auth-source/pass-entry lookup, SSH /
   TRAMP forwarding, or SQL Interface routing into this repository.  They are
   caller UX and integration code, not MongoDB protocol implementation.
-- After changing a public `mongo-` API used by Clutch, update the Clutch adapter
+- After changing a public `mongodb-` API used by Clutch, update the Clutch adapter
   in the same overall change and rerun Clutch's MongoDB-focused tests before
   considering the protocol change complete.
 
 ## Clutch Residue Audit
 
-Keep the split between `mongo.el` and the sibling Clutch checkout explicit.
+Keep the split between `mongodb.el` and the sibling Clutch checkout explicit.
 Clutch should retain only caller-facing MongoDB code:
 
-- `clutch-db-mongodb.el` may adapt public `mongo-` APIs to Clutch's generic
+- `clutch-mongodb.el` may adapt public `mongodb-` APIs to Clutch's generic
   database contract, including MQL helper parsing, result-grid shaping,
   collection metadata, and document-surface query execution.
-- The Clutch MongoDB adapter may hold the public `mongo-conn` object as an
+- The Clutch MongoDB adapter may hold the public `mongodb-conn` object as an
   opaque client handle.  It should name that handle as `client` or connection
   state, not as `wire`, `protocol`, socket, pool, or topology state.
 - `clutch-mongodb-mode` may own query-buffer syntax, highlighting, and
@@ -218,9 +218,9 @@ Clutch should retain only caller-facing MongoDB code:
 
 The following must not drift back into Clutch:
 
-- direct requires of `mongo-wire`, `mongo-bson`, `mongo-params`, or
-  `mongo-auth`;
-- calls to private `mongo--*` symbols;
+- direct requires of `mongodb-wire`, `mongodb-bson`, `mongodb-params`, or
+  `mongodb-auth`;
+- calls to private `mongodb--*` symbols;
 - BSON codec, wire message framing, URI/SRV parsing, auth, sessions,
   transactions, server selection, cursor, retry, compression, or pooling
   implementation;
@@ -237,7 +237,7 @@ The following must not drift back into Clutch:
 User-facing Clutch configuration remains one backend: `:backend mongodb`.
 MongoDB SQL Interface is an optional surface of that backend:
 `:backend mongodb :surface sql-interface`.  If Clutch needs protocol behavior
-that is not available publicly, add a `mongo-` API here first instead of using a
+that is not available publicly, add a `mongodb-` API here first instead of using a
 private helper from Clutch.
 
 ## Protocol Boundaries
@@ -262,7 +262,7 @@ private helper from Clutch.
 
 ## Version Baseline
 
-- `mongo.el` targets **Emacs 29.1+**.
+- `mongodb.el` targets **Emacs 29.1+**.
 - Do not silently raise the baseline.  If a change requires a higher Emacs
   version, update `README.org`, package metadata, and a design note explaining
   why.
@@ -289,10 +289,10 @@ private helper from Clutch.
 
 ## Quality and Release Checks
 
-- Byte-compile distributable `mongo*.el` files with zero warnings after code
+- Byte-compile distributable `mongodb*.el` files with zero warnings after code
   changes.
-- Run checkdoc on distributable `mongo*.el` files and package-lint on
-  `mongo.el` before release.
+- Run checkdoc on distributable `mongodb*.el` files and package-lint on
+  `mongodb.el` before release.
 - Run live MongoDB tests for changes that touch sockets, TLS, URI/SRV parsing,
   auth, command execution, cursors, sessions, retry behavior, transactions,
   compression, server selection, or pooling.
@@ -313,10 +313,10 @@ private helper from Clutch.
 - First line: `;;; file.el --- Short description -*- lexical-binding: t; -*-`
   - Description must not contain "for Emacs" or the package name.
   - Keep the description under 60 characters.
-- `mongo.el` is the package entry file.  It is the only file that should carry
+- `mongodb.el` is the package entry file.  It is the only file that should carry
   package metadata such as `;; Package-Requires:`, `;; URL:`, `;; Version:`,
   and `;; Author:`.
-- `;; Package-Requires:` in `mongo.el` must list all direct dependencies with
+- `;; Package-Requires:` in `mongodb.el` must list all direct dependencies with
   minimum versions, including the declared Emacs baseline.
 - Split implementation files must not carry `;; Package-Requires:` headers, but
   they must carry formal license metadata, preferably
@@ -329,8 +329,8 @@ private helper from Clutch.
 ### Naming
 
 - Follow the public/private naming rules above.  Internal structs, maps,
-  constants, and helpers use `mongo--`.
-- User-facing commands and public helpers use `mongo-`.
+  constants, and helpers use `mongodb--`.
+- User-facing commands and public helpers use `mongodb-`.
 - Every `defcustom` must specify `:type`.
 
 ### Autoloads
@@ -344,14 +344,14 @@ private helper from Clutch.
   docstring.
 - Docstring first line must be a complete sentence ending with a period.
 - Argument names in docstrings should be UPPERCASED.
-- Run checkdoc across distributable `mongo*.el` files.
+- Run checkdoc across distributable `mongodb*.el` files.
 
 ### Common pitfalls
 
 - `cl-lib` functions require `(require 'cl-lib)`; do not rely on transitive
   loading.
 - Avoid `eval-when-compile` for runtime-needed dependencies.
-- Compatibility shims must stay in the `mongo--` namespace.
+- Compatibility shims must stay in the `mongodb--` namespace.
 - Avoid `with-eval-after-load` in package code unless the form registers an
   optional integration at a clear package boundary.
 
@@ -371,25 +371,25 @@ Read every changed line before committing.
 ### 2. Run unit tests
 
 ```bash
-emacs -Q --batch -L . -l ert -l test/mongo-test.el \
-  --eval '(ert-run-tests-batch-and-exit "mongo-test-.*")'
+emacs -Q --batch -L . -l ert -l test/mongodb-test.el \
+  --eval '(ert-run-tests-batch-and-exit "mongodb-test-.*")'
 ```
 
 ### 3. Check external private API boundaries
 
 ```bash
 rg -n -P "(?<![A-Za-z0-9-])(clutch|mysql|pg|tramp-rpc)--[A-Za-z0-9-]+" \
-  mongo*.el test/*.el
+  mongodb*.el test/*.el
 ```
 
-This command should return no matches.  Internal `mongo--*` symbols are allowed
+This command should return no matches.  Internal `mongodb--*` symbols are allowed
 inside this repository.
 
 If the sibling Clutch checkout is present, also verify that Clutch still depends
-only on public `mongo-` APIs:
+only on public `mongodb-` APIs:
 
 ```bash
-rg -n -P "(?<![A-Za-z0-9-])(mysql|mongo|nerd-icons|tramp-rpc)--[A-Za-z0-9-]+" \
+rg -n -P "(?<![A-Za-z0-9-])(mysql|mongodb|nerd-icons|tramp-rpc)--[A-Za-z0-9-]+" \
   ../clutch/clutch*.el ../clutch/test/*.el
 ```
 
@@ -401,33 +401,33 @@ If the sibling Clutch checkout is present, ensure Clutch has not started
 depending on split implementation files or shell executables:
 
 ```bash
-rg -n "require 'mongo-(wire|bson|params|auth)|mongo--|mongosh" \
+rg -n -P "require 'mongodb-(wire|bson|params|auth)|(?<![A-Za-z0-9-])mongodb--[A-Za-z0-9-]+|mongosh" \
   ../clutch/clutch*.el ../clutch/test/*.el
 ```
 
-This command should return no matches.  Clutch must use `(require 'mongo)` and
-public `mongo-` APIs only.
+This command should return no matches.  Clutch must use `(require 'mongodb)` and
+public `mongodb-` APIs only.
 
 Also check that Clutch has not copied MongoDB URI parsing or synthesis back into
 its native adapter:
 
 ```bash
-rg -n "clutch-db-mongodb--.*(uri|url)|url-hexify-string|url-unhex-string" \
-  ../clutch/clutch-db-mongodb.el ../clutch/test/*.el
+rg -n "clutch-mongodb--.*(uri|url)|url-hexify-string|url-unhex-string" \
+  ../clutch/clutch-mongodb.el ../clutch/test/*.el
 ```
 
 This command should return no matches.  `:url` may be an opaque saved
-connection parameter in Clutch; URL interpretation belongs in `mongo.el`.
+connection parameter in Clutch; URL interpretation belongs in `mongodb.el`.
 
 Also check that Clutch's native adapter does not expose protocol-layer naming as
 its own state:
 
 ```bash
 rg -n "conn-wire|:wire|OP_MSG|wire protocol|MongoDB wire" \
-  ../clutch/clutch-db-mongodb.el
+  ../clutch/clutch-mongodb.el
 ```
 
-This command should return no matches.  Clutch may hold a public `mongo-conn`
+This command should return no matches.  Clutch may hold a public `mongodb-conn`
 as an opaque client handle; wire/protocol terminology belongs here.
 
 Also check that Clutch user docs do not duplicate detailed MongoDB protocol
@@ -439,7 +439,7 @@ rg -n "OP_MSG|wire compression|BSON wrappers|SASLprep|server selection|load-bala
 ```
 
 This command should return no matches.  Clutch docs may say that ordinary
-MongoDB uses the external `mongo.el` native client, then link here for protocol
+MongoDB uses the external `mongodb.el` native client, then link here for protocol
 details.
 
 ### 5. Check MongoDB surface naming in Clutch
@@ -474,13 +474,13 @@ compression, or command execution.  A local `mongod` is enough for ordinary
 document-surface protocol tests; SQL Interface JDBC tests are outside this
 repository.
 
-When the sibling Clutch checkout is present and a public `mongo-` API used by
+When the sibling Clutch checkout is present and a public `mongodb-` API used by
 Clutch changes, rerun Clutch's MongoDB live adapter tests too.
 
 ### 7. Byte-compile with zero warnings
 
 ```bash
-emacs -Q --batch -L . -f batch-byte-compile mongo*.el test/mongo-test.el
+emacs -Q --batch -L . -f batch-byte-compile mongodb*.el test/mongodb-test.el
 ```
 
 Remove generated `*.elc` files after byte-compilation in a source checkout
@@ -488,8 +488,8 @@ unless they are intentionally committed artifacts.
 
 ### 8. Run package checks before release
 
-Run package-lint on `mongo.el`, and run checkdoc across distributable
-`mongo*.el` files.  Do not move package metadata into split files to satisfy
+Run package-lint on `mongodb.el`, and run checkdoc across distributable
+`mongodb*.el` files.  Do not move package metadata into split files to satisfy
 per-file lint.
 
 ### 9. Update tests when behavior changes

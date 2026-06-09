@@ -1,22 +1,22 @@
-;;; mongo-auth.el --- Authentication mechanisms -*- lexical-binding: t; -*-
+;;; mongodb-auth.el --- Authentication mechanisms -*- lexical-binding: t; -*-
 
 ;; Copyright (C) 2025-2026 Lucius Chen
 ;; SPDX-License-Identifier: GPL-3.0-or-later
 
-;; This file is part of mongo.el.
+;; This file is part of mongodb.el.
 
-;; mongo.el is free software: you can redistribute it and/or modify
+;; mongodb.el is free software: you can redistribute it and/or modify
 ;; it under the terms of the GNU General Public License as published by
 ;; the Free Software Foundation, either version 3 of the License, or
 ;; (at your option) any later version.
 
-;; mongo.el is distributed in the hope that it will be useful,
+;; mongodb.el is distributed in the hope that it will be useful,
 ;; but WITHOUT ANY WARRANTY; without even the implied warranty of
 ;; MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
 ;; GNU General Public License for more details.
 
 ;; You should have received a copy of the GNU General Public License
-;; along with mongo.el.  If not, see <https://www.gnu.org/licenses/>.
+;; along with mongodb.el.  If not, see <https://www.gnu.org/licenses/>.
 
 ;;; Commentary:
 
@@ -26,8 +26,8 @@
 
 (require 'cl-lib)
 (require 'json)
-(require 'mongo-bson)
-(require 'mongo-params)
+(require 'mongodb-bson)
+(require 'mongodb-params)
 (require 'parse-time)
 (require 'seq)
 (require 'subr-x)
@@ -35,11 +35,11 @@
 (require 'url)
 (require 'url-util)
 
-(declare-function mongo-command "mongo" (conn database command &optional timeout sequences))
-(declare-function mongo-conn-host "mongo" (conn))
-(declare-function mongo-conn-p "mongo" (object))
+(declare-function mongodb-command "mongodb" (conn database command &optional timeout sequences))
+(declare-function mongodb-conn-host "mongodb" (conn))
+(declare-function mongodb-conn-p "mongodb" (object))
 
-(cl-defstruct mongo--aws-credentials
+(cl-defstruct mongodb--aws-credentials
   access-key-id
   secret-access-key
   session-token
@@ -47,14 +47,14 @@
 
 ;;;; Authentication
 
-(defconst mongo--scram-auth-mechanisms
+(defconst mongodb--scram-auth-mechanisms
   '("SCRAM-SHA-256" "SCRAM-SHA-1"))
 
-(defconst mongo--supported-auth-mechanisms
-  (append mongo--scram-auth-mechanisms
+(defconst mongodb--supported-auth-mechanisms
+  (append mongodb--scram-auth-mechanisms
           '("MONGODB-X509" "PLAIN" "MONGODB-AWS" "MONGODB-OIDC")))
 
-(defconst mongo--saslprep-map-to-nothing-ranges
+(defconst mongodb--saslprep-map-to-nothing-ranges
   '((#x00AD . #x00AD)
     (#x034F . #x034F)
     (#x1806 . #x1806)
@@ -65,7 +65,7 @@
     (#xFEFF . #xFEFF))
   "RFC 3454 table B.1 characters mapped to nothing by SASLprep.")
 
-(defconst mongo--saslprep-space-ranges
+(defconst mongodb--saslprep-space-ranges
   '((#x00A0 . #x00A0)
     (#x1680 . #x1680)
     (#x2000 . #x200A)
@@ -74,7 +74,7 @@
     (#x3000 . #x3000))
   "RFC 3454 table C.1.2 space characters mapped to ASCII space.")
 
-(defconst mongo--saslprep-prohibited-ranges
+(defconst mongodb--saslprep-prohibited-ranges
   '((#x0000 . #x001F)
     (#x007F . #x009F)
     (#x06DD . #x06DD)
@@ -97,22 +97,22 @@
     (#x100000 . #x10FFFD))
   "RFC 4013 prohibited output ranges for SASLprep.")
 
-(defun mongo--choose-auth-mechanism (credential hello)
+(defun mongodb--choose-auth-mechanism (credential hello)
   "Return the auth mechanism to use for CREDENTIAL from HELLO."
   (let ((mechanism
-         (mongo--normalize-auth-mechanism
-          (mongo--credential-mechanism credential)))
+         (mongodb--normalize-auth-mechanism
+          (mongodb--credential-mechanism credential)))
         (supported (cdr (assoc "saslSupportedMechs" hello))))
     (cond
      (mechanism
-      (unless (member mechanism mongo--supported-auth-mechanisms)
-        (signal 'mongo-error
+      (unless (member mechanism mongodb--supported-auth-mechanisms)
+        (signal 'mongodb-error
                 (list (format "Native MongoDB authentication supports SCRAM-SHA-256, SCRAM-SHA-1, MONGODB-X509, PLAIN, MONGODB-AWS, and MONGODB-OIDC, not %s"
                               mechanism))))
-      (when (and (member mechanism mongo--scram-auth-mechanisms)
+      (when (and (member mechanism mongodb--scram-auth-mechanisms)
                  supported
                  (not (member mechanism supported)))
-        (signal 'mongo-error
+        (signal 'mongodb-error
                 (list (format "MongoDB server/user does not report support for %s"
                               mechanism))))
       mechanism)
@@ -121,30 +121,30 @@
      ((member "SCRAM-SHA-1" supported)
       "SCRAM-SHA-1")
      (supported
-      (signal 'mongo-error
+      (signal 'mongodb-error
               (list "Native MongoDB authentication requires SCRAM-SHA-256 or SCRAM-SHA-1 support from the server/user")))
      (t
       "SCRAM-SHA-1"))))
 
-(defun mongo--codepoint-in-ranges-p (codepoint ranges)
+(defun mongodb--codepoint-in-ranges-p (codepoint ranges)
   "Return non-nil when CODEPOINT is included in RANGES."
   (cl-some (lambda (range)
              (and (<= (car range) codepoint)
                   (<= codepoint (cdr range))))
            ranges))
 
-(defun mongo--saslprep-map-char (char)
+(defun mongodb--saslprep-map-char (char)
   "Return SASLprep-mapped CHAR, or nil when CHAR maps to nothing."
   (cond
-   ((mongo--codepoint-in-ranges-p
-     char mongo--saslprep-map-to-nothing-ranges)
+   ((mongodb--codepoint-in-ranges-p
+     char mongodb--saslprep-map-to-nothing-ranges)
     nil)
-   ((mongo--codepoint-in-ranges-p char mongo--saslprep-space-ranges)
+   ((mongodb--codepoint-in-ranges-p char mongodb--saslprep-space-ranges)
     ?\s)
    (t
     char)))
 
-(defun mongo--saslprep-non-character-codepoint-p (char)
+(defun mongodb--saslprep-non-character-codepoint-p (char)
   "Return non-nil when CHAR is a Unicode non-character code point."
   (or (and (<= #xFDD0 char)
            (<= char #xFDEF))
@@ -154,25 +154,25 @@
              (or (= low #xFFFE)
                  (= low #xFFFF))))))
 
-(defun mongo--saslprep-prohibited-p (char)
+(defun mongodb--saslprep-prohibited-p (char)
   "Return non-nil when CHAR is prohibited by SASLprep."
-  (or (mongo--codepoint-in-ranges-p
-       char mongo--saslprep-prohibited-ranges)
-      (mongo--saslprep-non-character-codepoint-p char)))
+  (or (mongodb--codepoint-in-ranges-p
+       char mongodb--saslprep-prohibited-ranges)
+      (mongodb--saslprep-non-character-codepoint-p char)))
 
-(defun mongo--saslprep-randal-p (char)
+(defun mongodb--saslprep-randal-p (char)
   "Return non-nil when CHAR is in RFC 3454 RandALCat."
   (memq (get-char-code-property char 'bidi-class) '(R AL)))
 
-(defun mongo--saslprep-lcat-p (char)
+(defun mongodb--saslprep-lcat-p (char)
   "Return non-nil when CHAR is in RFC 3454 LCat."
   (eq (get-char-code-property char 'bidi-class) 'L))
 
-(defun mongo--saslprep (string)
+(defun mongodb--saslprep (string)
   "Prepare STRING with the SASLprep profile used by MongoDB SCRAM-SHA-256."
   (let* ((mapped-chars
           (cl-loop for char across string
-                   for mapped = (mongo--saslprep-map-char char)
+                   for mapped = (mongodb--saslprep-map-char char)
                    when mapped collect mapped))
          (normalized
           (ucs-normalize-NFKC-string
@@ -181,46 +181,46 @@
          (has-lcat nil))
     (cl-loop for char across normalized
              do
-             (when (mongo--saslprep-prohibited-p char)
-               (signal 'mongo-error
+             (when (mongodb--saslprep-prohibited-p char)
+               (signal 'mongodb-error
                        (list (format "MongoDB SCRAM password contains a prohibited SASLprep character: U+%04X"
                                      char))))
-             (when (mongo--saslprep-randal-p char)
+             (when (mongodb--saslprep-randal-p char)
                (setq has-randal t))
-             (when (mongo--saslprep-lcat-p char)
+             (when (mongodb--saslprep-lcat-p char)
                (setq has-lcat t)))
     (when has-randal
       (when has-lcat
-        (signal 'mongo-error
+        (signal 'mongodb-error
                 (list "MongoDB SCRAM password violates SASLprep bidirectional text rules")))
       (unless (and (> (length normalized) 0)
-                   (mongo--saslprep-randal-p (aref normalized 0))
-                   (mongo--saslprep-randal-p
+                   (mongodb--saslprep-randal-p (aref normalized 0))
+                   (mongodb--saslprep-randal-p
                     (aref normalized (1- (length normalized)))))
-        (signal 'mongo-error
+        (signal 'mongodb-error
                 (list "MongoDB SCRAM password violates SASLprep bidirectional text rules"))))
     normalized))
 
-(defun mongo--scram-password-bytes (secret)
+(defun mongodb--scram-password-bytes (secret)
   "Return SASLprep-normalized SECRET bytes for SCRAM-SHA-256."
-  (mongo--utf8-bytes (mongo--saslprep secret)))
+  (mongodb--utf8-bytes (mongodb--saslprep secret)))
 
-(defun mongo--scram-sha1-password-bytes (username secret)
+(defun mongodb--scram-sha1-password-bytes (username secret)
   "Return MongoDB SCRAM-SHA-1 password digest bytes for USERNAME and SECRET."
-  (mongo--utf8-bytes
+  (mongodb--utf8-bytes
    (secure-hash
     'md5
-    (mongo--utf8-bytes
-     (format "%s:mongo:%s" username secret)))))
+    (mongodb--utf8-bytes
+     (format "%s:mongodb:%s" username secret)))))
 
-(defvar mongo--random-seeded nil
+(defvar mongodb--random-seeded nil
   "Non-nil after `random' has been seeded for MongoDB nonce generation.")
 
-(defun mongo--random-bytes (count)
+(defun mongodb--random-bytes (count)
   "Return COUNT random bytes."
-  (unless mongo--random-seeded
+  (unless mongodb--random-seeded
     (random t)
-    (setq mongo--random-seeded t))
+    (setq mongodb--random-seeded t))
   (let ((bytes ""))
     (while (< (length bytes) count)
       (setq bytes
@@ -236,96 +236,96 @@
               nil nil t))))
     (substring bytes 0 count)))
 
-(defun mongo--scram-client-nonce ()
+(defun mongodb--scram-client-nonce ()
   "Return a printable SCRAM client nonce."
-  (mongo--base64-encode (mongo--random-bytes 24)))
+  (mongodb--base64-encode (mongodb--random-bytes 24)))
 
-(defun mongo--uuid-v4-bytes ()
+(defun mongodb--uuid-v4-bytes ()
   "Return a locally generated RFC 4122 version 4 UUID as 16 bytes."
-  (let ((bytes (copy-sequence (mongo--random-bytes 16))))
+  (let ((bytes (copy-sequence (mongodb--random-bytes 16))))
     (aset bytes 6 (logior #x40 (logand (aref bytes 6) #x0f)))
     (aset bytes 8 (logior #x80 (logand (aref bytes 8) #x3f)))
     bytes))
 
-(defvar mongo--object-id-random nil
+(defvar mongodb--object-id-random nil
   "Five process-random bytes used when generating MongoDB ObjectIds.")
 
-(defvar mongo--object-id-counter nil
+(defvar mongodb--object-id-counter nil
   "Three-byte counter used when generating MongoDB ObjectIds.")
 
-(defun mongo--uint24-value (bytes)
+(defun mongodb--uint24-value (bytes)
   "Return the unsigned 24-bit integer represented by BYTES."
   (logior (ash (aref bytes 0) 16)
           (ash (aref bytes 1) 8)
           (aref bytes 2)))
 
-(defun mongo--pack-uint24-be (value)
+(defun mongodb--pack-uint24-be (value)
   "Return VALUE packed as unsigned big-endian uint24."
   (unibyte-string
    (logand (ash value -16) #xff)
    (logand (ash value -8) #xff)
    (logand value #xff)))
 
-(defun mongo-new-object-id (&optional time)
+(defun mongodb-new-object-id (&optional time)
   "Return a newly generated MongoDB ObjectId.
 TIME, when non-nil, supplies the timestamp component."
-  (unless mongo--object-id-random
-    (setq mongo--object-id-random (mongo--random-bytes 5)))
-  (unless mongo--object-id-counter
-    (setq mongo--object-id-counter
-          (mongo--uint24-value (mongo--random-bytes 3))))
+  (unless mongodb--object-id-random
+    (setq mongodb--object-id-random (mongodb--random-bytes 5)))
+  (unless mongodb--object-id-counter
+    (setq mongodb--object-id-counter
+          (mongodb--uint24-value (mongodb--random-bytes 3))))
   (let* ((seconds (logand (floor (float-time (or time (current-time))))
                           #xffffffff))
-         (counter mongo--object-id-counter)
+         (counter mongodb--object-id-counter)
          (bytes (concat
-                 (mongo--pack-uint32-be seconds)
-                 mongo--object-id-random
-                 (mongo--pack-uint24-be counter))))
-    (setq mongo--object-id-counter
-          (mod (1+ mongo--object-id-counter) #x1000000))
-    (mongo-object-id (mongo--bytes-to-hex bytes))))
+                 (mongodb--pack-uint32-be seconds)
+                 mongodb--object-id-random
+                 (mongodb--pack-uint24-be counter))))
+    (setq mongodb--object-id-counter
+          (mod (1+ mongodb--object-id-counter) #x1000000))
+    (mongodb-object-id (mongodb--bytes-to-hex bytes))))
 
-(defun mongo--make-session-id ()
+(defun mongodb--make-session-id ()
   "Return a MongoDB logical session id document."
-  `(("id" . ,(mongo-binary 4 (mongo--uuid-v4-bytes)))))
+  `(("id" . ,(mongodb-binary 4 (mongodb--uuid-v4-bytes)))))
 
-(defun mongo--scram-escape-name (name)
+(defun mongodb--scram-escape-name (name)
   "Return SCRAM escaped NAME."
   (replace-regexp-in-string
    "," "=2C"
    (replace-regexp-in-string "=" "=3D" name t t)
    t t))
 
-(defun mongo--scram-parse-attrs (message)
+(defun mongodb--scram-parse-attrs (message)
   "Parse a SCRAM MESSAGE into an alist of attribute strings."
   (let (attrs)
     (dolist (part (split-string message "," t))
       (unless (string-match "\\`\\([^=]+\\)=\\(.*\\)\\'" part)
-        (signal 'mongo-error
+        (signal 'mongodb-error
                 (list (format "Invalid MongoDB SCRAM message: %S" message))))
       (push (cons (match-string 1 part)
                   (match-string 2 part))
             attrs))
     (nreverse attrs)))
 
-(defun mongo--scram-payload-string (payload)
+(defun mongodb--scram-payload-string (payload)
   "Return SCRAM PAYLOAD decoded as a UTF-8 string."
   (cond
    ((stringp payload)
     payload)
    (t
     (decode-coding-string
-     (mongo--binary-value-data payload)
+     (mongodb--binary-value-data payload)
      'utf-8 t))))
 
-(defun mongo--scram-start-data (credential mechanism)
+(defun mongodb--scram-start-data (credential mechanism)
   "Return SCRAM client-first data for CREDENTIAL and MECHANISM."
-  (let* ((username (mongo--credential-username credential))
-         (source (mongo--credential-source credential))
-         (client-nonce (mongo--scram-client-nonce))
+  (let* ((username (mongodb--credential-username credential))
+         (source (mongodb--credential-source credential))
+         (client-nonce (mongodb--scram-client-nonce))
          (client-first-bare
           (format "n=%s,r=%s"
-                  (mongo--scram-escape-name username)
+                  (mongodb--scram-escape-name username)
                   client-nonce))
          (client-first (concat "n,," client-first-bare)))
     (list :mechanism mechanism
@@ -335,43 +335,43 @@ TIME, when non-nil, supplies the timestamp component."
           :client-first-bare client-first-bare
           :client-first client-first)))
 
-(defun mongo--scram-start-command (start-data &optional include-db)
+(defun mongodb--scram-start-command (start-data &optional include-db)
   "Return a MongoDB saslStart command from START-DATA.
 When INCLUDE-DB is non-nil, include the auth database as a top-level db field
 for speculative authentication."
   `(("saslStart" . 1)
     ("mechanism" . ,(plist-get start-data :mechanism))
     ("options" . (("skipEmptyExchange" . t)))
-    ("payload" . ,(mongo-binary
+    ("payload" . ,(mongodb-binary
                    0
-                   (mongo--utf8-bytes
+                   (mongodb--utf8-bytes
                     (plist-get start-data :client-first))))
     ,@(when include-db
         `(("db" . ,(plist-get start-data :source))))
     ("autoAuthorize" . 1)))
 
-(defun mongo--credential-scram-negotiation-p (credential)
+(defun mongodb--credential-scram-negotiation-p (credential)
   "Return non-nil when CREDENTIAL should request saslSupportedMechs."
   (when credential
-    (let ((mechanism (mongo--normalize-auth-mechanism
-                      (mongo--credential-mechanism credential))))
+    (let ((mechanism (mongodb--normalize-auth-mechanism
+                      (mongodb--credential-mechanism credential))))
       (or (null mechanism)
-          (member mechanism mongo--scram-auth-mechanisms)))))
+          (member mechanism mongodb--scram-auth-mechanisms)))))
 
-(defun mongo--speculative-auth-state (credential)
+(defun mongodb--speculative-auth-state (credential)
   "Return SCRAM speculative authentication state for CREDENTIAL, or nil."
   (when credential
-    (let ((mechanism (or (mongo--normalize-auth-mechanism
-                          (mongo--credential-mechanism credential))
+    (let ((mechanism (or (mongodb--normalize-auth-mechanism
+                          (mongodb--credential-mechanism credential))
                          "SCRAM-SHA-256")))
-      (when (member mechanism mongo--scram-auth-mechanisms)
-        (mongo--scram-start-data credential mechanism)))))
+      (when (member mechanism mongodb--scram-auth-mechanisms)
+        (mongodb--scram-start-data credential mechanism)))))
 
-(defun mongo--scram-client-final
+(defun mongodb--scram-client-final
     (mechanism username secret client-first-bare client-nonce server-first-message)
   "Return SCRAM final data for MECHANISM and SERVER-FIRST-MESSAGE.
 The returned plist contains :message, :server-signature, and :server-nonce."
-  (let* ((attrs (mongo--scram-parse-attrs server-first-message))
+  (let* ((attrs (mongodb--scram-parse-attrs server-first-message))
          (server-nonce (cdr (assoc "r" attrs)))
          (salt64 (cdr (assoc "s" attrs)))
          (iterations-text (cdr (assoc "i" attrs)))
@@ -379,20 +379,20 @@ The returned plist contains :message, :server-signature, and :server-nonce."
                           (string-to-number iterations-text))))
     (unless (and server-nonce
                  (string-prefix-p client-nonce server-nonce))
-      (signal 'mongo-error
+      (signal 'mongodb-error
               (list "MongoDB SCRAM server nonce does not extend client nonce")))
     (unless salt64
-      (signal 'mongo-error
+      (signal 'mongodb-error
               (list "MongoDB SCRAM server message is missing salt")))
     (unless (and iterations
                  (>= iterations 4096))
-      (signal 'mongo-error
+      (signal 'mongodb-error
               (list "MongoDB SCRAM server message has invalid iteration count")))
-    (let* ((salt (mongo--base64-decode salt64))
+    (let* ((salt (mongodb--base64-decode salt64))
            (client-final-without-proof
             (format "c=biws,r=%s" server-nonce))
            (auth-message
-            (mongo--utf8-bytes
+            (mongodb--utf8-bytes
              (mapconcat #'identity
                         (list client-first-bare
                               server-first-message
@@ -401,118 +401,118 @@ The returned plist contains :message, :server-signature, and :server-nonce."
            (salted-password
             (pcase mechanism
               ("SCRAM-SHA-256"
-               (mongo--pbkdf2-hmac-sha256
-                (mongo--scram-password-bytes secret)
+               (mongodb--pbkdf2-hmac-sha256
+                (mongodb--scram-password-bytes secret)
                 salt
                 iterations))
               ("SCRAM-SHA-1"
-               (mongo--pbkdf2-hmac-sha1
-                (mongo--scram-sha1-password-bytes username secret)
+               (mongodb--pbkdf2-hmac-sha1
+                (mongodb--scram-sha1-password-bytes username secret)
                 salt
                 iterations))
               (_
-               (signal 'mongo-error
+               (signal 'mongodb-error
                        (list (format "Unsupported MongoDB auth mechanism: %s"
                                      mechanism))))))
            (client-key
             (pcase mechanism
               ("SCRAM-SHA-256"
-               (mongo--hmac-sha256 salted-password
-                                   (mongo--utf8-bytes "Client Key")))
+               (mongodb--hmac-sha256 salted-password
+                                   (mongodb--utf8-bytes "Client Key")))
               ("SCRAM-SHA-1"
-               (mongo--hmac-sha1 salted-password
-                                  (mongo--utf8-bytes "Client Key")))))
+               (mongodb--hmac-sha1 salted-password
+                                  (mongodb--utf8-bytes "Client Key")))))
            (stored-key
             (pcase mechanism
-              ("SCRAM-SHA-256" (mongo--sha256 client-key))
-              ("SCRAM-SHA-1" (mongo--sha1 client-key))))
+              ("SCRAM-SHA-256" (mongodb--sha256 client-key))
+              ("SCRAM-SHA-1" (mongodb--sha1 client-key))))
            (client-signature
             (pcase mechanism
               ("SCRAM-SHA-256"
-               (mongo--hmac-sha256 stored-key auth-message))
+               (mongodb--hmac-sha256 stored-key auth-message))
               ("SCRAM-SHA-1"
-               (mongo--hmac-sha1 stored-key auth-message))))
+               (mongodb--hmac-sha1 stored-key auth-message))))
            (client-proof
-            (mongo--xor-bytes client-key client-signature))
+            (mongodb--xor-bytes client-key client-signature))
            (server-key
             (pcase mechanism
               ("SCRAM-SHA-256"
-               (mongo--hmac-sha256 salted-password
-                                   (mongo--utf8-bytes "Server Key")))
+               (mongodb--hmac-sha256 salted-password
+                                   (mongodb--utf8-bytes "Server Key")))
               ("SCRAM-SHA-1"
-               (mongo--hmac-sha1 salted-password
-                                  (mongo--utf8-bytes "Server Key")))))
+               (mongodb--hmac-sha1 salted-password
+                                  (mongodb--utf8-bytes "Server Key")))))
            (server-signature
             (pcase mechanism
               ("SCRAM-SHA-256"
-               (mongo--hmac-sha256 server-key auth-message))
+               (mongodb--hmac-sha256 server-key auth-message))
               ("SCRAM-SHA-1"
-               (mongo--hmac-sha1 server-key auth-message)))))
+               (mongodb--hmac-sha1 server-key auth-message)))))
       (list :message
             (format "%s,p=%s"
                     client-final-without-proof
-                    (mongo--base64-encode client-proof))
+                    (mongodb--base64-encode client-proof))
             :server-signature server-signature
             :server-nonce server-nonce))))
 
-(defun mongo--scram-sha256-client-final
+(defun mongodb--scram-sha256-client-final
     (secret client-first-bare client-nonce server-first-message)
   "Return SCRAM-SHA-256 final data for SERVER-FIRST-MESSAGE."
-  (mongo--scram-client-final
+  (mongodb--scram-client-final
    "SCRAM-SHA-256" nil secret client-first-bare client-nonce
    server-first-message))
 
-(defun mongo--scram-sha1-client-final
+(defun mongodb--scram-sha1-client-final
     (username secret client-first-bare client-nonce server-first-message)
   "Return SCRAM-SHA-1 final data for SERVER-FIRST-MESSAGE."
-  (mongo--scram-client-final
+  (mongodb--scram-client-final
    "SCRAM-SHA-1" username secret client-first-bare client-nonce
    server-first-message))
 
-(defun mongo--authenticate-scram
+(defun mongodb--authenticate-scram
     (conn credential mechanism &optional start-data start-response)
   "Authenticate CONN with CREDENTIAL using SCRAM MECHANISM.
 START-DATA and START-RESPONSE, when non-nil, continue a speculative
 authentication exchange started in the initial handshake."
   (let* ((start-data (or start-data
-                         (mongo--scram-start-data credential mechanism)))
-         (username (mongo--credential-username credential))
-         (secret (mongo--credential-password credential))
-         (source (mongo--credential-source credential))
+                         (mongodb--scram-start-data credential mechanism)))
+         (username (mongodb--credential-username credential))
+         (secret (mongodb--credential-password credential))
+         (source (mongodb--credential-source credential))
          (client-nonce (plist-get start-data :client-nonce))
          (client-first-bare (plist-get start-data :client-first-bare))
          (start-response
           (or start-response
-              (mongo-command
+              (mongodb-command
                conn source
-               (mongo--scram-start-command start-data))))
+               (mongodb--scram-start-command start-data))))
          (conversation-id (cdr (assoc "conversationId" start-response)))
          (server-first
-          (mongo--scram-payload-string
+          (mongodb--scram-payload-string
            (cdr (assoc "payload" start-response)))))
     (when (eq (cdr (assoc "done" start-response)) t)
-      (signal 'mongo-error
+      (signal 'mongodb-error
               (list "MongoDB SCRAM conversation ended before client proof")))
     (let* ((final-data
             (pcase mechanism
               ("SCRAM-SHA-256"
-               (mongo--scram-sha256-client-final
+               (mongodb--scram-sha256-client-final
                 secret client-first-bare client-nonce server-first))
               ("SCRAM-SHA-1"
-               (mongo--scram-sha1-client-final
+               (mongodb--scram-sha1-client-final
                 username secret client-first-bare client-nonce server-first))
               (_
-               (signal 'mongo-error
+               (signal 'mongodb-error
                        (list (format "Unsupported MongoDB auth mechanism: %s"
                                      mechanism))))))
            (continue-response
-            (mongo-command
+            (mongodb-command
              conn source
              `(("saslContinue" . 1)
                ("conversationId" . ,conversation-id)
-               ("payload" . ,(mongo-binary
+               ("payload" . ,(mongodb-binary
                                0
-                               (mongo--utf8-bytes
+                               (mongodb--utf8-bytes
                                 (plist-get final-data :message)))))))
            (server-verified nil)
            (rounds 0))
@@ -520,47 +520,47 @@ authentication exchange started in the initial handshake."
                   (< rounds 5))
         (cl-incf rounds)
         (when-let* ((payload (cdr (assoc "payload" continue-response))))
-          (let* ((server-final (mongo--scram-payload-string payload))
+          (let* ((server-final (mongodb--scram-payload-string payload))
                  (server-final-attrs
                   (and (not (string-empty-p server-final))
-                       (mongo--scram-parse-attrs server-final))))
+                       (mongodb--scram-parse-attrs server-final))))
             (when-let* ((error-text (cdr (assoc "e" server-final-attrs))))
-              (signal 'mongo-error
+              (signal 'mongodb-error
                       (list (format "MongoDB SCRAM authentication failed: %s"
                                     error-text))))
             (when-let* ((verifier (cdr (assoc "v" server-final-attrs))))
-              (unless (equal (mongo--base64-decode verifier)
+              (unless (equal (mongodb--base64-decode verifier)
                              (plist-get final-data :server-signature))
-                (signal 'mongo-error
+                (signal 'mongodb-error
                         (list "MongoDB SCRAM server signature verification failed")))
               (setq server-verified t))))
         (if (eq (cdr (assoc "done" continue-response)) t)
             (setq continue-response nil)
           (setq continue-response
-                (mongo-command
+                (mongodb-command
                  conn source
                  `(("saslContinue" . 1)
                    ("conversationId" . ,conversation-id)
-                   ("payload" . ,(mongo-binary 0 "")))))))
+                   ("payload" . ,(mongodb-binary 0 "")))))))
       (unless server-verified
-        (signal 'mongo-error
+        (signal 'mongodb-error
                 (list "MongoDB SCRAM server signature was not returned")))
       (when continue-response
-        (signal 'mongo-error
+        (signal 'mongodb-error
                 (list "MongoDB SCRAM conversation did not complete"))))))
 
-(defun mongo--authenticate-scram-sha256 (conn credential)
+(defun mongodb--authenticate-scram-sha256 (conn credential)
   "Authenticate CONN with CREDENTIAL using SCRAM-SHA-256."
-  (mongo--authenticate-scram conn credential "SCRAM-SHA-256"))
+  (mongodb--authenticate-scram conn credential "SCRAM-SHA-256"))
 
-(defun mongo--authenticate-scram-sha1 (conn credential)
+(defun mongodb--authenticate-scram-sha1 (conn credential)
   "Authenticate CONN with CREDENTIAL using SCRAM-SHA-1."
-  (mongo--authenticate-scram conn credential "SCRAM-SHA-1"))
+  (mongodb--authenticate-scram conn credential "SCRAM-SHA-1"))
 
-(defun mongo--authenticate-x509 (conn credential)
+(defun mongodb--authenticate-x509 (conn credential)
   "Authenticate CONN with CREDENTIAL using MONGODB-X509."
-  (let ((username (mongo--credential-username credential)))
-    (mongo-command
+  (let ((username (mongodb--credential-username credential)))
+    (mongodb-command
      conn
      "$external"
      `(("authenticate" . 1)
@@ -568,10 +568,10 @@ authentication exchange started in the initial handshake."
        ,@(when username
            `(("user" . ,username)))))))
 
-(defconst mongo--aws-sts-body "Action=GetCallerIdentity&Version=2011-06-15"
+(defconst mongodb--aws-sts-body "Action=GetCallerIdentity&Version=2011-06-15"
   "AWS STS request body signed for MONGODB-AWS authentication.")
 
-(defun mongo--aws-credential-field (value &rest keys)
+(defun mongodb--aws-credential-field (value &rest keys)
   "Return the first field named by KEYS from AWS credential VALUE."
   (catch 'found
     (dolist (key keys)
@@ -585,74 +585,74 @@ authentication exchange started in the initial handshake."
         (throw 'found (cdr (assoc key value))))))
     nil))
 
-(defun mongo--aws-expiration-time (value)
+(defun mongodb--aws-expiration-time (value)
   "Return AWS credential expiration VALUE as float time, or nil."
-  (when (mongo--nonempty-string value)
+  (when (mongodb--nonempty-string value)
     (condition-case err
         (float-time (date-to-time value))
       (error
-       (signal 'mongo-error
+       (signal 'mongodb-error
                (list (format "MongoDB MONGODB-AWS credential expiration is invalid: %s"
                              (error-message-string err))))))))
 
-(defun mongo--aws-normalize-credentials (value context &optional require-expiration)
+(defun mongodb--aws-normalize-credentials (value context &optional require-expiration)
   "Return AWS credentials from VALUE for CONTEXT.
 When REQUIRE-EXPIRATION is non-nil, VALUE must include an Expiration field."
   (let* ((access-key-id
-          (or (and (mongo--aws-credentials-p value)
-                   (mongo--aws-credentials-access-key-id value))
-              (mongo--aws-credential-field
+          (or (and (mongodb--aws-credentials-p value)
+                   (mongodb--aws-credentials-access-key-id value))
+              (mongodb--aws-credential-field
                value :access-key-id :accessKeyId 'access-key-id 'accessKeyId
                'AccessKeyId 'access_key_id
                "AccessKeyId" "accessKeyId" "access_key_id")))
          (secret-access-key
-          (or (and (mongo--aws-credentials-p value)
-                   (mongo--aws-credentials-secret-access-key value))
-              (mongo--aws-credential-field
+          (or (and (mongodb--aws-credentials-p value)
+                   (mongodb--aws-credentials-secret-access-key value))
+              (mongodb--aws-credential-field
                value :secret-access-key :secretAccessKey
                'secret-access-key 'secretAccessKey
                'SecretAccessKey 'secret_access_key
                "SecretAccessKey" "secretAccessKey" "secret_access_key")))
          (session-token
-          (or (and (mongo--aws-credentials-p value)
-                   (mongo--aws-credentials-session-token value))
-              (mongo--aws-credential-field
+          (or (and (mongodb--aws-credentials-p value)
+                   (mongodb--aws-credentials-session-token value))
+              (mongodb--aws-credential-field
                value :session-token :sessionToken
                'session-token 'sessionToken
                'SessionToken 'session_token 'Token 'token
                "SessionToken" "sessionToken" "Token" "token")))
          (expiration
-          (or (and (mongo--aws-credentials-p value)
-                   (mongo--aws-credentials-expiration value))
-              (mongo--aws-expiration-time
-               (mongo--aws-credential-field
+          (or (and (mongodb--aws-credentials-p value)
+                   (mongodb--aws-credentials-expiration value))
+              (mongodb--aws-expiration-time
+               (mongodb--aws-credential-field
                 value :expiration 'expiration 'Expiration
                 "Expiration" "expiration")))))
-    (unless (and (mongo--nonempty-string access-key-id)
-                 (mongo--nonempty-string secret-access-key))
-      (signal 'mongo-error
+    (unless (and (mongodb--nonempty-string access-key-id)
+                 (mongodb--nonempty-string secret-access-key))
+      (signal 'mongodb-error
               (list (format "MongoDB MONGODB-AWS %s did not return access key id and secret access key"
                             context))))
     (when (and require-expiration
                (not expiration))
-      (signal 'mongo-error
+      (signal 'mongodb-error
               (list (format "MongoDB MONGODB-AWS %s did not return credential expiration"
                             context))))
-    (make-mongo--aws-credentials
+    (make-mongodb--aws-credentials
      :access-key-id access-key-id
      :secret-access-key secret-access-key
      :session-token session-token
      :expiration expiration)))
 
-(defun mongo--aws-cached-credentials-valid-p (credentials)
+(defun mongodb--aws-cached-credentials-valid-p (credentials)
   "Return non-nil when cached AWS CREDENTIALS are still usable."
-  (and (mongo--aws-credentials-p credentials)
-       (let ((expiration (mongo--aws-credentials-expiration credentials)))
+  (and (mongodb--aws-credentials-p credentials)
+       (let ((expiration (mongodb--aws-credentials-expiration credentials)))
          (or (not expiration)
              (> (- expiration (float-time))
-                mongo--aws-credential-expiry-skew-seconds)))))
+                mongodb--aws-credential-expiry-skew-seconds)))))
 
-(defun mongo--aws-json-object (body context)
+(defun mongodb--aws-json-object (body context)
   "Parse BODY as AWS JSON response for CONTEXT."
   (condition-case err
       (json-parse-string body
@@ -661,38 +661,38 @@ When REQUIRE-EXPIRATION is non-nil, VALUE must include an Expiration field."
                          :null-object nil
                          :false-object :false)
     (json-parse-error
-     (signal 'mongo-error
+     (signal 'mongodb-error
              (list (format "MongoDB MONGODB-AWS %s returned invalid JSON: %s"
                            context
                            (error-message-string err)))))))
 
-(defun mongo--aws-json-field (object key)
+(defun mongodb--aws-json-field (object key)
   "Return KEY from parsed AWS JSON OBJECT."
   (cdr (or (assoc key object)
            (assoc (intern key) object))))
 
-(defun mongo--aws-http-request (method url headers)
+(defun mongodb--aws-http-request (method url headers)
   "Return response body for AWS credential HTTP METHOD URL with HEADERS."
   (let ((url-request-method method)
         (url-request-extra-headers headers)
-        (timeout-seconds mongo--aws-credential-timeout-seconds)
+        (timeout-seconds mongodb--aws-credential-timeout-seconds)
         buffer)
     (setq buffer
           (url-retrieve-synchronously
            url t t timeout-seconds))
     (unless buffer
-      (signal 'mongo-error
+      (signal 'mongodb-error
               (list (format "MongoDB MONGODB-AWS credential request timed out: %s"
                             url))))
     (unwind-protect
         (with-current-buffer buffer
           (goto-char (point-min))
           (unless (looking-at "HTTP/[0-9.]+ \\([0-9][0-9][0-9]\\)")
-            (signal 'mongo-error
+            (signal 'mongodb-error
                     (list "MongoDB MONGODB-AWS credential response has no HTTP status")))
           (let ((status (string-to-number (match-string 1))))
             (unless (re-search-forward "\r?\n\r?\n" nil t)
-              (signal 'mongo-error
+              (signal 'mongodb-error
                       (list "MongoDB MONGODB-AWS credential response has no body")))
             (let ((body (decode-coding-string
                          (buffer-substring-no-properties
@@ -700,14 +700,14 @@ When REQUIRE-EXPIRATION is non-nil, VALUE must include an Expiration field."
                          'utf-8 t)))
               (unless (and (>= status 200)
                            (< status 300))
-                (signal 'mongo-error
+                (signal 'mongodb-error
                         (list (format "MongoDB MONGODB-AWS credential request failed with HTTP %s: %s"
                                       status body))))
               body)))
       (when (buffer-live-p buffer)
         (kill-buffer buffer)))))
 
-(defun mongo--aws-query-string (pairs)
+(defun mongodb--aws-query-string (pairs)
   "Return AWS query string from PAIRS."
   (mapconcat (lambda (pair)
                (concat (url-hexify-string (car pair))
@@ -716,223 +716,223 @@ When REQUIRE-EXPIRATION is non-nil, VALUE must include an Expiration field."
              pairs
              "&"))
 
-(defun mongo--aws-provider-credentials (credential)
+(defun mongodb--aws-provider-credentials (credential)
   "Return credentials from CREDENTIAL's custom AWS provider, or nil."
-  (when-let* ((provider (mongo--credential-aws-credential-provider credential)))
+  (when-let* ((provider (mongodb--credential-aws-credential-provider credential)))
     (unless (functionp provider)
-      (signal 'mongo-error
+      (signal 'mongodb-error
               (list "MongoDB MONGODB-AWS :aws-credential-provider must be a function")))
     (let ((result (funcall provider
                            (list :timeout-seconds
-                                 mongo--aws-credential-timeout-seconds))))
-      (mongo--aws-normalize-credentials result "credential provider"))))
+                                 mongodb--aws-credential-timeout-seconds))))
+      (mongodb--aws-normalize-credentials result "credential provider"))))
 
-(defun mongo--aws-env-credentials
+(defun mongodb--aws-env-credentials
     (credential explicit-credentials &optional explicit-only)
   "Return explicit or environment AWS credentials for CREDENTIAL.
 When EXPLICIT-ONLY is non-nil, do not consult process environment variables."
   (let* ((explicit-access-key-id
-          (mongo--nonempty-string
-           (mongo--credential-username credential)))
+          (mongodb--nonempty-string
+           (mongodb--credential-username credential)))
          (explicit-secret-access-key
-          (mongo--nonempty-string
-           (mongo--credential-password credential)))
+          (mongodb--nonempty-string
+           (mongodb--credential-password credential)))
          (access-key-id (or explicit-access-key-id
                             (and (not explicit-only)
-                                 (mongo--nonempty-string
+                                 (mongodb--nonempty-string
                                   (getenv "AWS_ACCESS_KEY_ID")))))
          (secret-access-key (or explicit-secret-access-key
                                 (and (not explicit-only)
-                                     (mongo--nonempty-string
+                                     (mongodb--nonempty-string
                                       (getenv "AWS_SECRET_ACCESS_KEY")))))
-         (session-token (or (mongo--nonempty-string
-                             (mongo--mechanism-property
-                              (mongo--credential-mechanism-properties credential)
+         (session-token (or (mongodb--nonempty-string
+                             (mongodb--mechanism-property
+                              (mongodb--credential-mechanism-properties credential)
                               "AWS_SESSION_TOKEN"))
                             (and (not explicit-credentials)
                                  (not explicit-only)
-                                 (mongo--nonempty-string
+                                 (mongodb--nonempty-string
                                   (getenv "AWS_SESSION_TOKEN"))))))
     (when (or access-key-id secret-access-key)
       (unless (and access-key-id secret-access-key)
-        (signal 'mongo-error
+        (signal 'mongodb-error
                 (list "MongoDB MONGODB-AWS authentication requires both AWS access key id and secret access key")))
-      (make-mongo--aws-credentials
+      (make-mongodb--aws-credentials
        :access-key-id access-key-id
        :secret-access-key secret-access-key
        :session-token session-token))))
 
-(defun mongo--aws-web-identity-credentials ()
+(defun mongodb--aws-web-identity-credentials ()
   "Return AWS credentials from AssumeRoleWithWebIdentity, or nil."
-  (let ((token-file (mongo--nonempty-string
+  (let ((token-file (mongodb--nonempty-string
                      (getenv "AWS_WEB_IDENTITY_TOKEN_FILE")))
-        (role-arn (mongo--nonempty-string
+        (role-arn (mongodb--nonempty-string
                    (getenv "AWS_ROLE_ARN"))))
     (cond
      ((or token-file role-arn)
       (unless (and token-file role-arn)
-        (signal 'mongo-error
+        (signal 'mongodb-error
                 (list "MongoDB MONGODB-AWS AssumeRoleWithWebIdentity requires AWS_WEB_IDENTITY_TOKEN_FILE and AWS_ROLE_ARN")))
-      (let* ((token (mongo--oidc-read-token-file token-file))
+      (let* ((token (mongodb--oidc-read-token-file token-file))
              (session-name
-              (or (mongo--nonempty-string
+              (or (mongodb--nonempty-string
                    (getenv "AWS_ROLE_SESSION_NAME"))
-                  (concat "mongo-el-"
-                          (mongo--bytes-to-hex
-                           (mongo--random-bytes 8)))))
-             (query (mongo--aws-query-string
+                  (concat "mongodb-el-"
+                          (mongodb--bytes-to-hex
+                           (mongodb--random-bytes 8)))))
+             (query (mongodb--aws-query-string
                      `(("Action" . "AssumeRoleWithWebIdentity")
                        ("RoleSessionName" . ,session-name)
                        ("RoleArn" . ,role-arn)
                        ("WebIdentityToken" . ,token)
                        ("Version" . "2011-06-15"))))
-             (body (mongo--aws-http-request
+             (body (mongodb--aws-http-request
                     "POST"
                     (concat "https://sts.amazonaws.com/?" query)
                     '(("Accept" . "application/json"))))
-             (document (mongo--aws-json-object
+             (document (mongodb--aws-json-object
                         body "AssumeRoleWithWebIdentity response"))
-             (credentials (mongo--aws-json-field document "Credentials")))
-        (mongo--aws-normalize-credentials
+             (credentials (mongodb--aws-json-field document "Credentials")))
+        (mongodb--aws-normalize-credentials
          credentials "AssumeRoleWithWebIdentity response" t)))
      (t nil))))
 
-(defun mongo--aws-ecs-credentials ()
+(defun mongodb--aws-ecs-credentials ()
   "Return AWS credentials from ECS task metadata, or nil."
   (when-let* ((relative-uri
-               (mongo--nonempty-string
+               (mongodb--nonempty-string
                 (getenv "AWS_CONTAINER_CREDENTIALS_RELATIVE_URI"))))
     (let* ((path (if (string-prefix-p "/" relative-uri)
                      relative-uri
                    (concat "/" relative-uri)))
-           (body (mongo--aws-http-request
+           (body (mongodb--aws-http-request
                   "GET"
                   (concat "http://169.254.170.2" path)
                   '(("Accept" . "application/json"))))
-           (document (mongo--aws-json-object
+           (document (mongodb--aws-json-object
                       body "ECS credentials response")))
-      (mongo--aws-normalize-credentials
+      (mongodb--aws-normalize-credentials
        document "ECS credentials response" t))))
 
-(defun mongo--aws-ec2-credentials ()
+(defun mongodb--aws-ec2-credentials ()
   "Return AWS credentials from EC2 IMDSv2."
   (let* ((token (string-trim
-                 (mongo--aws-http-request
+                 (mongodb--aws-http-request
                   "PUT"
                   "http://169.254.169.254/latest/api/token"
                   '(("X-aws-ec2-metadata-token-ttl-seconds" . "21600")))))
          (headers `(("X-aws-ec2-metadata-token" . ,token)))
          (role-name (string-trim
-                     (mongo--aws-http-request
+                     (mongodb--aws-http-request
                       "GET"
                       "http://169.254.169.254/latest/meta-data/iam/security-credentials/"
                       headers))))
-    (unless (mongo--nonempty-string role-name)
-      (signal 'mongo-error
+    (unless (mongodb--nonempty-string role-name)
+      (signal 'mongodb-error
               (list "MongoDB MONGODB-AWS EC2 metadata returned no IAM role name")))
-    (let* ((body (mongo--aws-http-request
+    (let* ((body (mongodb--aws-http-request
                   "GET"
                   (concat
                    "http://169.254.169.254/latest/meta-data/iam/security-credentials/"
                    (url-hexify-string role-name))
                   headers))
-           (document (mongo--aws-json-object
+           (document (mongodb--aws-json-object
                       body "EC2 credentials response")))
-      (mongo--aws-normalize-credentials
+      (mongodb--aws-normalize-credentials
        document "EC2 credentials response" t))))
 
-(defun mongo--aws-fetch-and-cache-credentials (credential)
+(defun mongodb--aws-fetch-and-cache-credentials (credential)
   "Fetch temporary AWS credentials for CREDENTIAL and cache them."
-  (let ((credentials (or (mongo--aws-web-identity-credentials)
-                         (mongo--aws-ecs-credentials)
-                         (mongo--aws-ec2-credentials))))
-    (setf (mongo--credential-aws-cached-credentials credential)
+  (let ((credentials (or (mongodb--aws-web-identity-credentials)
+                         (mongodb--aws-ecs-credentials)
+                         (mongodb--aws-ec2-credentials))))
+    (setf (mongodb--credential-aws-cached-credentials credential)
           credentials)
     credentials))
 
-(defun mongo--aws-credentials (credential)
+(defun mongodb--aws-credentials (credential)
   "Return AWS credentials for MONGODB-AWS CREDENTIAL."
   (let* ((explicit-access-key-id
-          (mongo--nonempty-string
-           (mongo--credential-username credential)))
+          (mongodb--nonempty-string
+           (mongodb--credential-username credential)))
          (explicit-secret-access-key
-          (mongo--nonempty-string
-           (mongo--credential-password credential)))
+          (mongodb--nonempty-string
+           (mongodb--credential-password credential)))
          (explicit-credentials
           (or explicit-access-key-id explicit-secret-access-key)))
     (or (and explicit-credentials
-             (mongo--aws-env-credentials credential explicit-credentials t))
-        (mongo--aws-provider-credentials credential)
-        (when (mongo--aws-cached-credentials-valid-p
-               (mongo--credential-aws-cached-credentials credential))
-          (mongo--credential-aws-cached-credentials credential))
-        (mongo--aws-env-credentials credential explicit-credentials)
-        (mongo--aws-fetch-and-cache-credentials credential)
-        (signal 'mongo-error
+             (mongodb--aws-env-credentials credential explicit-credentials t))
+        (mongodb--aws-provider-credentials credential)
+        (when (mongodb--aws-cached-credentials-valid-p
+               (mongodb--credential-aws-cached-credentials credential))
+          (mongodb--credential-aws-cached-credentials credential))
+        (mongodb--aws-env-credentials credential explicit-credentials)
+        (mongodb--aws-fetch-and-cache-credentials credential)
+        (signal 'mongodb-error
                 (list "MongoDB MONGODB-AWS authentication requires AWS credentials from URI/params, :aws-credential-provider, environment variables, AssumeRoleWithWebIdentity, ECS, or EC2 IMDS")))))
 
-(defun mongo--aws-date ()
+(defun mongodb--aws-date ()
   "Return the current AWS SigV4 timestamp."
   (format-time-string "%Y%m%dT%H%M%SZ" nil t))
 
-(defun mongo--aws-validate-sts-host (host)
+(defun mongodb--aws-validate-sts-host (host)
   "Validate AWS STS HOST from a MONGODB-AWS server-first message."
-  (unless (mongo--nonempty-string host)
-    (signal 'mongo-error
+  (unless (mongodb--nonempty-string host)
+    (signal 'mongodb-error
             (list "MongoDB MONGODB-AWS server returned an empty STS host")))
-  (when (> (length (mongo--utf8-bytes host)) 255)
-    (signal 'mongo-error
+  (when (> (length (mongodb--utf8-bytes host)) 255)
+    (signal 'mongodb-error
             (list "MongoDB MONGODB-AWS STS host exceeds 255 bytes")))
   (when (or (string-prefix-p "." host)
             (string-suffix-p "." host)
             (string-match-p "\\.\\." host))
-    (signal 'mongo-error
+    (signal 'mongodb-error
             (list (format "MongoDB MONGODB-AWS STS host is invalid: %s"
                           host))))
   host)
 
-(defun mongo--aws-region (host)
+(defun mongodb--aws-region (host)
   "Return AWS SigV4 region derived from STS HOST."
-  (setq host (mongo--aws-validate-sts-host host))
+  (setq host (mongodb--aws-validate-sts-host host))
   (cond
    ((member host '("sts.amazonaws.com" "aws.amazonaws.com"))
     "us-east-1")
    ((string-match-p "\\." host)
     (let ((region (cadr (split-string host "\\."))))
-      (unless (mongo--nonempty-string region)
-        (signal 'mongo-error
+      (unless (mongodb--nonempty-string region)
+        (signal 'mongodb-error
                 (list (format "MongoDB MONGODB-AWS STS host has no region label: %s"
                               host))))
       region))
    (t "us-east-1")))
 
-(defun mongo--aws-signing-key (secret-access-key date-stamp region)
+(defun mongodb--aws-signing-key (secret-access-key date-stamp region)
   "Return AWS SigV4 signing key for SECRET-ACCESS-KEY, DATE-STAMP, and REGION."
-  (let* ((date-key (mongo--hmac-sha256
-                    (mongo--utf8-bytes (concat "AWS4" secret-access-key))
-                    (mongo--utf8-bytes date-stamp)))
-         (region-key (mongo--hmac-sha256
+  (let* ((date-key (mongodb--hmac-sha256
+                    (mongodb--utf8-bytes (concat "AWS4" secret-access-key))
+                    (mongodb--utf8-bytes date-stamp)))
+         (region-key (mongodb--hmac-sha256
                       date-key
-                      (mongo--utf8-bytes region)))
-         (service-key (mongo--hmac-sha256
+                      (mongodb--utf8-bytes region)))
+         (service-key (mongodb--hmac-sha256
                        region-key
-                       (mongo--utf8-bytes "sts"))))
-    (mongo--hmac-sha256 service-key
-                        (mongo--utf8-bytes "aws4_request"))))
+                       (mongodb--utf8-bytes "sts"))))
+    (mongodb--hmac-sha256 service-key
+                        (mongodb--utf8-bytes "aws4_request"))))
 
-(defun mongo--aws-authorization-header
+(defun mongodb--aws-authorization-header
     (credentials host server-nonce amz-date)
   "Return AWS SigV4 Authorization header for MONGODB-AWS."
-  (let* ((host (mongo--aws-validate-sts-host host))
-         (region (mongo--aws-region host))
+  (let* ((host (mongodb--aws-validate-sts-host host))
+         (region (mongodb--aws-region host))
          (date-stamp (substring amz-date 0 8))
          (scope (format "%s/%s/sts/aws4_request" date-stamp region))
-         (server-nonce64 (mongo--base64-encode server-nonce))
+         (server-nonce64 (mongodb--base64-encode server-nonce))
          (session-token
-          (mongo--aws-credentials-session-token credentials))
+          (mongodb--aws-credentials-session-token credentials))
          (headers
           `(("content-length" . ,(number-to-string
-                                  (length mongo--aws-sts-body)))
+                                  (length mongodb--aws-sts-body)))
             ("content-type" . "application/x-www-form-urlencoded")
             ("host" . ,host)
             ("x-amz-date" . ,amz-date)
@@ -957,9 +957,9 @@ When EXPLICIT-ONLY is non-nil, do not consult process environment variables."
                  ""
                  canonical-headers
                  signed-headers
-                 (mongo--bytes-to-hex
-                  (mongo--sha256
-                   (mongo--utf8-bytes mongo--aws-sts-body))))
+                 (mongodb--bytes-to-hex
+                  (mongodb--sha256
+                   (mongodb--utf8-bytes mongodb--aws-sts-body))))
            "\n"))
          (string-to-sign
           (mapconcat
@@ -967,75 +967,75 @@ When EXPLICIT-ONLY is non-nil, do not consult process environment variables."
            (list "AWS4-HMAC-SHA256"
                  amz-date
                  scope
-                 (mongo--bytes-to-hex
-                  (mongo--sha256
-                   (mongo--utf8-bytes canonical-request))))
+                 (mongodb--bytes-to-hex
+                  (mongodb--sha256
+                   (mongodb--utf8-bytes canonical-request))))
            "\n"))
          (signing-key
-          (mongo--aws-signing-key
-           (mongo--aws-credentials-secret-access-key credentials)
+          (mongodb--aws-signing-key
+           (mongodb--aws-credentials-secret-access-key credentials)
            date-stamp
            region))
          (signature
-          (mongo--bytes-to-hex
-           (mongo--hmac-sha256 signing-key
-                               (mongo--utf8-bytes string-to-sign)))))
+          (mongodb--bytes-to-hex
+           (mongodb--hmac-sha256 signing-key
+                               (mongodb--utf8-bytes string-to-sign)))))
     (format (concat "AWS4-HMAC-SHA256 Credential=%s/%s, "
                     "SignedHeaders=%s, Signature=%s")
-            (mongo--aws-credentials-access-key-id credentials)
+            (mongodb--aws-credentials-access-key-id credentials)
             scope
             signed-headers
             signature)))
 
-(defun mongo--aws-client-first-command (client-nonce)
+(defun mongodb--aws-client-first-command (client-nonce)
   "Return the MONGODB-AWS saslStart command for CLIENT-NONCE."
   `(("saslStart" . 1)
     ("mechanism" . "MONGODB-AWS")
-    ("payload" . ,(mongo-binary
+    ("payload" . ,(mongodb-binary
                    0
-                   (mongo--encode-document
-                    `(("r" . ,(mongo-binary 0 client-nonce))
-                      ("p" . ,(mongo-int32 ?n))))))
+                   (mongodb--encode-document
+                    `(("r" . ,(mongodb-binary 0 client-nonce))
+                      ("p" . ,(mongodb-int32 ?n))))))
     ("autoAuthorize" . 1)))
 
-(defun mongo--aws-server-first (response client-nonce)
+(defun mongodb--aws-server-first (response client-nonce)
   "Return decoded MONGODB-AWS server-first data from RESPONSE."
   (let* ((payload (cdr (assoc "payload" response)))
          (document
           (and payload
-               (mongo--decode-document-from-string
-                (mongo--binary-value-data payload))))
+               (mongodb--decode-document-from-string
+                (mongodb--binary-value-data payload))))
          (server-nonce
           (and document
-               (mongo--binary-value-data
+               (mongodb--binary-value-data
                 (cdr (assoc "s" document)))))
          (host (cdr (assoc "h" document)))
          (conversation-id (cdr (assoc "conversationId" response))))
     (unless conversation-id
-      (signal 'mongo-error
+      (signal 'mongodb-error
               (list "MongoDB MONGODB-AWS server response is missing conversationId")))
     (unless (and server-nonce
                  (= (length server-nonce) 64))
-      (signal 'mongo-error
+      (signal 'mongodb-error
               (list "MongoDB MONGODB-AWS server nonce must be exactly 64 bytes")))
     (unless (string-prefix-p client-nonce server-nonce)
-      (signal 'mongo-error
+      (signal 'mongodb-error
               (list "MongoDB MONGODB-AWS server nonce does not begin with the client nonce")))
-    (mongo--aws-validate-sts-host host)
+    (mongodb--aws-validate-sts-host host)
     (list :server-nonce server-nonce
           :host host
           :conversation-id conversation-id)))
 
-(defun mongo--aws-client-second-command (conversation-id credentials server-first)
+(defun mongodb--aws-client-second-command (conversation-id credentials server-first)
   "Return the MONGODB-AWS saslContinue command."
-  (let* ((amz-date (mongo--aws-date))
+  (let* ((amz-date (mongodb--aws-date))
          (server-nonce (plist-get server-first :server-nonce))
          (host (plist-get server-first :host))
          (authorization
-          (mongo--aws-authorization-header
+          (mongodb--aws-authorization-header
            credentials host server-nonce amz-date))
          (session-token
-          (mongo--aws-credentials-session-token credentials))
+          (mongodb--aws-credentials-session-token credentials))
          (payload
           `(("a" . ,authorization)
             ("d" . ,amz-date)
@@ -1043,44 +1043,44 @@ When EXPLICIT-ONLY is non-nil, do not consult process environment variables."
                 `(("t" . ,session-token))))))
     `(("saslContinue" . 1)
       ("conversationId" . ,conversation-id)
-      ("payload" . ,(mongo-binary
+      ("payload" . ,(mongodb-binary
                      0
-                     (mongo--encode-document payload))))))
+                     (mongodb--encode-document payload))))))
 
-(defun mongo--authenticate-aws (conn credential)
+(defun mongodb--authenticate-aws (conn credential)
   "Authenticate CONN with CREDENTIAL using MONGODB-AWS."
   (condition-case err
-      (let* ((credentials (mongo--aws-credentials credential))
-             (client-nonce (mongo--random-bytes 32))
+      (let* ((credentials (mongodb--aws-credentials credential))
+             (client-nonce (mongodb--random-bytes 32))
              (start-response
-              (mongo-command
+              (mongodb-command
                conn
-               (mongo--credential-source credential)
-               (mongo--aws-client-first-command client-nonce))))
+               (mongodb--credential-source credential)
+               (mongodb--aws-client-first-command client-nonce))))
         (when (eq (cdr (assoc "done" start-response)) t)
-          (signal 'mongo-error
+          (signal 'mongodb-error
                   (list "MongoDB MONGODB-AWS conversation ended before client signature")))
         (let* ((server-first
-                (mongo--aws-server-first start-response client-nonce))
+                (mongodb--aws-server-first start-response client-nonce))
                (conversation-id (plist-get server-first :conversation-id))
                (continue-response
-                (mongo-command
+                (mongodb-command
                  conn
-                 (mongo--credential-source credential)
-                 (mongo--aws-client-second-command
+                 (mongodb--credential-source credential)
+                 (mongodb--aws-client-second-command
                   conversation-id credentials server-first))))
           (unless (eq (cdr (assoc "done" continue-response)) t)
-            (signal 'mongo-error
+            (signal 'mongodb-error
                     (list "MongoDB MONGODB-AWS SASL authentication did not complete")))
           continue-response))
     (error
-     (setf (mongo--credential-aws-cached-credentials credential) nil)
+     (setf (mongodb--credential-aws-cached-credentials credential) nil)
      (signal (car err) (cdr err)))))
 
-(defun mongo--oidc-read-token-file (file)
+(defun mongodb--oidc-read-token-file (file)
   "Return an OIDC access token read from FILE."
-  (unless (mongo--nonempty-string file)
-    (signal 'mongo-error
+  (unless (mongodb--nonempty-string file)
+    (signal 'mongodb-error
             (list "MongoDB MONGODB-OIDC token file path is empty")))
   (condition-case err
       (with-temp-buffer
@@ -1088,32 +1088,32 @@ When EXPLICIT-ONLY is non-nil, do not consult process environment variables."
         (insert-file-contents-literally file)
         (string-trim (decode-coding-string (buffer-string) 'utf-8 t)))
     (error
-     (signal 'mongo-error
+     (signal 'mongodb-error
              (list (format "MongoDB MONGODB-OIDC token file could not be read: %s"
                            (error-message-string err)))))))
 
-(defun mongo--oidc-http-get (url headers)
+(defun mongodb--oidc-http-get (url headers)
   "Return response body for OIDC metadata GET URL with HEADERS."
   (let ((url-request-method "GET")
         (url-request-extra-headers headers)
-        (timeout-seconds (/ mongo--oidc-callback-timeout-ms 1000.0))
+        (timeout-seconds (/ mongodb--oidc-callback-timeout-ms 1000.0))
         buffer)
     (setq buffer
           (url-retrieve-synchronously
            url t t timeout-seconds))
     (unless buffer
-      (signal 'mongo-error
+      (signal 'mongodb-error
               (list (format "MongoDB MONGODB-OIDC metadata request timed out: %s"
                             url))))
     (unwind-protect
         (with-current-buffer buffer
           (goto-char (point-min))
           (unless (looking-at "HTTP/[0-9.]+ \\([0-9][0-9][0-9]\\)")
-            (signal 'mongo-error
+            (signal 'mongodb-error
                     (list "MongoDB MONGODB-OIDC metadata response has no HTTP status")))
           (let ((status (string-to-number (match-string 1))))
             (unless (re-search-forward "\r?\n\r?\n" nil t)
-              (signal 'mongo-error
+              (signal 'mongodb-error
                       (list "MongoDB MONGODB-OIDC metadata response has no body")))
             (let ((body (decode-coding-string
                          (buffer-substring-no-properties
@@ -1121,14 +1121,14 @@ When EXPLICIT-ONLY is non-nil, do not consult process environment variables."
                          'utf-8 t)))
               (unless (and (>= status 200)
                            (< status 300))
-                (signal 'mongo-error
+                (signal 'mongodb-error
                         (list (format "MongoDB MONGODB-OIDC metadata request failed with HTTP %s: %s"
                                       status body))))
               body)))
       (when (buffer-live-p buffer)
         (kill-buffer buffer)))))
 
-(defun mongo--oidc-json-object (body context)
+(defun mongodb--oidc-json-object (body context)
   "Parse BODY as a JSON object for CONTEXT."
   (condition-case err
       (json-parse-string body
@@ -1137,28 +1137,28 @@ When EXPLICIT-ONLY is non-nil, do not consult process environment variables."
                          :null-object nil
                          :false-object :false)
     (json-parse-error
-     (signal 'mongo-error
+     (signal 'mongodb-error
              (list (format "MongoDB MONGODB-OIDC %s returned invalid JSON: %s"
                            context
                            (error-message-string err)))))))
 
-(defun mongo--oidc-json-field (object key)
+(defun mongodb--oidc-json-field (object key)
   "Return KEY from parsed JSON OBJECT."
   (cdr (or (assoc key object)
            (assoc (intern key) object))))
 
-(defun mongo--oidc-resource-query (credential key)
+(defun mongodb--oidc-resource-query (credential key)
   "Return OIDC metadata query parameter KEY for CREDENTIAL's TOKEN_RESOURCE."
   (let ((resource
-         (mongo--oidc-token-resource
-          (mongo--credential-mechanism-properties credential))))
+         (mongodb--oidc-token-resource
+          (mongodb--credential-mechanism-properties credential))))
     (concat key "=" (url-hexify-string resource))))
 
-(defun mongo--oidc-azure-token (credential)
+(defun mongodb--oidc-azure-token (credential)
   "Return an access token from Azure IMDS for CREDENTIAL."
-  (let* ((query (mongo--oidc-resource-query credential "resource"))
-         (username (mongo--nonempty-string
-                    (mongo--credential-username credential)))
+  (let* ((query (mongodb--oidc-resource-query credential "resource"))
+         (username (mongodb--nonempty-string
+                    (mongodb--credential-username credential)))
          (url (concat
                "http://169.254.169.254/metadata/identity/oauth2/token"
                "?api-version=2018-02-01&"
@@ -1166,33 +1166,33 @@ When EXPLICIT-ONLY is non-nil, do not consult process environment variables."
                (when username
                  (concat "&client_id="
                          (url-hexify-string username)))))
-         (body (mongo--oidc-http-get
+         (body (mongodb--oidc-http-get
                 url
                 '(("Accept" . "application/json")
                   ("Metadata" . "true"))))
-         (document (mongo--oidc-json-object body "Azure metadata endpoint"))
-         (token (mongo--oidc-json-field document "access_token")))
-    (unless (mongo--nonempty-string token)
-      (signal 'mongo-error
+         (document (mongodb--oidc-json-object body "Azure metadata endpoint"))
+         (token (mongodb--oidc-json-field document "access_token")))
+    (unless (mongodb--nonempty-string token)
+      (signal 'mongodb-error
               (list "MongoDB MONGODB-OIDC Azure metadata response is missing access_token")))
     token))
 
-(defun mongo--oidc-gcp-token (credential)
+(defun mongodb--oidc-gcp-token (credential)
   "Return an access token from GCP metadata service for CREDENTIAL."
   (let* ((url (concat
                "http://metadata/computeMetadata/v1/instance/"
                "service-accounts/default/identity?"
-               (mongo--oidc-resource-query credential "audience")))
-         (body (mongo--oidc-http-get
+               (mongodb--oidc-resource-query credential "audience")))
+         (body (mongodb--oidc-http-get
                 url
                 '(("Metadata-Flavor" . "Google"))))
          (token (string-trim body)))
-    (unless (mongo--nonempty-string token)
-      (signal 'mongo-error
+    (unless (mongodb--nonempty-string token)
+      (signal 'mongodb-error
               (list "MongoDB MONGODB-OIDC GCP metadata response is empty")))
     token))
 
-(defun mongo--oidc-callback-result-field (result &rest keys)
+(defun mongodb--oidc-callback-result-field (result &rest keys)
   "Return the first field named by KEYS from OIDC callback RESULT."
   (catch 'found
     (dolist (key keys)
@@ -1206,147 +1206,147 @@ When EXPLICIT-ONLY is non-nil, do not consult process environment variables."
         (throw 'found (cdr (assoc key result))))))
     nil))
 
-(defun mongo--oidc-callback-result-access-token (result)
+(defun mongodb--oidc-callback-result-access-token (result)
   "Return an access token from OIDC callback RESULT, or nil."
   (if (stringp result)
       result
-    (mongo--oidc-callback-result-field
+    (mongodb--oidc-callback-result-field
      result :access-token :accessToken 'access-token 'accessToken
      "accessToken" "access_token")))
 
-(defun mongo--oidc-callback-result-refresh-token (result)
+(defun mongodb--oidc-callback-result-refresh-token (result)
   "Return a refresh token from OIDC callback RESULT, or nil."
-  (mongo--oidc-callback-result-field
+  (mongodb--oidc-callback-result-field
    result :refresh-token :refreshToken 'refresh-token 'refreshToken
    "refreshToken" "refresh_token"))
 
-(defun mongo--oidc-callback-token (credential)
+(defun mongodb--oidc-callback-token (credential)
   "Return an OIDC access token from CREDENTIAL's callback."
-  (when-let* ((callback (mongo--credential-oidc-callback credential)))
+  (when-let* ((callback (mongodb--credential-oidc-callback credential)))
     (unless (functionp callback)
-      (signal 'mongo-error
+      (signal 'mongodb-error
               (list "MongoDB MONGODB-OIDC callback must be a function")))
     (let* ((result (funcall callback
-                            (list :timeout-ms mongo--oidc-callback-timeout-ms
+                            (list :timeout-ms mongodb--oidc-callback-timeout-ms
                                   :username
-                                  (mongo--credential-username credential)
+                                  (mongodb--credential-username credential)
                                   :version 1)))
-           (token (mongo--oidc-callback-result-access-token result)))
-      (unless (mongo--nonempty-string token)
-        (signal 'mongo-error
+           (token (mongodb--oidc-callback-result-access-token result)))
+      (unless (mongodb--nonempty-string token)
+        (signal 'mongodb-error
                 (list "MongoDB MONGODB-OIDC callback did not return an access token")))
       token)))
 
-(defun mongo--oidc-human-callback-token (credential idp-info)
+(defun mongodb--oidc-human-callback-token (credential idp-info)
   "Return an OIDC access token from CREDENTIAL's human callback."
-  (let ((callback (mongo--credential-oidc-human-callback credential)))
+  (let ((callback (mongodb--credential-oidc-human-callback credential)))
     (unless (functionp callback)
-      (signal 'mongo-error
+      (signal 'mongodb-error
               (list "MongoDB MONGODB-OIDC human callback must be a function")))
     (let* ((result (funcall callback
-                            (list :timeout-ms mongo--oidc-callback-timeout-ms
+                            (list :timeout-ms mongodb--oidc-callback-timeout-ms
                                   :username
-                                  (mongo--credential-username credential)
+                                  (mongodb--credential-username credential)
                                   :version 1
                                   :idp-info idp-info
                                   :refresh-token
-                                  (mongo--credential-oidc-refresh-token
+                                  (mongodb--credential-oidc-refresh-token
                                    credential))))
-           (token (mongo--oidc-callback-result-access-token result))
+           (token (mongodb--oidc-callback-result-access-token result))
            (refresh-token
-            (mongo--oidc-callback-result-refresh-token result)))
-      (unless (mongo--nonempty-string token)
-        (signal 'mongo-error
+            (mongodb--oidc-callback-result-refresh-token result)))
+      (unless (mongodb--nonempty-string token)
+        (signal 'mongodb-error
                 (list "MongoDB MONGODB-OIDC human callback did not return an access token")))
-      (when (mongo--nonempty-string refresh-token)
-        (setf (mongo--credential-oidc-refresh-token credential)
+      (when (mongodb--nonempty-string refresh-token)
+        (setf (mongodb--credential-oidc-refresh-token credential)
               refresh-token))
       token)))
 
-(defun mongo--oidc-k8s-token-file ()
+(defun mongodb--oidc-k8s-token-file ()
   "Return the Kubernetes OIDC token file path from the standard environment."
-  (or (mongo--nonempty-string (getenv "AZURE_FEDERATED_TOKEN_FILE"))
-      (mongo--nonempty-string (getenv "AWS_WEB_IDENTITY_TOKEN_FILE"))
+  (or (mongodb--nonempty-string (getenv "AZURE_FEDERATED_TOKEN_FILE"))
+      (mongodb--nonempty-string (getenv "AWS_WEB_IDENTITY_TOKEN_FILE"))
       "/var/run/secrets/kubernetes.io/serviceaccount/token"))
 
-(defun mongo--oidc-environment-token (credential)
+(defun mongodb--oidc-environment-token (credential)
   "Return an OIDC access token from CREDENTIAL's ENVIRONMENT, or nil."
   (when-let* ((environment
-               (mongo--oidc-mechanism-environment
-                (mongo--credential-mechanism-properties credential))))
+               (mongodb--oidc-mechanism-environment
+                (mongodb--credential-mechanism-properties credential))))
     (pcase environment
       ("k8s"
-       (mongo--oidc-read-token-file
-        (mongo--oidc-k8s-token-file)))
+       (mongodb--oidc-read-token-file
+        (mongodb--oidc-k8s-token-file)))
       ("test"
-       (mongo--oidc-read-token-file
-        (or (mongo--nonempty-string (getenv "OIDC_TOKEN_FILE"))
-            (signal 'mongo-error
+       (mongodb--oidc-read-token-file
+        (or (mongodb--nonempty-string (getenv "OIDC_TOKEN_FILE"))
+            (signal 'mongodb-error
                     (list "MongoDB MONGODB-OIDC ENVIRONMENT:test requires OIDC_TOKEN_FILE")))))
       ("azure"
-       (mongo--oidc-azure-token credential))
+       (mongodb--oidc-azure-token credential))
       ("gcp"
-       (mongo--oidc-gcp-token credential))
+       (mongodb--oidc-gcp-token credential))
       (_
-       (signal 'mongo-error
+       (signal 'mongodb-error
                (list (format "Unsupported MongoDB MONGODB-OIDC ENVIRONMENT: %s"
                              environment)))))))
 
-(defun mongo--oidc-one-step-token (credential)
+(defun mongodb--oidc-one-step-token (credential)
   "Return an OIDC one-step access token for CREDENTIAL, or nil."
-  (or (mongo--nonempty-string
-       (mongo--credential-oidc-token credential))
-      (when-let* ((file (mongo--credential-oidc-token-file credential)))
-        (mongo--oidc-read-token-file file))
-      (mongo--oidc-environment-token credential)
-      (mongo--oidc-callback-token credential)))
+  (or (mongodb--nonempty-string
+       (mongodb--credential-oidc-token credential))
+      (when-let* ((file (mongodb--credential-oidc-token-file credential)))
+        (mongodb--oidc-read-token-file file))
+      (mongodb--oidc-environment-token credential)
+      (mongodb--oidc-callback-token credential)))
 
-(defun mongo--oidc-token (credential)
+(defun mongodb--oidc-token (credential)
   "Return the OIDC access token for CREDENTIAL."
-  (let ((token (mongo--oidc-one-step-token credential)))
-    (unless (mongo--nonempty-string token)
-      (signal 'mongo-error
+  (let ((token (mongodb--oidc-one-step-token credential)))
+    (unless (mongodb--nonempty-string token)
+      (signal 'mongodb-error
               (list "MongoDB MONGODB-OIDC authentication requires :oidc-token, :oidc-token-file, :oidc-callback, :oidc-human-callback, or ENVIRONMENT:k8s/test/azure/gcp token configuration")))
     token))
 
-(defun mongo--oidc-start-command (token)
+(defun mongodb--oidc-start-command (token)
   "Return a MongoDB MONGODB-OIDC one-step saslStart command for TOKEN."
   `(("saslStart" . 1)
     ("mechanism" . "MONGODB-OIDC")
-    ("payload" . ,(mongo-binary
+    ("payload" . ,(mongodb-binary
                    0
-                   (mongo--encode-document
+                   (mongodb--encode-document
                     `(("jwt" . ,token)))))
     ("autoAuthorize" . 1)))
 
-(defun mongo--oidc-principal-start-command (credential)
+(defun mongodb--oidc-principal-start-command (credential)
   "Return a MONGODB-OIDC two-step saslStart command for CREDENTIAL."
   `(("saslStart" . 1)
     ("mechanism" . "MONGODB-OIDC")
-    ("payload" . ,(mongo-binary
+    ("payload" . ,(mongodb-binary
                    0
-                   (mongo--encode-document
-                    `(,@(when (mongo--credential-username credential)
-                          `(("n" . ,(mongo--credential-username
+                   (mongodb--encode-document
+                    `(,@(when (mongodb--credential-username credential)
+                          `(("n" . ,(mongodb--credential-username
                                       credential))))))))
     ("autoAuthorize" . 1)))
 
-(defun mongo--oidc-continue-command (conversation-id token)
+(defun mongodb--oidc-continue-command (conversation-id token)
   "Return a MONGODB-OIDC saslContinue command for TOKEN."
   `(("saslContinue" . 1)
     ("conversationId" . ,conversation-id)
-    ("payload" . ,(mongo-binary
+    ("payload" . ,(mongodb-binary
                    0
-                   (mongo--encode-document
+                   (mongodb--encode-document
                     `(("jwt" . ,token)))))))
 
-(defun mongo--oidc-response-payload-document (response)
+(defun mongodb--oidc-response-payload-document (response)
   "Return decoded BSON payload document from OIDC RESPONSE."
   (when-let* ((payload (cdr (assoc "payload" response))))
-    (mongo--decode-document-from-string
-     (mongo--binary-value-data payload))))
+    (mongodb--decode-document-from-string
+     (mongodb--binary-value-data payload))))
 
-(defun mongo--oidc-normalize-idp-info (idp-info)
+(defun mongodb--oidc-normalize-idp-info (idp-info)
   "Return IDP-INFO with array fields normalized for callbacks."
   (mapcar
    (lambda (pair)
@@ -1358,26 +1358,26 @@ When EXPLICIT-ONLY is non-nil, do not consult process environment variables."
        pair))
    idp-info))
 
-(defun mongo--oidc-idp-info (credential response)
+(defun mongodb--oidc-idp-info (credential response)
   "Return IdPInfo from OIDC two-step RESPONSE and cache it on CREDENTIAL."
   (let* ((conversation-id (cdr (assoc "conversationId" response)))
-         (raw-idp-info (mongo--oidc-response-payload-document response))
+         (raw-idp-info (mongodb--oidc-response-payload-document response))
          (idp-info (and raw-idp-info
-                        (mongo--oidc-normalize-idp-info raw-idp-info))))
+                        (mongodb--oidc-normalize-idp-info raw-idp-info))))
     (unless conversation-id
-      (signal 'mongo-error
+      (signal 'mongodb-error
               (list "MongoDB MONGODB-OIDC server response is missing conversationId")))
     (unless idp-info
-      (signal 'mongo-error
+      (signal 'mongodb-error
               (list "MongoDB MONGODB-OIDC server response is missing IdPInfo payload")))
     (unless (cdr (assoc "issuer" idp-info))
-      (signal 'mongo-error
+      (signal 'mongodb-error
               (list "MongoDB MONGODB-OIDC IdPInfo is missing issuer")))
-    (setf (mongo--credential-oidc-idp-info credential) idp-info)
+    (setf (mongodb--credential-oidc-idp-info credential) idp-info)
     (list :conversation-id conversation-id
           :idp-info idp-info)))
 
-(defun mongo--oidc-normalize-host (host)
+(defun mongodb--oidc-normalize-host (host)
   "Return HOST normalized for MONGODB-OIDC allowed-host matching."
   (when host
     (let ((normalized (downcase (format "%s" host))))
@@ -1386,10 +1386,10 @@ When EXPLICIT-ONLY is non-nil, do not consult process environment variables."
         (setq normalized (substring normalized 1 -1)))
       (string-remove-suffix "." normalized))))
 
-(defun mongo--oidc-host-matches-allowed-p (host allowed)
+(defun mongodb--oidc-host-matches-allowed-p (host allowed)
   "Return non-nil when HOST matches one ALLOWED host pattern."
-  (let ((host (mongo--oidc-normalize-host host))
-        (allowed (mongo--oidc-normalize-host allowed)))
+  (let ((host (mongodb--oidc-normalize-host host))
+        (allowed (mongodb--oidc-normalize-host allowed)))
     (cond
      ((not (and host allowed)) nil)
      ((string-prefix-p "*." allowed)
@@ -1399,118 +1399,118 @@ When EXPLICIT-ONLY is non-nil, do not consult process environment variables."
      (t
       (equal host allowed)))))
 
-(defun mongo--oidc-allowed-host-p (host allowed-hosts)
+(defun mongodb--oidc-allowed-host-p (host allowed-hosts)
   "Return non-nil when HOST is allowed for a human OIDC callback."
   (seq-some (lambda (allowed)
-              (mongo--oidc-host-matches-allowed-p host allowed))
-            (or allowed-hosts mongo--oidc-default-allowed-hosts)))
+              (mongodb--oidc-host-matches-allowed-p host allowed))
+            (or allowed-hosts mongodb--oidc-default-allowed-hosts)))
 
-(defun mongo--validate-oidc-human-callback-host (conn credential)
+(defun mongodb--validate-oidc-human-callback-host (conn credential)
   "Validate CONN host before invoking CREDENTIAL's human OIDC callback."
-  (when (mongo-conn-p conn)
-    (let ((host (mongo-conn-host conn)))
-      (unless (mongo--oidc-allowed-host-p
+  (when (mongodb-conn-p conn)
+    (let ((host (mongodb-conn-host conn)))
+      (unless (mongodb--oidc-allowed-host-p
                host
-               (mongo--credential-oidc-allowed-hosts credential))
-        (signal 'mongo-error
+               (mongodb--credential-oidc-allowed-hosts credential))
+        (signal 'mongodb-error
                 (list (format "MongoDB MONGODB-OIDC human callback is not allowed for host %s; configure :oidc-allowed-hosts if this host is expected"
                               (or host "<unknown>"))))))))
 
-(defun mongo--authenticate-oidc-two-step (conn credential)
+(defun mongodb--authenticate-oidc-two-step (conn credential)
   "Authenticate CONN with CREDENTIAL using two-step MONGODB-OIDC."
   (let* ((start-response
-          (mongo-command
+          (mongodb-command
            conn
-           (mongo--credential-source credential)
-           (mongo--oidc-principal-start-command credential)))
-         (server-first (mongo--oidc-idp-info credential start-response))
+           (mongodb--credential-source credential)
+           (mongodb--oidc-principal-start-command credential)))
+         (server-first (mongodb--oidc-idp-info credential start-response))
          (conversation-id (plist-get server-first :conversation-id))
          (idp-info (plist-get server-first :idp-info))
-         (token (mongo--oidc-human-callback-token credential idp-info))
+         (token (mongodb--oidc-human-callback-token credential idp-info))
          (continue-response
-          (mongo-command
+          (mongodb-command
            conn
-           (mongo--credential-source credential)
-           (mongo--oidc-continue-command conversation-id token))))
+           (mongodb--credential-source credential)
+           (mongodb--oidc-continue-command conversation-id token))))
     (unless (eq (cdr (assoc "done" continue-response)) t)
-      (signal 'mongo-error
+      (signal 'mongodb-error
               (list "MongoDB MONGODB-OIDC two-step conversation did not complete")))
     continue-response))
 
-(defun mongo--authenticate-oidc (conn credential)
+(defun mongodb--authenticate-oidc (conn credential)
   "Authenticate CONN with CREDENTIAL using MONGODB-OIDC."
-  (if-let* ((token (mongo--oidc-one-step-token credential)))
+  (if-let* ((token (mongodb--oidc-one-step-token credential)))
       (let ((response
-             (mongo-command
+             (mongodb-command
               conn
-              (mongo--credential-source credential)
-              (mongo--oidc-start-command token))))
+              (mongodb--credential-source credential)
+              (mongodb--oidc-start-command token))))
         (unless (eq (cdr (assoc "done" response)) t)
-          (signal 'mongo-error
+          (signal 'mongodb-error
                   (list "MongoDB MONGODB-OIDC one-step conversation did not complete")))
         response)
-    (if (mongo--credential-oidc-human-callback credential)
+    (if (mongodb--credential-oidc-human-callback credential)
         (progn
-          (mongo--validate-oidc-human-callback-host conn credential)
-          (mongo--authenticate-oidc-two-step conn credential))
-      (mongo--oidc-token credential))))
+          (mongodb--validate-oidc-human-callback-host conn credential)
+          (mongodb--authenticate-oidc-two-step conn credential))
+      (mongodb--oidc-token credential))))
 
-(defun mongo--plain-payload (credential)
+(defun mongodb--plain-payload (credential)
   "Return the SASL PLAIN payload for CREDENTIAL."
-  (mongo--utf8-bytes
+  (mongodb--utf8-bytes
    (concat "\0"
-           (mongo--credential-username credential)
+           (mongodb--credential-username credential)
            "\0"
-           (mongo--credential-password credential))))
+           (mongodb--credential-password credential))))
 
-(defun mongo--plain-start-command (credential)
+(defun mongodb--plain-start-command (credential)
   "Return a MongoDB saslStart command for PLAIN CREDENTIAL."
   `(("saslStart" . 1)
     ("mechanism" . "PLAIN")
-    ("payload" . ,(mongo-binary 0 (mongo--plain-payload credential)))
+    ("payload" . ,(mongodb-binary 0 (mongodb--plain-payload credential)))
     ("autoAuthorize" . 1)))
 
-(defun mongo--authenticate-plain (conn credential)
+(defun mongodb--authenticate-plain (conn credential)
   "Authenticate CONN with CREDENTIAL using PLAIN SASL."
   (let ((response
-         (mongo-command
+         (mongodb-command
           conn
-          (mongo--credential-source credential)
-          (mongo--plain-start-command credential))))
+          (mongodb--credential-source credential)
+          (mongodb--plain-start-command credential))))
     (unless (eq (cdr (assoc "done" response)) t)
-      (signal 'mongo-error
+      (signal 'mongodb-error
               (list "MongoDB PLAIN SASL authentication did not complete")))
     response))
 
-(defun mongo--authenticate (conn credential hello &optional speculative-auth)
+(defun mongodb--authenticate (conn credential hello &optional speculative-auth)
   "Authenticate CONN with CREDENTIAL using data from HELLO.
 SPECULATIVE-AUTH is the SCRAM start data sent in the initial handshake."
   (let ((speculative-response (cdr (assoc "speculativeAuthenticate" hello))))
     (if (and speculative-auth
              speculative-response
              (assoc "payload" speculative-response))
-        (mongo--authenticate-scram
+        (mongodb--authenticate-scram
          conn credential
          (plist-get speculative-auth :mechanism)
          speculative-auth speculative-response)
-      (pcase (mongo--choose-auth-mechanism credential hello)
+      (pcase (mongodb--choose-auth-mechanism credential hello)
         ("SCRAM-SHA-256"
-         (mongo--authenticate-scram-sha256 conn credential))
+         (mongodb--authenticate-scram-sha256 conn credential))
         ("SCRAM-SHA-1"
-         (mongo--authenticate-scram-sha1 conn credential))
+         (mongodb--authenticate-scram-sha1 conn credential))
         ("MONGODB-X509"
-         (mongo--authenticate-x509 conn credential))
+         (mongodb--authenticate-x509 conn credential))
         ("PLAIN"
-         (mongo--authenticate-plain conn credential))
+         (mongodb--authenticate-plain conn credential))
         ("MONGODB-AWS"
-         (mongo--authenticate-aws conn credential))
+         (mongodb--authenticate-aws conn credential))
         ("MONGODB-OIDC"
-         (mongo--authenticate-oidc conn credential))
+         (mongodb--authenticate-oidc conn credential))
         (mechanism
-         (signal 'mongo-error
+         (signal 'mongodb-error
                  (list (format "Unsupported MongoDB auth mechanism: %s"
                                mechanism))))))))
 
-(provide 'mongo-auth)
+(provide 'mongodb-auth)
 
-;;; mongo-auth.el ends here
+;;; mongodb-auth.el ends here

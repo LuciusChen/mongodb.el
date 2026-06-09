@@ -1,30 +1,30 @@
-#+TITLE: mongo.el Native Client Guide
+#+TITLE: mongodb.el Native Client Guide
 
 * Overview
 
-=mongo.el= is a native MongoDB protocol client.  It opens sockets to =mongod=
+=mongodb.el= is a native MongoDB protocol client.  It opens sockets to =mongod=
 or =mongos=, performs the MongoDB handshake, encodes command documents as BSON,
 and sends modern =OP_MSG= frames.
 
 It intentionally does not evaluate MongoDB Shell JavaScript.  Callers provide
-MongoDB command documents or use the small helper APIs such as =mongo-find=,
-=mongo-aggregate=, =mongo-insert=, =mongo-update=, =mongo-delete=, and
-=mongo-bulk-write=.
+MongoDB command documents or use the small helper APIs such as =mongodb-find=,
+=mongodb-aggregate=, =mongodb-insert=, =mongodb-update=, =mongodb-delete=, and
+=mongodb-bulk-write=.
 
 * Module Layout
 
-=mongo.el= is the package entry point loaded by =(require 'mongo)=.
-=mongo-bson.el= owns BSON wrappers, BSON encode/decode, low-level byte
+=mongodb.el= is the package entry point loaded by =(require 'mongodb)=.
+=mongodb-bson.el= owns BSON wrappers, BSON encode/decode, low-level byte
 primitives, checksums, and cryptographic byte helpers used by auth and wire
-framing.  =mongo-wire.el= owns OP_MSG, OP_COMPRESSED, legacy OP_REPLY frame
+framing.  =mongodb-wire.el= owns OP_MSG, OP_COMPRESSED, legacy OP_REPLY frame
 handling, snappy/zlib/zstd wire compression helpers, and responseTo validation;
-zstd uses the optional =mongo-zstd-program= executable.
-=mongo-params.el= owns URI parsing, SRV DNS resolution, connection params
+zstd uses the optional =mongodb-zstd-program= executable.
+=mongodb-params.el= owns URI parsing, SRV DNS resolution, connection params
 normalization, TLS params, credentials, read/write concern, server API, and
-pool option helpers.  =mongo-auth.el= owns native SCRAM, X.509, PLAIN,
+pool option helpers.  =mongodb-auth.el= owns native SCRAM, X.509, PLAIN,
 MONGODB-AWS, and MONGODB-OIDC authentication plus ObjectId/session id byte
 helpers.  Connection-state transport, command execution, server selection,
-sessions, transactions, and pooling are assembled by =mongo.el=.
+sessions, transactions, and pooling are assembled by =mongodb.el=.
 
 Caller UI syntax, MongoDB Shell helper parsing, SQL-to-MQL translation, and SQL
 Interface JDBC routing stay outside this repository.
@@ -42,14 +42,14 @@ client-level =bulkWrite=.  Pool helpers enforce =minPoolSize=, =maxPoolSize=,
 =maxIdleTimeMS=, =waitQueueTimeoutMS=, and =maxConnecting= accounting on
 checkout.  A ready pool is populated until =minPoolSize= is satisfied; checkout
 and ready paths also refill the pool after idle/dead connections are pruned.
-=mongo-pool-clear= implements basic generation-based clearing:
+=mongodb-pool-clear= implements basic generation-based clearing:
 available connections are closed immediately, and checked-out connections from
 older generations are closed when released.  Clearing pauses the pool until
-=mongo-pool-ready= is called.  Manually opened pools start ready; callers that
-want SDAM-style background recovery can opt into =mongo-pool-start-monitor= for
+=mongodb-pool-ready= is called.  Manually opened pools start ready; callers that
+want SDAM-style background recovery can opt into =mongodb-pool-start-monitor= for
 non-load-balanced pools.  Load-balanced pools do not open dedicated monitor
 connections.
-Callers may pass non-nil =interrupt-in-use-connections= to =mongo-pool-clear=
+Callers may pass non-nil =interrupt-in-use-connections= to =mongodb-pool-clear=
 to close affected checked-out connections immediately; the pool-cleared event
 then includes =interrupt-in-use-connections=.
 Clearing an already paused non-load-balanced pool advances the generation
@@ -61,10 +61,10 @@ Checkout attempts waiting for a connection are evicted when the pool is cleared
 and receive a =connection-check-out-failed= event with =reason=
 =connection-error= instead of waiting for =waitQueueTimeoutMS=.  Checkout
 attempts against a paused or cleared pool signal a retryable
-=mongo-error= with =RetryableError=.  As in the MongoDB connection string
+=mongodb-error= with =RetryableError=.  As in the MongoDB connection string
 specification, =waitQueueTimeoutMS= 0 means the wait queue has no configured
 deadline; callers that need an immediate or shorter bound can pass the optional
-=timeout= argument to =mongo-pool-checkout=.  The optional checkout purpose
+=timeout= argument to =mongodb-pool-checkout=.  The optional checkout purpose
 argument accepts =cursor=, =transaction=, or =other=; load-balanced wait queue
 timeouts include the configured =maxPoolSize= and checked-out counts for those
 three categories.
@@ -77,16 +77,16 @@ After a checked-out pooled connection fails during command execution, non-timeou
 network errors clear the pool generation.  In load-balanced mode, only the
 failing connection's =serviceId= generation is cleared and the pool remains
 available for other serviceIds.  Command response timeouts do not clear the
-pool.  =mongo-pool-cursor-results= and =mongo-pool-find= keep one connection
+pool.  =mongodb-pool-cursor-results= and =mongodb-pool-find= keep one connection
 checked out for the initial cursor command, getMore, and killCursors.  This is
 required for load-balanced cursors, where getMore must stay on the same socket;
 after a load-balanced getMore network error, the helper does not issue
 killCursors on the failed pinned connection.
-When a load-balanced =serviceId= is supplied to =mongo-pool-clear=, only
+When a load-balanced =serviceId= is supplied to =mongodb-pool-clear=, only
 connections for that serviceId are cleared and the pool is not paused.  Basic
 CMAP-style lifecycle, checkout, checkin, clear, close, connection-created,
 connection-ready, and connection-closed events are exposed through
-=mongo-pool-event-hook= as alists.  Connection events include monotonically
+=mongodb-pool-event-hook= as alists.  Connection events include monotonically
 increasing =connection-id= values; pool-created events include non-default
 pool options, and URI credentials are not included in event addresses.  Close
 events include =reason= values such as =stale=, =idle=, =error=, and
@@ -99,22 +99,22 @@ checked-out connections remain associated with the pool and are closed with
 =reason= =pool-closed= when released.  Connection-ready, checked-out, and
 checkout-failed events include =duration-ms=.
 
-Basic command monitoring events are exposed through =mongo-command-event-hook=
+Basic command monitoring events are exposed through =mongodb-command-event-hook=
 as alists with =command-started=, =command-succeeded=, and =command-failed=
 types.  Events include the command name, database name, request id, connection
 address, and duration for terminal events; load-balanced command events include
-=service-id=.  Commands run through =mongo-pool-command= and pooled cursor
+=service-id=.  Commands run through =mongodb-pool-command= and pooled cursor
 helpers also include the pool's driver-generated =driver-connection-id=.
 Started events expose OP_MSG document sequences as command array fields.  Split
-=mongo-bulk-write= command events share an =operation-id=.  Sensitive auth and
+=mongodb-bulk-write= command events share an =operation-id=.  Sensitive auth and
 user-management command/reply fields are emitted as empty documents; sensitive
 server error replies retain only =code=, =codeName=, and =errorLabels=.
 Unacknowledged writes use OP_MSG =moreToCome= with =writeConcern= =w:0= and
 emit a =command-succeeded= event with =(("ok" . 1))= without waiting for a
 server reply; =w:0= with =j:true= remains acknowledged.
 
-SDAM heartbeat monitoring events are exposed through =mongo-sdam-event-hook=.
-=mongo-monitor-once= emits paired =server-heartbeat-started= and
+SDAM heartbeat monitoring events are exposed through =mongodb-sdam-event-hook=.
+=mongodb-monitor-once= emits paired =server-heartbeat-started= and
 =server-heartbeat-succeeded= / =server-heartbeat-failed= events for
 non-load-balanced monitor heartbeats.  Events include =connection-id=,
 =address=, and =awaited=; terminal events also include =duration-ms= and
@@ -129,8 +129,8 @@ SDAM server/topology description changes.  RTT-only and last-update-time-only
 refreshes do not emit description-changed events.
 
 Callers that consume topology descriptions can test SDAM availability with
-=mongo-topology-description-has-readable-server-p= and
-=mongo-topology-description-has-writable-server-p=.  The readable predicate
+=mongodb-topology-description-has-readable-server-p= and
+=mongodb-topology-description-has-writable-server-p=.  The readable predicate
 accepts the same read preference values used by command options and applies
 read preference mode, tag, and maxStalenessSeconds constraints.
 
@@ -140,7 +140,7 @@ MONGODB-OIDC.  Native auth sends MongoDB commands and SASL payloads directly;
 it does not use a JDBC driver, =mongosh=, or JavaScript evaluation.
 
 URI options are validated instead of silently ignored.  Unsupported protocol
-features should fail with a clear =mongo-error= and should be documented here
+features should fail with a clear =mongodb-error= and should be documented here
 or in =README.org= when the boundary is user-visible.
 
 * Connections
@@ -148,7 +148,7 @@ or in =README.org= when the boundary is user-visible.
 Basic connection:
 
 #+begin_src emacs-lisp
-(setq conn (mongo-connect '(:host "127.0.0.1"
+(setq conn (mongodb-connect '(:host "127.0.0.1"
                             :port 27017
                             :database "app")))
 #+end_src
@@ -156,36 +156,36 @@ Basic connection:
 URI connection:
 
 #+begin_src emacs-lisp
-(setq conn (mongo-connect '(:url "mongodb://127.0.0.1:27017/app")))
+(setq conn (mongodb-connect '(:url "mongodb://127.0.0.1:27017/app")))
 #+end_src
 
 Replica-set seed list:
 
 #+begin_src emacs-lisp
-(mongo-connect
+(mongodb-connect
  '(:url "mongodb://db1.example.test,db2.example.test/app?replicaSet=rs0"))
 #+end_src
 
 SRV seed list:
 
 #+begin_src emacs-lisp
-(mongo-connect
+(mongodb-connect
  '(:url "mongodb+srv://cluster.example.test/app"))
 #+end_src
 
 UNIX-domain socket:
 
 #+begin_src emacs-lisp
-(mongo-connect
+(mongodb-connect
  '(:url "mongodb://%2Ftmp%2Fmongodb-27017.sock/app"))
 #+end_src
 
 * Command Helpers
 
-=mongo-command= sends a command document to a database:
+=mongodb-command= sends a command document to a database:
 
 #+begin_src emacs-lisp
-(mongo-command conn "admin" '(("listDatabases" . 1)))
+(mongodb-command conn "admin" '(("listDatabases" . 1)))
 #+end_src
 
 This is a generic RunCommand-style helper.  It does not automatically apply
@@ -193,44 +193,44 @@ connection-level =readConcern= or =writeConcern= to raw command documents, and
 it does not parse =ok:1= =writeErrors= or =writeConcernError= replies into
 signals.  Callers that need those fields on raw commands should include them in
 the command document explicitly.  Collection and database helpers such as
-=mongo-find=, =mongo-insert=, =mongo-update=, =mongo-aggregate=,
-=mongo-create-index=, and =mongo-drop-collection= keep driver helper semantics:
+=mongodb-find=, =mongodb-insert=, =mongodb-update=, =mongodb-aggregate=,
+=mongodb-create-index=, and =mongodb-drop-collection= keep driver helper semantics:
 they apply configured concerns for supported operations and surface write
-errors as =mongo-error=.
+errors as =mongodb-error=.
 
 Subscribe to command monitoring events when callers need request-id correlation
 or load-balanced service tracking:
 
 #+begin_src emacs-lisp
-(let ((mongo-command-event-hook
+(let ((mongodb-command-event-hook
        (list (lambda (event)
                (message "MongoDB %s %s request=%s"
                         (alist-get 'type event)
                         (alist-get 'command-name event)
                         (alist-get 'request-id event))))))
-  (mongo-command conn "admin" '(("ping" . 1))))
+  (mongodb-command conn "admin" '(("ping" . 1))))
 #+end_src
 
-=mongo-find= returns all cursor results:
+=mongodb-find= returns all cursor results:
 
 #+begin_src emacs-lisp
-(mongo-find conn "app" "users" '(("active" . t)))
+(mongodb-find conn "app" "users" '(("active" . t)))
 #+end_src
 
-Use =mongo-pool-find=, or the lower-level =mongo-pool-cursor-results= helper,
+Use =mongodb-pool-find=, or the lower-level =mongodb-pool-cursor-results= helper,
 when draining cursor results from a pool:
 
 #+begin_src emacs-lisp
-(let ((pool (mongo-pool-open '(:url "mongodb://127.0.0.1:27017/app"))))
+(let ((pool (mongodb-pool-open '(:url "mongodb://127.0.0.1:27017/app"))))
   (unwind-protect
-      (mongo-pool-find pool "app" "users" '(("active" . t)))
-    (mongo-pool-disconnect pool)))
+      (mongodb-pool-find pool "app" "users" '(("active" . t)))
+    (mongodb-pool-disconnect pool)))
 #+end_src
 
-=mongo-aggregate= accepts a vector pipeline:
+=mongodb-aggregate= accepts a vector pipeline:
 
 #+begin_src emacs-lisp
-(mongo-aggregate
+(mongodb-aggregate
  conn "app" "orders"
  [(("$match" . (("status" . "paid"))))
   (("$group" . (("_id" . "$userId")
@@ -240,7 +240,7 @@ when draining cursor results from a pool:
 Client-level =bulkWrite= sends the MongoDB 8.0 =bulkWrite= command to =admin=:
 
 #+begin_src emacs-lisp
-(mongo-bulk-write
+(mongodb-bulk-write
  conn
  '((("insert" . "app.users")
     ("document" . (("name" . "Ann"))))
@@ -255,28 +255,28 @@ Client-level =bulkWrite= sends the MongoDB 8.0 =bulkWrite= command to =admin=:
 Plain Elisp values map to common BSON values.  Use wrappers for explicit wire
 types:
 
-- =mongo-object-id= and =mongo-new-object-id=
-- =mongo-datetime=
-- =mongo-timestamp=
-- =mongo-int32= and =mongo-int64=
-- =mongo-decimal128=
-- =mongo-binary= and =mongo-uuid=
-- =mongo-regex=
-- =mongo-min-key= and =mongo-max-key=
+- =mongodb-object-id= and =mongodb-new-object-id=
+- =mongodb-datetime=
+- =mongodb-timestamp=
+- =mongodb-int32= and =mongodb-int64=
+- =mongodb-decimal128=
+- =mongodb-binary= and =mongodb-uuid=
+- =mongodb-regex=
+- =mongodb-min-key= and =mongodb-max-key=
 
-Public helper APIs for caller adapters include =mongo-document-value-p=,
-=mongo-document-elements=, =mongo-byte-string=, =mongo-bytes-to-hex=,
-=mongo-response-ok-p=, and =mongo-extended-json-to-bson-value=.  Callers should
-not use private =mongo--*= helpers.
+Public helper APIs for caller adapters include =mongodb-document-value-p=,
+=mongodb-document-elements=, =mongodb-byte-string=, =mongodb-bytes-to-hex=,
+=mongodb-response-ok-p=, and =mongodb-extended-json-to-bson-value=.  Callers should
+not use private =mongodb--*= helpers.
 
 * Transactions
 
 The transaction helpers are:
 
-- =mongo-start-transaction=
-- =mongo-commit-transaction=
-- =mongo-abort-transaction=
-- =mongo-in-transaction-p=
+- =mongodb-start-transaction=
+- =mongodb-commit-transaction=
+- =mongodb-abort-transaction=
+- =mongodb-in-transaction-p=
 
 Transactions require logical session support.  Load-balanced connections always
 support sessions, matching MongoDB's load balancer rules, even when hello omits
@@ -284,7 +284,7 @@ support sessions, matching MongoDB's load balancer rules, even when hello omits
 servers that support logical sessions, with the same load-balanced exception.
 Commands inside a transaction carry =lsid=, =txnNumber=, and =autocommit:
 false=.  Commit retries follow MongoDB's retryable commit behavior and expose
-error labels through =mongo-error-has-label-p=.
+error labels through =mongodb-error-has-label-p=.
 
 * Scope Boundaries
 
@@ -294,8 +294,8 @@ non-JDBC SQL translation belong in the caller application.
 
 If SQL support is needed without JDBC, build it as a separate layer that parses
 SQL and emits MongoDB commands or aggregation pipelines through public
-=mongo-*= APIs.  Do not add a SQL parser, relational planner, BI Connector /
-=mongosqld= client, or SQL query console to =mongo.el= core.
+=mongodb-*= APIs.  Do not add a SQL parser, relational planner, BI Connector /
+=mongosqld= client, or SQL query console to =mongodb.el= core.
 
 Current gaps include complete SDAM/CMAP/command event and waitQueue spec-suite
 parity, CSFLE, and full MongoDB specification-suite parity.

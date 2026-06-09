@@ -1,6 +1,6 @@
-#+TITLE: mongo.el
+#+TITLE: mongodb.el
 
-=mongo.el= is a native MongoDB wire protocol client for Emacs Lisp.
+=mongodb.el= is a native MongoDB wire protocol client for Emacs Lisp.
 
 It speaks modern MongoDB =OP_MSG= directly and encodes/decodes BSON in Emacs
 Lisp.  It is a command-level driver, not a JavaScript evaluator and not a JDBC
@@ -18,7 +18,7 @@ Implemented areas include:
 - SCRAM-SHA-256, SCRAM-SHA-1, X.509, PLAIN, AWS, and one-step OIDC auth
 - OP_MSG command helpers, =moreToCome= unacknowledged writes, cursors,
   getMore, killCursors, and compression (=snappy=, =zlib=, and optional =zstd=
-  via =mongo-zstd-program=)
+  via =mongodb-zstd-program=)
 - read preference, read concern, write concern, Stable API, sessions including
   load-balanced session support, retryable reads/writes, transaction helpers,
   and client-level =bulkWrite=
@@ -26,11 +26,11 @@ Implemented areas include:
   connection paths
 - connection pool helpers with =minPoolSize=, =maxPoolSize=,
   =maxIdleTimeMS=, =waitQueueTimeoutMS=, =maxConnecting= accounting, and basic
-  generation-based pool clearing via =mongo-pool-clear= / =mongo-pool-ready=,
+  generation-based pool clearing via =mongodb-pool-clear= / =mongodb-pool-ready=,
   including ready/checkout maintenance of =minPoolSize=, load-balanced
   per-=serviceId= clearing, optional interruption of checked-out connections,
   and connection-count accounting;
-  =mongo-pool-start-monitor= can run SDAM-style heartbeats for
+  =mongodb-pool-start-monitor= can run SDAM-style heartbeats for
   non-load-balanced pools that clear unhealthy pools and mark cleared pools
   ready again; load-balanced pools do not open dedicated monitor connections.
   Waiting checkouts are evicted on pool clear with =RetryableError=,
@@ -42,22 +42,22 @@ Implemented areas include:
   other operation counts;
   pooled cursor helpers keep the same checked-out connection for the initial
   cursor command, getMore, and killCursors, including load-balanced cursors;
-  basic CMAP-style events are exposed via =mongo-pool-event-hook=, including
+  basic CMAP-style events are exposed via =mongodb-pool-event-hook=, including
   sanitized pool addresses, non-default pool-created options, Lisp symbol
   =reason= values, CMAP string =reason-string= values, and load-balanced
   =service-id= only where applicable
-- basic command monitoring events via =mongo-command-event-hook=, including
+- basic command monitoring events via =mongodb-command-event-hook=, including
   request id correlation, command duration, OP_MSG document sequence exposure,
   bulkWrite =operation-id= correlation, sensitive command redaction, and
   pooled =driver-connection-id= / load-balanced =serviceId= on command events
-- SDAM heartbeat monitoring events via =mongo-sdam-event-hook=, including
+- SDAM heartbeat monitoring events via =mongodb-sdam-event-hook=, including
   paired =server-heartbeat-started= / =server-heartbeat-succeeded= /
   =server-heartbeat-failed= events, topology/server opening/closed lifecycle
   events, plus =server-description-changed= and
   =topology-description-changed= events for monitored topology state changes
 - SDAM topology availability predicates:
-  =mongo-topology-description-has-readable-server-p= and
-  =mongo-topology-description-has-writable-server-p=
+  =mongodb-topology-description-has-readable-server-p= and
+  =mongodb-topology-description-has-writable-server-p=
 
 Known incomplete areas include complete SDAM/CMAP/command event and waitQueue
 spec-suite parity, client-side field level encryption, and full MongoDB
@@ -66,80 +66,80 @@ upstream specification-suite parity.
 * Usage
 
 #+begin_src emacs-lisp
-(require 'mongo)
+(require 'mongodb)
 
-(let ((conn (mongo-connect '(:url "mongodb://127.0.0.1:27017/app"))))
+(let ((conn (mongodb-connect '(:url "mongodb://127.0.0.1:27017/app"))))
   (unwind-protect
-      (mongo-find conn "app" "users" '(("active" . t)))
-    (mongo-disconnect conn)))
+      (mongodb-find conn "app" "users" '(("active" . t)))
+    (mongodb-disconnect conn)))
 #+end_src
 
-Run arbitrary command documents with =mongo-command=:
+Run arbitrary command documents with =mongodb-command=:
 
 #+begin_src emacs-lisp
-(mongo-command conn "admin" '(("ping" . 1)))
+(mongodb-command conn "admin" '(("ping" . 1)))
 #+end_src
 
-=mongo-command= is the generic RunCommand surface: it does not inherit
+=mongodb-command= is the generic RunCommand surface: it does not inherit
 connection-level =readConcern= or =writeConcern=, and it returns =ok:1=
 =writeErrors= / =writeConcernError= replies as ordinary response documents.
 Include those fields explicitly when using a raw command.  Typed helpers such as
-=mongo-find=, =mongo-insert=, =mongo-update=, and =mongo-create-index= keep the
+=mongodb-find=, =mongodb-insert=, =mongodb-update=, and =mongodb-create-index= keep the
 driver helper behavior and apply configured concerns where supported.
 
 Use explicit BSON wrappers when the wire type matters:
 
 #+begin_src emacs-lisp
-(mongo-insert conn "app" "events"
-              (list (list (cons "_id" (mongo-new-object-id))
-                          (cons "createdAt" (mongo-datetime 1704164645678))
-                          (cons "counter" (mongo-int64 9223372036854775807)))))
+(mongodb-insert conn "app" "events"
+              (list (list (cons "_id" (mongodb-new-object-id))
+                          (cons "createdAt" (mongodb-datetime 1704164645678))
+                          (cons "counter" (mongodb-int64 9223372036854775807)))))
 #+end_src
 
 * SQL and Query Surfaces
 
-=mongo.el= does not implement SQL.  MongoDB's native wire protocol accepts
+=mongodb.el= does not implement SQL.  MongoDB's native wire protocol accepts
 MongoDB command documents, not SQL text.
 
 A non-JDBC SQL layer can still be built on top of this package, but it should
 be a separate caller-facing package or application surface.  That layer would
 parse SQL, map the supported subset to MongoDB commands or aggregation
-pipelines, then call public APIs such as =mongo-command=, =mongo-find=, and
-=mongo-aggregate=.  It should not add a SQL parser, relational planner, JDBC
+pipelines, then call public APIs such as =mongodb-command=, =mongodb-find=, and
+=mongodb-aggregate=.  It should not add a SQL parser, relational planner, JDBC
 driver, ODBC bridge, =mongosqld= client, or GUI/query-console code to
-=mongo.el= core.
+=mongodb.el= core.
 
 * Tests
 
 Run unit tests from this repository:
 
 #+begin_src sh
-emacs -Q --batch -L . -l ert -l test/mongo-test.el \
+emacs -Q --batch -L . -l ert -l test/mongodb-test.el \
   --eval '(ert-run-tests-batch-and-exit)'
 #+end_src
 
 Byte-compile:
 
 #+begin_src sh
-emacs -Q --batch -L . -f batch-byte-compile mongo*.el test/mongo-test.el
+emacs -Q --batch -L . -f batch-byte-compile mongodb*.el test/mongodb-test.el
 #+end_src
 
 * Module Layout
 
-=mongo.el= remains the public entry point.  Implementation modules are split by
+=mongodb.el= remains the public entry point.  Implementation modules are split by
 stable protocol responsibility:
 
-- =mongo-bson.el= contains BSON value wrappers, BSON encode/decode, byte
+- =mongodb-bson.el= contains BSON value wrappers, BSON encode/decode, byte
   primitives, checksums, and cryptographic byte helpers.
-- =mongo-wire.el= contains OP_MSG, OP_COMPRESSED, legacy OP_REPLY frame
+- =mongodb-wire.el= contains OP_MSG, OP_COMPRESSED, legacy OP_REPLY frame
   encoding/decoding, snappy/zlib/zstd wire compression helpers, and responseTo
-  validation.  zstd uses the optional =mongo-zstd-program= executable.
-- =mongo-params.el= contains URI parsing, SRV DNS resolution, connection
+  validation.  zstd uses the optional =mongodb-zstd-program= executable.
+- =mongodb-params.el= contains URI parsing, SRV DNS resolution, connection
   params normalization, TLS params, credentials, read/write concern, server API,
   and pool option helpers.
-- =mongo-auth.el= contains native SCRAM, X.509, PLAIN, MONGODB-AWS, and
+- =mongodb-auth.el= contains native SCRAM, X.509, PLAIN, MONGODB-AWS, and
   MONGODB-OIDC authentication plus ObjectId/session id byte helpers.
-- =mongo.el= assembles the client, including connection-state transport
+- =mongodb.el= assembles the client, including connection-state transport
   send/receive glue, command helpers, server selection, transactions, pooling,
   and lifecycle management.
 
