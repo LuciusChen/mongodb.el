@@ -106,6 +106,15 @@ events include `operation-id'; load-balanced events include `service-id'."
   :type 'hook
   :group 'mongo)
 
+(defcustom mongo-sdam-event-hook nil
+  "Abnormal hook run with one argument for MongoDB SDAM events.
+Each EVENT is an alist with at least `type', `connection-id', `address', and
+`awaited' entries.  Heartbeat event types are `server-heartbeat-started',
+`server-heartbeat-succeeded', and `server-heartbeat-failed'.  Terminal
+heartbeat events include `duration-ms' and either `reply' or `failure'."
+  :type 'hook
+  :group 'mongo)
+
 (defcustom mongo-tls-verify-server t
   "Non-nil means verify MongoDB TLS certificates and hostnames by default."
   :type 'boolean
@@ -1122,8 +1131,35 @@ document, matching MongoDB command monitoring semantics."
                    (cons 'duration-ms
                          (mongo--command-event-duration-ms))
                    (cons 'reply
-                         (mongo--redact-command-event-document
-                          reply sensitive))))))))))
+                          (mongo--redact-command-event-document
+                           reply sensitive))))))))))
+
+(defun mongo--emit-sdam-event (type &rest fields)
+  "Emit MongoDB SDAM monitoring event TYPE with FIELDS."
+  (when mongo-sdam-event-hook
+    (let ((event `((type . ,type)
+                   ,@fields)))
+      (run-hook-with-args 'mongo-sdam-event-hook event)
+      event)))
+
+(defun mongo--sdam-heartbeat-event-fields (conn awaited)
+  "Return common SDAM heartbeat event fields for CONN."
+  (let* ((address (mongo--conn-address conn))
+         (fields `((connection . ,conn)
+                   (connection-id . ,address)
+                   (address . ,address)
+                   (awaited . ,awaited))))
+    (when-let* ((server-id
+                 (cdr (assoc "connectionId" (mongo-conn-last-hello conn)))))
+      (setq fields (append fields
+                           (list (cons 'server-connection-id server-id)))))
+    fields))
+
+(defun mongo--monitor-awaitable-p (conn)
+  "Return non-nil when CONN's next monitor heartbeat is awaitable."
+  (and (not (eq (mongo-conn-server-monitoring-mode conn) 'poll))
+       (when-let* ((server (mongo--current-server-description conn)))
+         (mongo-server-description-topology-version server))))
 
 (defun mongo--make-command-event-context (database document sequences)
   "Return command monitoring context for DATABASE, DOCUMENT, and SEQUENCES."
@@ -4204,21 +4240,40 @@ response from the initial connection handshake instead."
       (progn
         (setf (mongo-conn-monitor-error conn) nil)
         (mongo-conn-last-hello conn))
-    (condition-case err
-        (let* ((max-await (or max-await-time-ms
-                              mongo-monitor-max-await-time-ms))
-               (timeout (or timeout
-                            (+ 1 (/ (float max-await) 1000.0))))
-               (hello (let ((mongo--suppress-command-events t))
-                        (if (eq (mongo-conn-server-monitoring-mode conn) 'poll)
-                            (mongo-hello conn timeout)
-                          (mongo-awaitable-hello conn max-await timeout)))))
-          (setf (mongo-conn-monitor-error conn) nil)
-          hello)
-      (error
-       (setf (mongo-conn-monitor-error conn) err)
-       (mongo--mark-current-server-unknown conn err)
-       (signal (car err) (cdr err))))))
+    (let* ((max-await (or max-await-time-ms
+                          mongo-monitor-max-await-time-ms))
+           (timeout (or timeout
+                        (+ 1 (/ (float max-await) 1000.0))))
+           (awaited (and (mongo--monitor-awaitable-p conn) t))
+           (heartbeat-start (float-time)))
+      (apply #'mongo--emit-sdam-event
+             'server-heartbeat-started
+             (mongo--sdam-heartbeat-event-fields conn awaited))
+      (condition-case err
+          (let ((hello (let ((mongo--suppress-command-events t))
+                         (if (eq (mongo-conn-server-monitoring-mode conn) 'poll)
+                             (mongo-hello conn timeout)
+                           (mongo-awaitable-hello conn max-await timeout)))))
+            (setf (mongo-conn-monitor-error conn) nil)
+            (apply #'mongo--emit-sdam-event
+                   'server-heartbeat-succeeded
+                   (append
+                    (mongo--sdam-heartbeat-event-fields conn awaited)
+                    (list (cons 'duration-ms
+                                (mongo--pool-duration-ms heartbeat-start))
+                          (cons 'reply hello))))
+            hello)
+        (error
+         (setf (mongo-conn-monitor-error conn) err)
+         (mongo--mark-current-server-unknown conn err)
+         (apply #'mongo--emit-sdam-event
+                'server-heartbeat-failed
+                (append
+                 (mongo--sdam-heartbeat-event-fields conn awaited)
+                 (list (cons 'duration-ms
+                             (mongo--pool-duration-ms heartbeat-start))
+                       (cons 'failure err))))
+         (signal (car err) (cdr err)))))))
 
 (defun mongo--monitor-tick (conn max-await-time-ms timeout)
   "Run one scheduled monitor tick for CONN."

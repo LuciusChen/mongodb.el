@@ -47,6 +47,9 @@ Implemented areas include:
   request id correlation, command duration, OP_MSG document sequence exposure,
   bulkWrite =operation-id= correlation, sensitive command redaction, and
   load-balanced =serviceId= on command events
+- SDAM heartbeat monitoring events via =mongo-sdam-event-hook=, including
+  paired =server-heartbeat-started= / =server-heartbeat-succeeded= /
+  =server-heartbeat-failed= events
 
 Known incomplete areas include complete SDAM/CMAP/command event and waitQueue
 spec-suite parity, client-side field level encryption, and full MongoDB

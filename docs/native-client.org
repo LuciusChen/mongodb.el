@@ -101,6 +101,14 @@ address, and duration for terminal events; load-balanced command events include
 fields.  Split =mongo-bulk-write= command events share an =operation-id=.
 Sensitive auth and user-management commands are redacted.
 
+SDAM heartbeat monitoring events are exposed through =mongo-sdam-event-hook=.
+=mongo-monitor-once= emits paired =server-heartbeat-started= and
+=server-heartbeat-succeeded= / =server-heartbeat-failed= events for
+non-load-balanced monitor heartbeats.  Events include =connection-id=,
+=address=, and =awaited=; terminal events also include =duration-ms= and
+either =reply= or =failure=.  Load-balanced connections do not run dedicated
+monitor heartbeats and therefore do not emit heartbeat events.
+
 Supported authentication mechanisms are SCRAM-SHA-256, SCRAM-SHA-1,
 MONGODB-X509, PLAIN, MONGODB-AWS, and one-step or human-callback
 MONGODB-OIDC.  Native auth sends MongoDB commands and SASL payloads directly;

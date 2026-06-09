@@ -6207,6 +6207,85 @@
     (should-not (mongo-conn-monitor-error conn))))
 
 
+(ert-deftest mongo-test-monitor-heartbeat-emits-sdam-success-events ()
+  "Monitor heartbeats should emit paired SDAM started/succeeded events."
+  (let* ((topology-version
+          '(("processId" . (("$oid" . "64f000000000000000000001")))
+            ("counter" . 7)))
+         (reply `(("ok" . 1)
+                  ("maxWireVersion" . 17)
+                  ("connectionId" . 42)
+                  ("topologyVersion" . ,topology-version)))
+         (conn (make-mongo-conn :host "db"
+                                :port 27017
+                                :database "app"))
+         events)
+    (setf (mongo-conn-last-hello conn)
+          '(("ok" . 1)
+            ("connectionId" . 41)))
+    (setf (mongo-conn-topology conn)
+          (mongo--topology-description-from-hello
+           conn
+           `(("ok" . 1)
+             ("maxWireVersion" . 17)
+             ("topologyVersion" . ,topology-version))))
+    (cl-letf (((symbol-function 'mongo-awaitable-hello)
+               (lambda (_conn max-await timeout)
+                 (should (= max-await 250))
+                 (should (= timeout 3))
+                 (setf (mongo-conn-last-hello conn) reply)
+                 reply)))
+      (let ((mongo-sdam-event-hook
+             (list (lambda (event)
+                     (push event events)))))
+        (should (equal (mongo-monitor-once conn 250 3) reply))))
+    (let ((ordered (nreverse events)))
+      (should (equal (mapcar (lambda (event)
+                               (alist-get 'type event))
+                             ordered)
+                     '(server-heartbeat-started
+                       server-heartbeat-succeeded)))
+      (should (eq (alist-get 'awaited (nth 0 ordered)) t))
+      (should (eq (alist-get 'awaited (nth 1 ordered)) t))
+      (should (equal (alist-get 'connection-id (nth 0 ordered))
+                     "db:27017"))
+      (should (equal (alist-get 'server-connection-id (nth 0 ordered))
+                     41))
+      (should (equal (alist-get 'server-connection-id (nth 1 ordered))
+                     42))
+      (should (numberp (alist-get 'duration-ms (nth 1 ordered))))
+      (should (equal (alist-get 'reply (nth 1 ordered)) reply)))))
+
+
+(ert-deftest mongo-test-monitor-heartbeat-emits-sdam-failure-events ()
+  "Monitor heartbeat failures should emit paired SDAM started/failed events."
+  (let ((conn (make-mongo-conn :host "db"
+                               :port 27017
+                               :database "app"))
+        events)
+    (cl-letf (((symbol-function 'mongo-awaitable-hello)
+               (lambda (&rest _args)
+                 (signal 'mongo-error (list "heartbeat failed")))))
+      (let ((mongo-sdam-event-hook
+             (list (lambda (event)
+                     (push event events)))))
+        (should-error (mongo-monitor-once conn 250 3)
+                      :type 'mongo-error)))
+    (let ((ordered (nreverse events)))
+      (should (equal (mapcar (lambda (event)
+                               (alist-get 'type event))
+                             ordered)
+                     '(server-heartbeat-started
+                       server-heartbeat-failed)))
+      (should-not (alist-get 'awaited (nth 0 ordered)))
+      (should-not (alist-get 'awaited (nth 1 ordered)))
+      (should (equal (alist-get 'connection-id (nth 0 ordered))
+                     "db:27017"))
+      (should (numberp (alist-get 'duration-ms (nth 1 ordered))))
+      (should (equal (alist-get 'failure (nth 1 ordered))
+                     '(mongo-error "heartbeat failed"))))))
+
+
 
 (ert-deftest mongo-test-monitor-once-can-use-poll-mode ()
   "serverMonitoringMode=poll should use ordinary hello for monitoring."
