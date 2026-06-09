@@ -16,8 +16,9 @@ Implemented areas include:
 - BSON encode/decode for core and compatibility types
 - TCP, UNIX-domain socket, TLS, =mongodb://=, and =mongodb+srv://=
 - SCRAM-SHA-256, SCRAM-SHA-1, X.509, PLAIN, AWS, and one-step OIDC auth
-- OP_MSG command helpers, cursors, getMore, killCursors, and compression
-  (=snappy=, =zlib=, and optional =zstd= via =mongo-zstd-program=)
+- OP_MSG command helpers, =moreToCome= unacknowledged writes, cursors,
+  getMore, killCursors, and compression (=snappy=, =zlib=, and optional =zstd=
+  via =mongo-zstd-program=)
 - read preference, read concern, write concern, Stable API, sessions including
   load-balanced session support, retryable reads/writes, transaction helpers,
   and client-level =bulkWrite=

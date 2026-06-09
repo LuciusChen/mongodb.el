@@ -1670,9 +1670,18 @@ Documents that already contain `_id' are returned unchanged."
 (defun mongo--unacknowledged-write-concern-p (write-concern)
   "Return non-nil when WRITE-CONCERN is unacknowledged."
   (when write-concern
-    (let ((w (mongo--document-field write-concern "w")))
-      (or (and (numberp w) (zerop w))
-          (equal w "0")))))
+    (let ((w (mongo--document-field write-concern "w"))
+          (journal (or (mongo--document-field write-concern "j")
+                       (mongo--document-field write-concern "journal"))))
+      (and (or (and (numberp w) (zerop w))
+               (equal w "0"))
+           (not (mongo--wire-truthy-p journal))))))
+
+(defun mongo--unacknowledged-write-command-p (conn command)
+  "Return non-nil when COMMAND should be sent as fire-and-forget."
+  (and (mongo--write-command-p command)
+       (mongo--unacknowledged-write-concern-p
+        (mongo--write-concern-value conn command))))
 
 (defun mongo--retryable-writes-supported-p (conn)
   "Return non-nil when CONN's selected server supports retryable writes."
@@ -2345,23 +2354,31 @@ SEQUENCES, when non-nil, is sent as OP_MSG document sequence sections."
 	      sequences)))
 	(condition-case err
 	    (progn
-	      (setq request-id
-	            (if sequences
-	                (mongo--send-document conn document sequences)
-	              (mongo--send-document conn document)))
-	      (mongo--command-event-started conn request-id)
-	      (mongo--mark-transaction-command-sent
-	       conn transaction-state)
-	      (let ((response
-	             (mongo--recv-message conn timeout request-id)))
-	        (mongo--advance-cluster-time-from-response
-	         conn command response)
-	        (mongo--advance-transaction-recovery-token-from-response
-	         conn transaction-state response)
-	        (if (mongo--ok-p response)
+	      (if (mongo--unacknowledged-write-command-p conn document)
+	          (let ((response '(("ok" . 1))))
+	            (setq request-id
+	                  (mongo--send-document-with-flags
+	                   conn document sequences mongo--op-msg-more-to-come))
+	            (mongo--command-event-started conn request-id)
 	            (mongo--command-event-succeeded conn response)
-	          (mongo--command-event-failed conn response))
-	        response))
+	            response)
+	        (setq request-id
+	              (if sequences
+	                  (mongo--send-document conn document sequences)
+	                (mongo--send-document conn document)))
+	        (mongo--command-event-started conn request-id)
+	        (mongo--mark-transaction-command-sent
+	         conn transaction-state)
+	        (let ((response
+	               (mongo--recv-message conn timeout request-id)))
+	          (mongo--advance-cluster-time-from-response
+	           conn command response)
+	          (mongo--advance-transaction-recovery-token-from-response
+	           conn transaction-state response)
+	          (if (mongo--ok-p response)
+	              (mongo--command-event-succeeded conn response)
+	            (mongo--command-event-failed conn response))
+	          response)))
 	  (error
 	   (mongo--command-event-failed conn err)
 	   (signal (car err) (cdr err))))))))

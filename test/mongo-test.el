@@ -2120,8 +2120,55 @@
                                (alist-get 'type event))
                              ordered)
                      '(command-started command-succeeded)))
+      (should (assoc 'command (car ordered)))
+      (should (assoc 'reply (cadr ordered)))
       (should-not (alist-get 'command (car ordered)))
       (should-not (alist-get 'reply (cadr ordered))))))
+
+
+(ert-deftest mongo-test-command-monitoring-redacts-sensitive-failure ()
+  "Sensitive command failures should retain only allowed server error fields."
+  (let ((conn (make-mongo-conn :process 'proc
+                               :closed nil
+                               :host "db.example.test"
+                               :port 27017
+                               :database "admin"
+                               :request-id 0
+                               :max-wire-version 17))
+        events)
+    (cl-letf (((symbol-function 'process-live-p)
+               (lambda (_proc) t))
+              ((symbol-function 'process-send-string)
+               (lambda (&rest _args) nil))
+              ((symbol-function 'mongo--recv-message)
+               (lambda (&rest _args)
+                 '(("ok" . 0)
+                   ("errmsg" . "secret failure")
+                   ("code" . 18)
+                   ("codeName" . "AuthenticationFailed")
+                   ("errorLabels" . ["TransientTransactionError"])
+                   ("payload" . "secret")))))
+      (let ((mongo-command-event-hook
+             (list (lambda (event)
+                     (push event events)))))
+        (should-error
+         (mongo-command
+          conn "admin"
+          '(("saslStart" . 1)
+            ("mechanism" . "SCRAM-SHA-256")
+            ("payload" . "secret")))
+         :type 'mongo-error)))
+    (let ((ordered (nreverse events)))
+      (should (equal (mapcar (lambda (event)
+                               (alist-get 'type event))
+                             ordered)
+                     '(command-started command-failed)))
+      (should (assoc 'command (car ordered)))
+      (should-not (alist-get 'command (car ordered)))
+      (should (equal (alist-get 'failure (cadr ordered))
+                     '(("code" . 18)
+                       ("codeName" . "AuthenticationFailed")
+                       ("errorLabels" . ["TransientTransactionError"])))))))
 
 
 
@@ -2298,6 +2345,104 @@
       (should (equal (mongo-command conn "app" '(("ping" . 1)) 1.25)
                      '(("ok" . 1)))))
     (should (= captured-timeout 1.25))))
+
+
+(ert-deftest mongo-test-command-unacknowledged-write-uses-more-to-come ()
+  "Unacknowledged writes should use OP_MSG moreToCome and skip receiving."
+  (let ((conn (make-mongo-conn
+               :process 'proc
+               :closed nil
+               :host "db.example.test"
+               :port 27017
+               :database "app"
+               :request-id 0
+               :max-wire-version 17
+               :write-concern
+               (make-mongo--write-concern :pairs '(("w" . 0)))))
+        events sent recv-called)
+    (cl-letf (((symbol-function 'process-live-p)
+               (lambda (_proc) t))
+              ((symbol-function 'process-send-string)
+               (lambda (_proc message)
+                 (setq sent message)))
+              ((symbol-function 'mongo--recv-message)
+               (lambda (&rest _args)
+                 (setq recv-called t)
+                 '(("ok" . 1))))
+              ((symbol-function 'mongo--ensure-writable-server)
+               (lambda (&rest _args) nil))
+              ((symbol-function 'mongo--ensure-readable-server)
+               (lambda (&rest _args) nil)))
+      (let ((mongo-command-event-hook
+             (list (lambda (event)
+                     (push event events)))))
+        (should (equal
+                 (mongo-command
+                  conn "app"
+                  '(("insert" . "users")
+                    ("documents" . [(("name" . "Ann"))])))
+                 '(("ok" . 1))))))
+    (should sent)
+    (should-not recv-called)
+    (let ((frame (mongo--decode-message-frame sent t)))
+      (should (= (logand (mongo--decoded-message-flags frame)
+                         mongo--op-msg-more-to-come)
+                 mongo--op-msg-more-to-come))
+      (should (equal (cdr (assoc "writeConcern"
+                                 (mongo--decoded-message-document frame)))
+                     '(("w" . 0)))))
+    (let ((ordered (nreverse events)))
+      (should (equal (mapcar (lambda (event)
+                               (alist-get 'type event))
+                             ordered)
+                     '(command-started command-succeeded)))
+      (should (= (alist-get 'request-id (car ordered)) 1))
+      (should (= (alist-get 'request-id (cadr ordered)) 1))
+      (should (equal (alist-get 'reply (cadr ordered))
+                     '(("ok" . 1)))))))
+
+
+(ert-deftest mongo-test-command-journaled-w0-write-is-acknowledged ()
+  "w:0 with j:true should wait for the server reply."
+  (let ((conn (make-mongo-conn
+               :process 'proc
+               :closed nil
+               :host "db.example.test"
+               :port 27017
+               :database "app"
+               :request-id 0
+               :max-wire-version 17
+               :write-concern
+               (make-mongo--write-concern :pairs '(("w" . 0) ("j" . t)))))
+        sent recv-response-to)
+    (cl-letf (((symbol-function 'process-live-p)
+               (lambda (_proc) t))
+              ((symbol-function 'process-send-string)
+               (lambda (_proc message)
+                 (setq sent message)))
+              ((symbol-function 'mongo--recv-message)
+               (lambda (_conn _timeout response-to &optional _allow-more)
+                 (setq recv-response-to response-to)
+                 '(("ok" . 1))))
+              ((symbol-function 'mongo--ensure-writable-server)
+               (lambda (&rest _args) nil))
+              ((symbol-function 'mongo--ensure-readable-server)
+               (lambda (&rest _args) nil)))
+      (should (equal
+               (mongo-command
+                conn "app"
+                '(("insert" . "users")
+                  ("documents" . [(("name" . "Ann"))])))
+               '(("ok" . 1)))))
+    (should sent)
+    (let ((frame (mongo--decode-message-frame sent)))
+      (should (= (logand (mongo--decoded-message-flags frame)
+                         mongo--op-msg-more-to-come)
+                 0))
+      (should (equal (cdr (assoc "writeConcern"
+                                 (mongo--decoded-message-document frame)))
+                     '(("w" . 0) ("j" . t)))))
+    (should (= recv-response-to 1))))
 
 
 

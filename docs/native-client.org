@@ -103,7 +103,11 @@ address, and duration for terminal events; load-balanced command events include
 helpers also include the pool's driver-generated =driver-connection-id=.
 Started events expose OP_MSG document sequences as command array fields.  Split
 =mongo-bulk-write= command events share an =operation-id=.  Sensitive auth and
-user-management commands are redacted.
+user-management command/reply fields are emitted as empty documents; sensitive
+server error replies retain only =code=, =codeName=, and =errorLabels=.
+Unacknowledged writes use OP_MSG =moreToCome= with =writeConcern= =w:0= and
+emit a =command-succeeded= event with =(("ok" . 1))= without waiting for a
+server reply; =w:0= with =j:true= remains acknowledged.
 
 SDAM heartbeat monitoring events are exposed through =mongo-sdam-event-hook=.
 =mongo-monitor-once= emits paired =server-heartbeat-started= and
