@@ -221,6 +221,9 @@ UnsatisfiableWriteConcern.")
 (defvar mongo--retryable-write-context nil
   "Non-nil when a helper is executing a supported retryable write operation.")
 
+(defvar mongo--operation-command-context nil
+  "Non-nil when a command is sent for a typed helper operation.")
+
 (defvar mongo--command-event-context nil
   "Dynamic context for command monitoring around low-level OP_MSG sends.")
 
@@ -1677,11 +1680,11 @@ Documents that already contain `_id' are returned unchanged."
                (equal w "0"))
            (not (mongo--wire-truthy-p journal))))))
 
-(defun mongo--unacknowledged-write-command-p (conn command)
+(defun mongo--unacknowledged-write-command-p (_conn command)
   "Return non-nil when COMMAND should be sent as fire-and-forget."
   (and (mongo--write-command-p command)
        (mongo--unacknowledged-write-concern-p
-        (mongo--write-concern-value conn command))))
+        (mongo--document-field command "writeConcern"))))
 
 (defun mongo--retryable-writes-supported-p (conn)
   "Return non-nil when CONN's selected server supports retryable writes."
@@ -2338,12 +2341,14 @@ SEQUENCES, when non-nil, is sent as OP_MSG document sequence sections."
 	     command
 	     (or database (mongo-conn-database conn))
 	     (mongo-conn-server-api conn)
-             (mongo-conn-session-id conn)
-             (mongo--effective-command-read-preference conn command)
-             (mongo-conn-read-concern conn)
-             (mongo-conn-write-concern conn)
-             effective-txn-number
-             transaction-state
+	     (mongo-conn-session-id conn)
+	     (mongo--effective-command-read-preference conn command)
+	     (and mongo--operation-command-context
+	          (mongo-conn-read-concern conn))
+	     (and mongo--operation-command-context
+	          (mongo-conn-write-concern conn))
+	     effective-txn-number
+	     transaction-state
 	     (mongo-conn-transaction-read-concern conn)
 	     (mongo--cluster-time-to-send conn)))
 	   (request-id nil))
@@ -2414,11 +2419,13 @@ caller must only use commands whose server semantics allow exhaust replies."
             (mongo--command-with-db
              command
              (or database (mongo-conn-database conn))
-             (mongo-conn-server-api conn)
-             (mongo-conn-session-id conn)
-             (mongo--effective-command-read-preference conn command)
-             (mongo-conn-read-concern conn)
-             (mongo-conn-write-concern conn)
+	     (mongo-conn-server-api conn)
+	     (mongo-conn-session-id conn)
+	     (mongo--effective-command-read-preference conn command)
+	     (and mongo--operation-command-context
+	          (mongo-conn-read-concern conn))
+	     (and mongo--operation-command-context
+	          (mongo-conn-write-concern conn))
 	     transaction-number
 	     transaction-state
 	     (mongo-conn-transaction-read-concern conn)
@@ -2458,7 +2465,8 @@ caller must only use commands whose server semantics allow exhaust replies."
 	      (mongo--command-event-succeeded
 	       conn (or (car (last responses)) '(("ok" . 1))))
 	      (dolist (response responses)
-	        (when-let* ((message (and (mongo--write-command-p command)
+	        (when-let* ((message (and mongo--operation-command-context
+	                                  (mongo--write-command-p command)
 	                                  (mongo--write-error-message response))))
 	          (signal 'mongo-error (list message))))
 	        responses)
@@ -3160,7 +3168,8 @@ SEQUENCES, when non-nil, is sent as OP_MSG document sequence sections."
                          (or (mongo--write-error-message response)
                              (mongo--response-message response))))
                   (throw 'retry nil))
-                (when-let* ((message (and (mongo--write-command-p command)
+                (when-let* ((message (and mongo--operation-command-context
+                                          (mongo--write-command-p command)
                                           (mongo--write-error-message response))))
                   (let ((labels (mongo--response-error-labels response)))
                     (mongo--transaction-unpin-for-labels conn labels)
@@ -3195,6 +3204,18 @@ that can legally return exhaust-style replies."
    conn database command
    (and conn (mongo--command-timeout conn timeout))
    sequences))
+
+(defun mongo--operation-command
+    (conn database command &optional timeout sequences)
+  "Run COMMAND as a typed helper operation on DATABASE over CONN."
+  (let ((mongo--operation-command-context t))
+    (cond
+     (sequences
+      (mongo-command conn database command timeout sequences))
+     (timeout
+      (mongo-command conn database command timeout))
+     (t
+      (mongo-command conn database command)))))
 
 (defun mongo--session-supported-p (hello)
   "Return non-nil when HELLO reports logical session support."
@@ -3322,7 +3343,7 @@ non-nil, do not issue killCursors after a getMore network error."
 
 (defun mongo-list-databases (conn)
   "Return database names visible to CONN."
-  (let ((response (mongo-command
+  (let ((response (mongo--operation-command
                    conn "admin"
                    '(("listDatabases" . 1)))))
     (mapcar (lambda (db) (cdr (assoc "name" db)))
@@ -3331,7 +3352,7 @@ non-nil, do not issue killCursors after a getMore network error."
 (defun mongo-list-collection-docs
     (conn database &optional filter)
   "Return collection metadata documents for DATABASE on CONN."
-  (let ((response (mongo-command
+  (let ((response (mongo--operation-command
                    conn database
                    `(("listCollections" . 1)
                      ("cursor" . ,(mongo-document nil))
@@ -3348,7 +3369,7 @@ non-nil, do not issue killCursors after a getMore network error."
     (conn database collection &optional options)
   "Create COLLECTION in DATABASE on CONN.
 OPTIONS is an alist or document of additional create command fields."
-  (mongo-command
+  (mongo--operation-command
    conn database
    `(("create" . ,collection)
      ,@(mongo--option-pairs options))))
@@ -3356,7 +3377,7 @@ OPTIONS is an alist or document of additional create command fields."
 (defun mongo-list-indexes (conn database collection)
   "Return index documents for COLLECTION in DATABASE on CONN."
   (let ((response
-         (mongo-command
+         (mongo--operation-command
           conn database
           `(("listIndexes" . ,collection)
             ("cursor" . ,(mongo-document nil))))))
@@ -3384,7 +3405,7 @@ OPTIONS is an alist or document of additional create command fields."
 OPTIONS is an alist of additional MongoDB find command fields."
   (let* ((option-pairs (mongo--option-pairs options))
          (response
-          (mongo-command
+          (mongo--operation-command
            conn database
            (mongo-find-command collection filter projection limit skip
                                option-pairs))))
@@ -3396,7 +3417,7 @@ OPTIONS is an alist of additional MongoDB find command fields."
     (conn database collection &optional filter options)
   "Return count for COLLECTION in DATABASE on CONN."
   (let ((response
-         (mongo-command
+         (mongo--operation-command
           conn database
           `(("count" . ,collection)
             ,@(when filter `(("query" . ,filter)))
@@ -3407,7 +3428,7 @@ OPTIONS is an alist of additional MongoDB find command fields."
     (conn database collection field &optional filter options)
   "Return distinct FIELD values for COLLECTION in DATABASE on CONN."
   (let ((response
-         (mongo-command
+         (mongo--operation-command
           conn database
           `(("distinct" . ,collection)
             ("key" . ,field)
@@ -3444,7 +3465,7 @@ OPTIONS is an alist or document of additional aggregate command fields.
 The convenience option field batchSize is translated into cursor.batchSize."
   (let* ((option-pairs (mongo--option-pairs options))
          (response
-          (mongo-command
+          (mongo--operation-command
            conn database
            (mongo-aggregate-command collection pipeline option-pairs))))
     (mongo--cursor-results
@@ -3457,7 +3478,7 @@ This is the protocol equivalent of mongosh `db.aggregate'.  PIPELINE should
 start with a stage that does not require an underlying collection."
   (let* ((option-pairs (mongo--option-pairs options))
          (response
-          (mongo-command
+          (mongo--operation-command
            conn database
            (mongo-aggregate-command 1 pipeline option-pairs))))
     (mongo--cursor-results
@@ -3516,7 +3537,7 @@ Clutch consumes a finite batch rather than returning a live cursor object: once
 an empty await batch is observed, the server cursor is closed."
   (let* ((option-pairs (mongo--option-pairs options))
          (response
-          (mongo-command
+          (mongo--operation-command
            conn database
            (mongo-watch-command collection pipeline option-pairs))))
     (mongo--cursor-results
@@ -3529,7 +3550,7 @@ an empty await batch is observed, the server cursor is closed."
 This is the protocol equivalent of mongosh `db.watch'."
   (let* ((option-pairs (mongo--option-pairs options))
          (response
-          (mongo-command
+          (mongo--operation-command
            conn database
            (mongo-watch-command 1 pipeline option-pairs))))
     (mongo--cursor-results
@@ -3549,7 +3570,7 @@ This is the protocol equivalent of mongosh `db.watch'."
 VERBOSITY may be nil, a MongoDB verbosity string, t, or :false.  Boolean
 values follow mongosh compatibility rules."
   (let ((verbosity (mongo--explain-verbosity verbosity)))
-    (mongo-command
+    (mongo--operation-command
      conn database
      `(("explain" . ,(mongo-document command))
        ,@(when verbosity
@@ -3566,7 +3587,7 @@ values follow mongosh compatibility rules."
       (dolist (batch (mongo--insert-document-batches
                       conn database command docs))
         (setq response
-              (mongo-command
+              (mongo--operation-command
                conn database
                command
                nil
@@ -3581,7 +3602,7 @@ values follow mongosh compatibility rules."
                                 (mongo-document nil)))
                     ("limit" . ,(or limit 0))))))
     (let ((mongo--retryable-write-context t))
-      (mongo-command
+      (mongo--operation-command
        conn database
        `(("delete" . ,collection))
        nil
@@ -3850,7 +3871,7 @@ cursor result documents."
 		 (batch-command (plist-get batch :command))
 		 (batch-sequences (plist-get batch :sequences))
 		 (response
-		  (mongo-command
+		  (mongo--operation-command
 		   conn "admin" batch-command timeout batch-sequences))
 		 (batch-results
 		  (mongo--cursor-results
@@ -3901,7 +3922,7 @@ cursor result documents."
                    (mongo--index-name keys)))
          (extra (mongo--remove-option-pairs '("key" "name")
                                             option-pairs)))
-    (mongo-command
+    (mongo--operation-command
      conn database
      `(("createIndexes" . ,collection)
        ("indexes" . ,(vector
@@ -3912,7 +3933,7 @@ cursor result documents."
 
 (defun mongo-drop-index (conn database collection index)
   "Drop INDEX from COLLECTION in DATABASE on CONN."
-  (mongo-command
+  (mongo--operation-command
    conn database
    `(("dropIndexes" . ,collection)
      ("index" . ,index))))
@@ -3937,7 +3958,7 @@ MongoDB options document."
                `(("upsert" . ,upsert)))
              extra))))
       (let ((mongo--retryable-write-context t))
-        (mongo-command
+        (mongo--operation-command
          conn database
          `(("update" . ,collection))
          nil
@@ -3972,7 +3993,7 @@ REMOVE is non-nil.  OPTIONS is a MongoDB options document."
                    "returnDocument")
                  option-pairs)))
     (let ((mongo--retryable-write-context t))
-      (mongo-command
+      (mongo--operation-command
        conn database
        (append
         `(("findAndModify" . ,collection)
@@ -3988,13 +4009,13 @@ REMOVE is non-nil.  OPTIONS is a MongoDB options document."
 
 (defun mongo-drop-collection (conn database collection)
   "Drop COLLECTION in DATABASE on CONN."
-  (mongo-command
+  (mongo--operation-command
    conn database
    `(("drop" . ,collection))))
 
 (defun mongo-drop-database (conn database)
   "Drop DATABASE on CONN."
-  (mongo-command
+  (mongo--operation-command
    conn database
    '(("dropDatabase" . 1))))
 
@@ -6439,7 +6460,8 @@ safe default for ordinary pools."
     (unwind-protect
         (condition-case err
             (let ((response
-                   (mongo-command conn database command timeout sequences)))
+                   (mongo--operation-command
+                    conn database command timeout sequences)))
               (mongo--cursor-results
                conn database collection response first-key get-more-options
                (mongo-conn-load-balanced conn)))

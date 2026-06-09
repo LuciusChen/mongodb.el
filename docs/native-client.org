@@ -184,6 +184,16 @@ UNIX-domain socket:
 (mongo-command conn "admin" '(("listDatabases" . 1)))
 #+end_src
 
+This is a generic RunCommand-style helper.  It does not automatically apply
+connection-level =readConcern= or =writeConcern= to raw command documents, and
+it does not parse =ok:1= =writeErrors= or =writeConcernError= replies into
+signals.  Callers that need those fields on raw commands should include them in
+the command document explicitly.  Collection and database helpers such as
+=mongo-find=, =mongo-insert=, =mongo-update=, =mongo-aggregate=,
+=mongo-create-index=, and =mongo-drop-collection= keep driver helper semantics:
+they apply configured concerns for supported operations and surface write
+errors as =mongo-error=.
+
 Subscribe to command monitoring events when callers need request-id correlation
 or load-balanced service tracking:
 

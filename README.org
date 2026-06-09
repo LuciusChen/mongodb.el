@@ -78,6 +78,13 @@ Run arbitrary command documents with =mongo-command=:
 (mongo-command conn "admin" '(("ping" . 1)))
 #+end_src
 
+=mongo-command= is the generic RunCommand surface: it does not inherit
+connection-level =readConcern= or =writeConcern=, and it returns =ok:1=
+=writeErrors= / =writeConcernError= replies as ordinary response documents.
+Include those fields explicitly when using a raw command.  Typed helpers such as
+=mongo-find=, =mongo-insert=, =mongo-update=, and =mongo-create-index= keep the
+driver helper behavior and apply configured concerns where supported.
+
 Use explicit BSON wrappers when the wire type matters:
 
 #+begin_src emacs-lisp

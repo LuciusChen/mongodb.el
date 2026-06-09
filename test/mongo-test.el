@@ -1747,6 +1747,91 @@
 
 
 
+(ert-deftest mongo-test-generic-command-does-not-inherit-read-write-concern ()
+  "Generic command execution should not apply connection read/write concern."
+  (let* ((read-concern
+          (mongo--params-read-concern '(:read-concern-level majority)))
+         (write-concern
+          (mongo--params-write-concern '(:w majority :journal t)))
+         (conn (make-mongo-conn :host "seed-a"
+                                :port 27017
+                                :database "app"
+                                :process 'proc
+                                :closed nil
+                                :max-wire-version 17
+                                :read-concern read-concern
+                                :write-concern write-concern))
+         (hello '(("ok" . 1)
+                  ("maxWireVersion" . 17)
+                  ("setName" . "rs0")
+                  ("isWritablePrimary" . t)))
+         sent)
+    (setf (mongo-conn-topology conn)
+          (mongo--topology-description-from-hello conn hello))
+    (cl-letf (((symbol-function 'process-live-p)
+               (lambda (_proc) t))
+              ((symbol-function 'mongo--send-document)
+               (lambda (_conn document &optional _sequences)
+                 (push document sent)
+                 1))
+              ((symbol-function 'mongo--recv-message)
+               (lambda (&rest _args)
+                 '(("ok" . 1)))))
+      (mongo-command conn "app" '(("find" . "users")))
+      (mongo-command conn "app" '(("insert" . "users")
+                                  ("documents" . []))))
+    (setq sent (nreverse sent))
+    (should-not (assoc "readConcern" (nth 0 sent)))
+    (should-not (assoc "writeConcern" (nth 1 sent)))))
+
+
+
+(ert-deftest mongo-test-operation-helpers-inherit-read-write-concern ()
+  "Typed helper operations should apply connection read/write concern."
+  (let* ((read-concern
+          (mongo--params-read-concern '(:read-concern-level majority)))
+         (write-concern
+          (mongo--params-write-concern '(:w majority :journal t)))
+         (conn (make-mongo-conn :host "seed-a"
+                                :port 27017
+                                :database "app"
+                                :process 'proc
+                                :closed nil
+                                :max-wire-version 17
+                                :read-concern read-concern
+                                :write-concern write-concern))
+         (hello '(("ok" . 1)
+                  ("maxWireVersion" . 17)
+                  ("setName" . "rs0")
+                  ("isWritablePrimary" . t)))
+         sent)
+    (setf (mongo-conn-topology conn)
+          (mongo--topology-description-from-hello conn hello))
+    (cl-letf (((symbol-function 'process-live-p)
+               (lambda (_proc) t))
+              ((symbol-function 'mongo--send-document)
+               (lambda (_conn document &optional _sequences)
+                 (push document sent)
+                 1))
+              ((symbol-function 'mongo--recv-message)
+               (lambda (&rest _args)
+                 (if (equal (caar (car sent)) "find")
+                     '(("ok" . 1)
+                       ("cursor" .
+                        (("id" . 0)
+                         ("firstBatch" . []))))
+                   '(("ok" . 1))))))
+      (mongo-find conn "app" "users")
+      (mongo-insert conn "app" "users"
+                    (vector (mongo-document '(("name" . "Ann"))))))
+    (setq sent (nreverse sent))
+    (should (equal (cdr (assoc "readConcern" (nth 0 sent)))
+                   '(("level" . "majority"))))
+    (should (equal (cdr (assoc "writeConcern" (nth 1 sent)))
+                   '(("w" . "majority") ("j" . t))))))
+
+
+
 (ert-deftest mongo-test-command-with-db-adds-transaction-fields ()
   "MongoDB transaction commands should use transaction metadata only."
   (let* ((session-id `(("id" . ,(mongo-binary 4 "abcdefghijklmnop"))))
@@ -2347,8 +2432,8 @@
     (should (= captured-timeout 1.25))))
 
 
-(ert-deftest mongo-test-command-unacknowledged-write-uses-more-to-come ()
-  "Unacknowledged writes should use OP_MSG moreToCome and skip receiving."
+(ert-deftest mongo-test-operation-unacknowledged-write-uses-more-to-come ()
+  "Unacknowledged helper writes should use OP_MSG moreToCome and skip receiving."
   (let ((conn (make-mongo-conn
                :process 'proc
                :closed nil
@@ -2377,10 +2462,9 @@
              (list (lambda (event)
                      (push event events)))))
         (should (equal
-                 (mongo-command
-                  conn "app"
-                  '(("insert" . "users")
-                    ("documents" . [(("name" . "Ann"))])))
+                 (mongo-insert
+                  conn "app" "users"
+                  (vector (mongo-document '(("name" . "Ann")))))
                  '(("ok" . 1))))))
     (should sent)
     (should-not recv-called)
@@ -2402,8 +2486,50 @@
                      '(("ok" . 1)))))))
 
 
-(ert-deftest mongo-test-command-journaled-w0-write-is-acknowledged ()
-  "w:0 with j:true should wait for the server reply."
+(ert-deftest mongo-test-generic-command-ignores-inherited-w0 ()
+  "Generic commands should not treat inherited w:0 as unacknowledged."
+  (let ((conn (make-mongo-conn
+               :process 'proc
+               :closed nil
+               :host "db.example.test"
+               :port 27017
+               :database "app"
+               :request-id 0
+               :max-wire-version 17
+               :write-concern
+               (make-mongo--write-concern :pairs '(("w" . 0)))))
+        sent recv-response-to)
+    (cl-letf (((symbol-function 'process-live-p)
+               (lambda (_proc) t))
+              ((symbol-function 'process-send-string)
+               (lambda (_proc message)
+                 (setq sent message)))
+              ((symbol-function 'mongo--recv-message)
+               (lambda (_conn _timeout response-to &optional _allow-more)
+                 (setq recv-response-to response-to)
+                 '(("ok" . 1))))
+              ((symbol-function 'mongo--ensure-writable-server)
+               (lambda (&rest _args) nil))
+              ((symbol-function 'mongo--ensure-readable-server)
+               (lambda (&rest _args) nil)))
+      (should (equal
+               (mongo-command
+                conn "app"
+                '(("insert" . "users")
+                  ("documents" . [(("name" . "Ann"))])))
+               '(("ok" . 1)))))
+    (should sent)
+    (let ((frame (mongo--decode-message-frame sent)))
+      (should (= (logand (mongo--decoded-message-flags frame)
+                         mongo--op-msg-more-to-come)
+                 0))
+      (should-not (assoc "writeConcern"
+                         (mongo--decoded-message-document frame))))
+    (should (= recv-response-to 1))))
+
+
+(ert-deftest mongo-test-operation-journaled-w0-write-is-acknowledged ()
+  "Helper writes with w:0 and j:true should wait for the server reply."
   (let ((conn (make-mongo-conn
                :process 'proc
                :closed nil
@@ -2429,10 +2555,9 @@
               ((symbol-function 'mongo--ensure-readable-server)
                (lambda (&rest _args) nil)))
       (should (equal
-               (mongo-command
-                conn "app"
-                '(("insert" . "users")
-                  ("documents" . [(("name" . "Ann"))])))
+               (mongo-insert
+                conn "app" "users"
+                (vector (mongo-document '(("name" . "Ann")))))
                '(("ok" . 1)))))
     (should sent)
     (let ((frame (mongo--decode-message-frame sent)))
@@ -10673,8 +10798,40 @@
 
 
 
-(ert-deftest mongo-test-command-rejects-write-errors-with-ok ()
-  "Write command replies with ok:1 and writeErrors should still signal."
+(ert-deftest mongo-test-generic-command-preserves-write-errors-with-ok ()
+  "Generic command replies with ok:1 and writeErrors should be returned."
+  (let* ((conn (make-mongo-conn :host "seed-a"
+                                :port 27017
+                                :database "app"
+                                :process 'proc
+                                :closed nil))
+         (primary-hello '(("ok" . 1)
+                          ("maxWireVersion" . 17)
+                          ("setName" . "rs0")
+                          ("isWritablePrimary" . t))))
+    (setf (mongo-conn-topology conn)
+          (mongo--topology-description-from-hello conn primary-hello))
+    (cl-letf (((symbol-function 'process-live-p)
+               (lambda (_proc) t))
+              ((symbol-function 'mongo--send-document)
+               (lambda (&rest _args) 1))
+              ((symbol-function 'mongo--recv-message)
+               (lambda (&rest _args)
+                 '(("ok" . 1)
+                   ("writeErrors" .
+                    ((("index" . 0)
+                      ("code" . 11000)
+                      ("codeName" . "DuplicateKey")
+                      ("errmsg" . "E11000 duplicate key error"))))))))
+      (let* ((response (mongo-command conn "app" '(("insert" . "users"))))
+             (write-error (car (cdr (assoc "writeErrors" response)))))
+        (should (equal (cdr (assoc "codeName" write-error))
+                       "DuplicateKey"))))))
+
+
+
+(ert-deftest mongo-test-insert-rejects-write-errors-with-ok ()
+  "Insert helper replies with ok:1 and writeErrors should still signal."
   (let* ((conn (make-mongo-conn :host "seed-a"
                                 :port 27017
                                 :database "app"
@@ -10699,7 +10856,9 @@
                       ("codeName" . "DuplicateKey")
                       ("errmsg" . "E11000 duplicate key error"))))))))
       (let ((err (should-error
-                  (mongo-command conn "app" '(("insert" . "users")))
+                  (mongo-insert
+                   conn "app" "users"
+                   (vector (mongo-document '(("name" . "Ann")))))
                   :type 'mongo-error)))
         (should (string-match-p "DuplicateKey"
                                 (error-message-string err)))
@@ -10787,8 +10946,42 @@
 
 
 
-(ert-deftest mongo-test-command-rejects-write-concern-error-with-ok ()
-  "Write command replies with ok:1 and writeConcernError should signal."
+(ert-deftest mongo-test-generic-command-preserves-write-concern-error-with-ok ()
+  "Generic command replies with ok:1 and writeConcernError should be returned."
+  (let* ((conn (make-mongo-conn :host "seed-a"
+                                :port 27017
+                                :database "app"
+                                :process 'proc
+                                :closed nil))
+         (primary-hello '(("ok" . 1)
+                          ("maxWireVersion" . 17)
+                          ("setName" . "rs0")
+                          ("isWritablePrimary" . t))))
+    (setf (mongo-conn-topology conn)
+          (mongo--topology-description-from-hello conn primary-hello))
+    (cl-letf (((symbol-function 'process-live-p)
+               (lambda (_proc) t))
+              ((symbol-function 'mongo--send-document)
+               (lambda (&rest _args) 1))
+              ((symbol-function 'mongo--recv-message)
+               (lambda (&rest _args)
+                 '(("ok" . 1)
+                   ("writeConcernError" .
+                    (("code" . 64)
+                     ("codeName" . "WriteConcernFailed")
+                     ("errmsg" . "waiting for replication timed out")))))))
+      (should (equal (cdr (assoc "codeName"
+                                 (cdr (assoc
+                                       "writeConcernError"
+                                       (mongo-command
+                                        conn "app"
+                                        '(("update" . "users")))))))
+                     "WriteConcernFailed")))))
+
+
+
+(ert-deftest mongo-test-update-rejects-write-concern-error-with-ok ()
+  "Update helper replies with ok:1 and writeConcernError should signal."
   (let* ((conn (make-mongo-conn :host "seed-a"
                                 :port 27017
                                 :database "app"
@@ -10812,7 +11005,10 @@
                      ("codeName" . "WriteConcernFailed")
                      ("errmsg" . "waiting for replication timed out")))))))
       (let ((err (should-error
-                  (mongo-command conn "app" '(("update" . "users")))
+                  (mongo-update
+                   conn "app" "users"
+                   (mongo-document '(("_id" . "a")))
+                   (mongo-document '(("$set" . (("seen" . t))))))
                   :type 'mongo-error)))
         (should (string-match-p "WriteConcernFailed"
                                 (error-message-string err)))
