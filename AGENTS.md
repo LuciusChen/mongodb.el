@@ -102,6 +102,11 @@ boundary in the guides before adding code.
   `mongo.el -> mongod/mongos` through native MongoDB commands.  Do not route the
   document surface through `mongosh`, JavaScript subprocesses, JDBC, or the
   MongoDB SQL Interface.
+- **SQL translation is a companion concern**: Non-JDBC SQL support, if pursued,
+  must live in a separate package or caller application that parses SQL and
+  emits MongoDB commands or aggregation pipelines through public `mongo-` APIs.
+  Do not add a SQL parser, relational planner, BI Connector / `mongosqld`
+  client, or SQL query console to this protocol package.
 - **External dependency boundaries stay explicit**: Do not add dependencies on
   Clutch, JDBC agents, Java drivers, `mongosh`, or GUI/query-console packages.
   Optional integrations belong in caller applications.

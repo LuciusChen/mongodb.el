@@ -26,8 +26,8 @@ MONGODB-AWS, and MONGODB-OIDC authentication plus ObjectId/session id byte
 helpers.  Connection-state transport, command execution, server selection,
 sessions, transactions, and pooling are assembled by =mongo.el=.
 
-Caller UI syntax, MongoDB Shell helper parsing, and SQL Interface JDBC routing
-stay outside this repository.
+Caller UI syntax, MongoDB Shell helper parsing, SQL-to-MQL translation, and SQL
+Interface JDBC routing stay outside this repository.
 
 * Protocol Capabilities
 
@@ -289,8 +289,13 @@ error labels through =mongo-error-has-label-p=.
 * Scope Boundaries
 
 This package is the protocol/client layer.  UI concerns such as shell-helper
-parsing, result grid rendering, completion, and SQL Interface routing belong in
-the caller application.
+parsing, result grid rendering, completion, SQL Interface routing, and
+non-JDBC SQL translation belong in the caller application.
+
+If SQL support is needed without JDBC, build it as a separate layer that parses
+SQL and emits MongoDB commands or aggregation pipelines through public
+=mongo-*= APIs.  Do not add a SQL parser, relational planner, BI Connector /
+=mongosqld= client, or SQL query console to =mongo.el= core.
 
 Current gaps include complete SDAM/CMAP/command event and waitQueue spec-suite
 parity, CSFLE, and full MongoDB specification-suite parity.

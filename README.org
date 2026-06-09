@@ -96,6 +96,19 @@ Use explicit BSON wrappers when the wire type matters:
                           (cons "counter" (mongo-int64 9223372036854775807)))))
 #+end_src
 
+* SQL and Query Surfaces
+
+=mongo.el= does not implement SQL.  MongoDB's native wire protocol accepts
+MongoDB command documents, not SQL text.
+
+A non-JDBC SQL layer can still be built on top of this package, but it should
+be a separate caller-facing package or application surface.  That layer would
+parse SQL, map the supported subset to MongoDB commands or aggregation
+pipelines, then call public APIs such as =mongo-command=, =mongo-find=, and
+=mongo-aggregate=.  It should not add a SQL parser, relational planner, JDBC
+driver, ODBC bridge, =mongosqld= client, or GUI/query-console code to
+=mongo.el= core.
+
 * Tests
 
 Run unit tests from this repository:
