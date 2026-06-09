@@ -5263,6 +5263,104 @@
     (should (assoc "seed-d:27017" servers))))
 
 
+(ert-deftest mongo-test-topology-description-readable-writable-server-p ()
+  "Topology availability predicates should follow SDAM readability rules."
+  (let* ((primary
+          (make-mongo-server-description
+           :address "primary:27017"
+           :type 'rs-primary
+           :tags '(("dc" . "east"))
+           :max-wire-version 17
+           :last-write-date 1000
+           :last-update-time 1000))
+         (secondary
+          (make-mongo-server-description
+           :address "secondary:27017"
+           :type 'rs-secondary
+           :tags '(("dc" . "west"))
+           :max-wire-version 17
+           :last-write-date 1000
+           :last-update-time 1000))
+         (mongos
+          (make-mongo-server-description
+           :address "mongos:27017"
+           :type 'mongos))
+         (unknown
+          (mongo--unknown-server-description "unknown:27017"))
+         (rs-with-primary
+          (make-mongo-topology-description
+           :type 'replica-set-with-primary
+           :primary-address "primary:27017"
+           :servers `(("primary:27017" . ,primary)
+                      ("secondary:27017" . ,secondary))))
+         (rs-no-primary
+          (make-mongo-topology-description
+           :type 'replica-set-no-primary
+           :servers `(("secondary:27017" . ,secondary)
+                      ("unknown:27017" . ,unknown))))
+         (single-secondary
+          (make-mongo-topology-description
+           :type 'single
+           :servers `(("secondary:27017" . ,secondary))))
+         (single-unknown
+          (make-mongo-topology-description
+           :type 'single
+           :servers `(("unknown:27017" . ,unknown))))
+         (sharded
+          (make-mongo-topology-description
+           :type 'sharded
+           :servers `(("mongos:27017" . ,mongos))))
+         (unknown-topology
+          (make-mongo-topology-description
+           :type 'unknown
+           :servers `(("unknown:27017" . ,unknown))))
+         (load-balanced
+          (make-mongo-topology-description
+           :type 'load-balanced))
+         (west-secondary
+          (mongo--params-read-preference
+           '(:read-preference secondary
+             :read-preference-tags ((("dc" . "west"))))))
+         (east-secondary
+          (mongo--params-read-preference
+           '(:read-preference secondary
+             :read-preference-tags ((("dc" . "east")))))))
+    (should (mongo-topology-description-has-readable-server-p
+             rs-with-primary))
+    (should (mongo-topology-description-has-writable-server-p
+             rs-with-primary))
+    (should-not (mongo-topology-description-has-readable-server-p
+                 rs-no-primary))
+    (should (mongo-topology-description-has-readable-server-p
+             rs-no-primary "secondary"))
+    (should (mongo-topology-description-has-readable-server-p
+             rs-no-primary west-secondary))
+    (should-not (mongo-topology-description-has-readable-server-p
+                 rs-no-primary east-secondary))
+    (should-not (mongo-topology-description-has-writable-server-p
+                 rs-no-primary))
+    (should (mongo-topology-description-has-readable-server-p
+             single-secondary))
+    (should (mongo-topology-description-has-writable-server-p
+             single-secondary))
+    (should-not (mongo-topology-description-has-readable-server-p
+                 single-unknown))
+    (should-not (mongo-topology-description-has-writable-server-p
+                 single-unknown))
+    (should (mongo-topology-description-has-readable-server-p
+             sharded))
+    (should (mongo-topology-description-has-writable-server-p
+             sharded))
+    (should-not (mongo-topology-description-has-readable-server-p
+                 unknown-topology))
+    (should-not (mongo-topology-description-has-writable-server-p
+                 unknown-topology))
+    (should (mongo-topology-description-has-readable-server-p
+             load-balanced))
+    (should (mongo-topology-description-has-writable-server-p
+             load-balanced))))
+
+
 
 (ert-deftest mongo-test-topology-hidden-secondary-is-rs-other ()
   "Hidden replica-set members should be discoverable but not readable."

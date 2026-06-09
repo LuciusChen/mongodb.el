@@ -109,6 +109,12 @@ non-load-balanced monitor heartbeats.  Events include =connection-id=,
 either =reply= or =failure=.  Load-balanced connections do not run dedicated
 monitor heartbeats and therefore do not emit heartbeat events.
 
+Callers that consume topology descriptions can test SDAM availability with
+=mongo-topology-description-has-readable-server-p= and
+=mongo-topology-description-has-writable-server-p=.  The readable predicate
+accepts the same read preference values used by command options and applies
+read preference mode, tag, and maxStalenessSeconds constraints.
+
 Supported authentication mechanisms are SCRAM-SHA-256, SCRAM-SHA-1,
 MONGODB-X509, PLAIN, MONGODB-AWS, and one-step or human-callback
 MONGODB-OIDC.  Native auth sends MongoDB commands and SASL payloads directly;

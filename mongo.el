@@ -1846,6 +1846,51 @@ state-change errors can be compared for freshness."
   (and server
        (not (eq (mongo-server-description-type server) 'unknown))))
 
+(defun mongo-topology-description-has-readable-server-p
+    (topology &optional read-preference heartbeat-seconds)
+  "Return non-nil when TOPOLOGY has a readable MongoDB server.
+READ-PREFERENCE accepts the same values as command and transaction options:
+nil or primary by default, a read preference mode string/symbol, or a
+readPreference document.  HEARTBEAT-SECONDS is used for maxStalenessSeconds
+calculation and defaults to `mongo-monitor-heartbeat-seconds'."
+  (when (mongo-topology-description-p topology)
+    (let ((read-preference (mongo--read-preference-value read-preference)))
+      (pcase (mongo-topology-description-type topology)
+        ('unknown nil)
+        ('load-balanced t)
+        ('single
+         (seq-some (lambda (entry)
+                     (mongo--available-server-p (cdr entry)))
+                   (mongo-topology-description-servers topology)))
+        ('sharded
+         (seq-some (lambda (entry)
+                     (mongo--available-server-p (cdr entry)))
+                   (mongo-topology-description-servers topology)))
+        (_
+         (seq-some (lambda (entry)
+                     (mongo--readable-server-p
+                      (cdr entry) read-preference topology heartbeat-seconds))
+                   (mongo-topology-description-servers topology)))))))
+
+(defun mongo-topology-description-has-writable-server-p (topology)
+  "Return non-nil when TOPOLOGY has a writable MongoDB server."
+  (when (mongo-topology-description-p topology)
+    (pcase (mongo-topology-description-type topology)
+      ('unknown nil)
+      ('load-balanced t)
+      ('single
+       (seq-some (lambda (entry)
+                   (mongo--available-server-p (cdr entry)))
+                 (mongo-topology-description-servers topology)))
+      ('sharded
+       (seq-some (lambda (entry)
+                   (mongo--available-server-p (cdr entry)))
+                 (mongo-topology-description-servers topology)))
+      (_
+       (seq-some (lambda (entry)
+                   (mongo--writable-server-p (cdr entry)))
+                 (mongo-topology-description-servers topology))))))
+
 (defun mongo--single-topology-read-preference (conn command read-preference)
   "Return effective OP_MSG read preference for CONN and COMMAND.
 In Server Selection Spec Single topology, reads against a replica-set member

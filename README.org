@@ -50,6 +50,9 @@ Implemented areas include:
 - SDAM heartbeat monitoring events via =mongo-sdam-event-hook=, including
   paired =server-heartbeat-started= / =server-heartbeat-succeeded= /
   =server-heartbeat-failed= events
+- SDAM topology availability predicates:
+  =mongo-topology-description-has-readable-server-p= and
+  =mongo-topology-description-has-writable-server-p=
 
 Known incomplete areas include complete SDAM/CMAP/command event and waitQueue
 spec-suite parity, client-side field level encryption, and full MongoDB
