@@ -47,7 +47,13 @@
              mongodb-timestamp
              mongodb-update))
     (should (fboundp symbol)))
-  (should (fboundp 'mongodb-conn-database)))
+  (should (fboundp 'mongodb-conn-database))
+  (should (fboundp 'mongodb-conn-closed)))
+
+(ert-deftest mongodb-test-connection-struct-keeps-public-closed-slot ()
+  (let ((conn (make-mongodb-conn :database "app" :closed nil)))
+    (should (equal (mongodb-conn-database conn) "app"))
+    (should-not (mongodb-conn-closed conn))))
 
 (ert-deftest mongodb-test-bson-roundtrip-keeps-wrapper-values ()
   (let* ((object-id (mongodb-object-id "64b64c2f40f9f2428b59d111"))
@@ -64,7 +70,8 @@
     (should (eq (cdr (assoc "active" decoded)) t))
     (should (= (cdr (assoc "count32" decoded)) 7))
     (should (= (cdr (assoc "count64" decoded)) 9223372036854775807))
-    (should (equal (cdr (assoc "_id" decoded)) object-id))))
+    (should (equal (cdr (assoc "_id" decoded))
+                   '(("$oid" . "64b64c2f40f9f2428b59d111"))))))
 
 (ert-deftest mongodb-test-document-wrapper-preserves-empty-document ()
   (let ((doc (mongodb-document nil)))

@@ -1338,6 +1338,7 @@ Arguments: MESSAGE, ALLOW-MORE-TO-COME."
   (max-bson-object-size (* 16 1024 1024))
   (max-message-size-bytes 48000000)
   (max-write-batch-size 100000)
+  (closed nil)
   live)
 
 (defconst mongodb--scram-auth-mechanisms '("SCRAM-SHA-256" "SCRAM-SHA-1"))
@@ -1985,6 +1986,8 @@ TIME, when non-nil, supplies the timestamp component."
          (buffer (generate-new-buffer (format " *mongodb %s:%s*" host port)))
          (proc nil)
          conn)
+    (with-current-buffer buffer
+      (set-buffer-multibyte nil))
     (condition-case err
         (progn
           (setq proc
@@ -2006,6 +2009,7 @@ TIME, when non-nil, supplies the timestamp component."
                  :database database
                  :params params
                  :credential credential
+                 :closed nil
                  :live t))
           (let ((hello (mongodb--send-document
                         conn (mongodb--hello-command credential)
@@ -2032,17 +2036,22 @@ TIME, when non-nil, supplies the timestamp component."
   "Disconnect MongoDB CONN."
   (when (mongodb-conn-p conn)
     (setf (mongodb-conn-live conn) nil)
-    (when (process-live-p (mongodb-conn-process conn))
-      (delete-process (mongodb-conn-process conn)))
-    (when (buffer-live-p (mongodb-conn-buffer conn))
-      (kill-buffer (mongodb-conn-buffer conn))))
+    (setf (mongodb-conn-closed conn) t)
+    (let ((process (mongodb-conn-process conn))
+          (buffer (mongodb-conn-buffer conn)))
+      (when (process-live-p process)
+        (delete-process process))
+      (when (buffer-live-p buffer)
+        (kill-buffer buffer))))
   nil)
 
 (defun mongodb-live-p (conn)
   "Return non-nil when CONN is live."
   (and (mongodb-conn-p conn)
+       (not (mongodb-conn-closed conn))
        (mongodb-conn-live conn)
-       (process-live-p (mongodb-conn-process conn))))
+       (let ((process (mongodb-conn-process conn)))
+         (and process (process-live-p process)))))
 
 (defun mongodb-hello (conn &optional timeout)
   "Run MongoDB hello through CONN."
