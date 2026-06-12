@@ -187,9 +187,28 @@ PATTERN is the regex pattern.  OPTIONS is a BSON regex option string."
   "Return VALUE packed as unsigned little-endian BYTES."
   (when (< value 0)
     (setq value (+ value (expt 2 (* 8 bytes)))))
-  (apply #'unibyte-string
-         (cl-loop for shift from 0 below (* 8 bytes) by 8
-                  collect (logand (ash value (- shift)) #xff))))
+  (pcase bytes
+    (2
+     (unibyte-string (logand value #xff)
+                     (logand (ash value -8) #xff)))
+    (4
+     (unibyte-string (logand value #xff)
+                     (logand (ash value -8) #xff)
+                     (logand (ash value -16) #xff)
+                     (logand (ash value -24) #xff)))
+    (8
+     (unibyte-string (logand value #xff)
+                     (logand (ash value -8) #xff)
+                     (logand (ash value -16) #xff)
+                     (logand (ash value -24) #xff)
+                     (logand (ash value -32) #xff)
+                     (logand (ash value -40) #xff)
+                     (logand (ash value -48) #xff)
+                     (logand (ash value -56) #xff)))
+    (_
+     (apply #'unibyte-string
+            (cl-loop for shift from 0 below (* 8 bytes) by 8
+                     collect (logand (ash value (- shift)) #xff))))))
 
 (defun mongodb--pack-int32 (value)
   "Return VALUE packed as little-endian int32."
@@ -231,30 +250,53 @@ PATTERN is the regex pattern.  OPTIONS is a BSON regex option string."
 
 (defun mongodb--read-uint-le (reader bytes)
   "Read an unsigned little-endian integer of BYTES from READER."
-  (cl-loop for shift from 0 below (* 8 bytes) by 8
-           sum (ash (mongodb--read-byte reader) shift)))
-
-(defun mongodb--signed (value bits)
-  "Return unsigned VALUE interpreted as a signed BITS-bit integer.
-
-Arguments: VALUE, BITS."
-  (let ((sign (expt 2 (1- bits)))
-        (modulus (expt 2 bits)))
-    (if (>= value sign)
-        (- value modulus)
-      value)))
+  (let* ((pos (mongodb--reader-pos reader))
+         (end (+ pos bytes))
+         (data (mongodb--reader-data reader)))
+    (when (> end (length data))
+      (signal 'mongodb-error
+              (list "MongoDB wire response ended unexpectedly")))
+    (setf (mongodb--reader-pos reader) end)
+    (pcase bytes
+      (2
+       (logior (aref data pos)
+               (ash (aref data (+ pos 1)) 8)))
+      (4
+       (logior (aref data pos)
+               (ash (aref data (+ pos 1)) 8)
+               (ash (aref data (+ pos 2)) 16)
+               (ash (aref data (+ pos 3)) 24)))
+      (8
+       (logior (aref data pos)
+               (ash (aref data (+ pos 1)) 8)
+               (ash (aref data (+ pos 2)) 16)
+               (ash (aref data (+ pos 3)) 24)
+               (ash (aref data (+ pos 4)) 32)
+               (ash (aref data (+ pos 5)) 40)
+               (ash (aref data (+ pos 6)) 48)
+               (ash (aref data (+ pos 7)) 56)))
+      (_
+       (let ((value 0)
+             (i 0))
+         (while (< i bytes)
+           (setq value (logior value
+                               (ash (aref data (+ pos i)) (* 8 i))))
+           (setq i (1+ i)))
+         value)))))
 
 (defun mongodb--read-int32 (reader)
   "Read a little-endian int32 from READER."
-  (mongodb--signed
-   (mongodb--read-uint-le reader 4)
-   32))
+  (let ((value (mongodb--read-uint-le reader 4)))
+    (if (>= value #x80000000)
+        (- value #x100000000)
+      value)))
 
 (defun mongodb--read-int64 (reader)
   "Read a little-endian int64 from READER."
-  (mongodb--signed
-   (mongodb--read-uint-le reader 8)
-   64))
+  (let ((value (mongodb--read-uint-le reader 8)))
+    (if (>= value mongodb--int64-sign)
+        (- value mongodb--uint64-mod)
+      value)))
 
 (defun mongodb--decode-double (reader)
   "Read a little-endian IEEE-754 double from READER."
@@ -1660,7 +1702,9 @@ TIME, when non-nil, supplies the timestamp component."
 
 (defun mongodb--scram-client-final
     (mechanism username secret client-first-bare client-nonce server-first-message)
-  "Return SCRAM final data for MECHANISM and SERVER-FIRST-MESSAGE."
+  "Return SCRAM final data for MECHANISM and SERVER-FIRST-MESSAGE.
+USERNAME, SECRET, CLIENT-FIRST-BARE, and CLIENT-NONCE are client SCRAM
+values."
   (let* ((attrs (mongodb--scram-parse-attrs server-first-message))
          (server-nonce (cdr (assoc "r" attrs)))
          (salt64 (cdr (assoc "s" attrs)))
@@ -1805,7 +1849,7 @@ TIME, when non-nil, supplies the timestamp component."
     next))
 
 (defun mongodb--wait-for-bytes (conn count timeout)
-  "Wait until CONN has at least COUNT bytes, then return them."
+  "Wait until CONN has at least COUNT bytes before TIMEOUT, then return them."
   (let ((proc (mongodb-conn-process conn))
         (buffer (mongodb-conn-buffer conn))
         (deadline (+ (float-time) (or timeout mongodb-timeout-seconds))))
@@ -1821,7 +1865,8 @@ TIME, when non-nil, supplies the timestamp component."
         (mongodb--byte-string data)))))
 
 (defun mongodb--recv-message-frame (conn timeout expected-response-to)
-  "Receive one MongoDB message frame from CONN."
+  "Receive one MongoDB message frame from CONN within TIMEOUT.
+EXPECTED-RESPONSE-TO, when non-nil, must match the reply header."
   (let* ((header (mongodb--wait-for-bytes conn 4 timeout))
          (length (mongodb--read-int32-from-string header))
          (body (mongodb--wait-for-bytes conn (- length 4) timeout))
@@ -2054,7 +2099,7 @@ TIME, when non-nil, supplies the timestamp component."
          (and process (process-live-p process)))))
 
 (defun mongodb-hello (conn &optional timeout)
-  "Run MongoDB hello through CONN."
+  "Run MongoDB hello through CONN within optional TIMEOUT."
   (mongodb-command conn "admin" '(("hello" . 1)) timeout))
 
 (defun mongodb--cursor-batch (cursor key)
@@ -2080,9 +2125,11 @@ TIME, when non-nil, supplies the timestamp component."
 
 (defun mongodb--cursor-results
     (conn database collection response first-batch-key &optional get-more-options)
-  "Return all cursor results from RESPONSE."
+  "Return all cursor results from RESPONSE using CONN.
+DATABASE, COLLECTION, FIRST-BATCH-KEY, and GET-MORE-OPTIONS describe the cursor
+and subsequent getMore commands."
   (let* ((cursor (cdr (assoc "cursor" response)))
-         (results (append (mongodb--cursor-batch cursor first-batch-key) nil))
+         (batches (list (mongodb--cursor-batch cursor first-batch-key)))
          (cursor-id (mongodb--cursor-id cursor))
          (collection (mongodb--cursor-namespace-collection cursor database collection)))
     (while (and (integerp cursor-id) (/= cursor-id 0))
@@ -2093,9 +2140,9 @@ TIME, when non-nil, supplies the timestamp component."
                  ("collection" . ,collection)
                  ,@(mongodb--option-pairs get-more-options))))
              (next (cdr (assoc "cursor" reply))))
-        (setq results (append results (mongodb--cursor-batch next "nextBatch")))
+        (push (mongodb--cursor-batch next "nextBatch") batches)
         (setq cursor-id (mongodb--cursor-id next))))
-    results))
+    (apply #'append (nreverse batches))))
 
 ;;;; Public command helpers
 
@@ -2137,7 +2184,8 @@ TIME, when non-nil, supplies the timestamp component."
 
 (defun mongodb-find-command
     (collection &optional filter projection limit skip sort options)
-  "Return a MongoDB find command document for COLLECTION."
+  "Return a MongoDB find command document for COLLECTION.
+FILTER, PROJECTION, LIMIT, SKIP, SORT, and OPTIONS map to find command fields."
   (let* ((option-pairs (mongodb--option-pairs options))
          (batch-size (or (cdr (assoc "batchSize" option-pairs)) 1000))
          (extra (mongodb--remove-option-pairs '("batchSize" "maxAwaitTimeMS")
@@ -2193,7 +2241,8 @@ TIME, when non-nil, supplies the timestamp component."
         (mongodb-document nil))))
 
 (defun mongodb-aggregate-command (collection pipeline &optional options)
-  "Return a MongoDB aggregate command document for COLLECTION and PIPELINE."
+  "Return a MongoDB aggregate command document for COLLECTION and PIPELINE.
+OPTIONS are appended to the aggregate command after cursor normalization."
   (let* ((pairs (mongodb--option-pairs options))
          (extra (mongodb--remove-option-pairs '("cursor" "batchSize") pairs)))
     `(("aggregate" . ,collection)
