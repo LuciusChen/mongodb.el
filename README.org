@@ -1,67 +1,32 @@
 #+TITLE: mongodb.el
 
-=mongodb.el= is a native MongoDB wire protocol client for Emacs Lisp.
+=mongodb.el= is a pure Emacs Lisp MongoDB wire protocol client.
 
-It speaks modern MongoDB =OP_MSG= directly and encodes/decodes BSON in Emacs
-Lisp.  It is a command-level driver, not a JavaScript evaluator and not a JDBC
-adapter.
+It speaks BSON and MongoDB =OP_MSG= directly.  It is a command-level client,
+not a JavaScript evaluator, JDBC bridge, SQL interface, or GUI/query-console
+package.
 
 * Status
 
-This package is under active development.  It is intended to become the
-standalone protocol layer used by Clutch's =mongodb= backend.
+This package intentionally keeps a small native surface for applications such
+as Clutch.
 
-Implemented areas include:
+Supported:
 
-- BSON encode/decode for core and compatibility types
-- TCP, UNIX-domain socket, TLS, =mongodb://=, and =mongodb+srv://=
-- SCRAM-SHA-256, SCRAM-SHA-1, X.509, PLAIN, AWS, and one-step OIDC auth
-- OP_MSG command helpers, =moreToCome= unacknowledged writes, cursors,
-  getMore, killCursors, and compression (=snappy=, =zlib=, and optional =zstd=
-  via =mongodb-zstd-program=)
-- read preference, read concern, write concern, Stable API, sessions including
-  load-balanced session support, retryable reads/writes, transaction helpers,
-  and client-level =bulkWrite=
-- Single-host, direct, replica-set seed-list, and single-socket load-balanced
-  connection paths
-- connection pool helpers with =minPoolSize=, =maxPoolSize=,
-  =maxIdleTimeMS=, =waitQueueTimeoutMS=, =maxConnecting= accounting, and basic
-  generation-based pool clearing via =mongodb-pool-clear= / =mongodb-pool-ready=,
-  including ready/checkout maintenance of =minPoolSize=, load-balanced
-  per-=serviceId= clearing, optional interruption of checked-out connections,
-  and connection-count accounting;
-  =mongodb-pool-start-monitor= can run SDAM-style heartbeats for
-  non-load-balanced pools that clear unhealthy pools and mark cleared pools
-  ready again; load-balanced pools do not open dedicated monitor connections.
-  Waiting checkouts are evicted on pool clear with =RetryableError=,
-  connection-establishment / initial hello network errors get CMAP backpressure
-  labels, command-stage non-timeout network errors clear the pool or matching
-  load-balanced =serviceId= generation, =waitQueueTimeoutMS= 0 means no
-  checkout deadline, and
-  load-balanced wait queue timeouts report checked-out cursor / transaction /
-  other operation counts;
-  pooled cursor helpers keep the same checked-out connection for the initial
-  cursor command, getMore, and killCursors, including load-balanced cursors;
-  basic CMAP-style events are exposed via =mongodb-pool-event-hook=, including
-  sanitized pool addresses, non-default pool-created options, Lisp symbol
-  =reason= values, CMAP string =reason-string= values, and load-balanced
-  =service-id= only where applicable
-- basic command monitoring events via =mongodb-command-event-hook=, including
-  request id correlation, command duration, OP_MSG document sequence exposure,
-  bulkWrite =operation-id= correlation, sensitive command redaction, and
-  pooled =driver-connection-id= / load-balanced =serviceId= on command events
-- SDAM heartbeat monitoring events via =mongodb-sdam-event-hook=, including
-  paired =server-heartbeat-started= / =server-heartbeat-succeeded= /
-  =server-heartbeat-failed= events, topology/server opening/closed lifecycle
-  events, plus =server-description-changed= and
-  =topology-description-changed= events for monitored topology state changes
-- SDAM topology availability predicates:
-  =mongodb-topology-description-has-readable-server-p= and
-  =mongodb-topology-description-has-writable-server-p=
+- BSON encode/decode and explicit BSON wrapper values
+- direct TCP connections, optional TLS, =mongodb://= URLs, and plist params
+- SCRAM-SHA-256 and SCRAM-SHA-1 authentication
+- OP_MSG command execution and cursor =getMore= / =killCursors=
+- helpers for find, aggregate, count, distinct, insert, update, delete,
+  collection/index metadata, create/drop collection/index, explain, and drop
+  database
 
-Known incomplete areas include complete SDAM/CMAP/command event and waitQueue
-spec-suite parity, client-side field level encryption, and full MongoDB
-upstream specification-suite parity.
+Out of scope for now:
+
+- =mongodb+srv=, seed-list discovery, SDAM, pooling, sessions, transactions,
+  retryable reads/writes, compression, load-balanced mode
+- X.509, PLAIN, AWS, OIDC, client-side encryption, change streams, bulkWrite
+- MongoDB Shell JavaScript, SQL, JDBC, ODBC, BI Connector, or GUI behavior
 
 * Usage
 
@@ -80,38 +45,19 @@ Run arbitrary command documents with =mongodb-command=:
 (mongodb-command conn "admin" '(("ping" . 1)))
 #+end_src
 
-=mongodb-command= is the generic RunCommand surface: it does not inherit
-connection-level =readConcern= or =writeConcern=, and it returns =ok:1=
-=writeErrors= / =writeConcernError= replies as ordinary response documents.
-Include those fields explicitly when using a raw command.  Typed helpers such as
-=mongodb-find=, =mongodb-insert=, =mongodb-update=, and =mongodb-create-index= keep the
-driver helper behavior and apply configured concerns where supported.
-
 Use explicit BSON wrappers when the wire type matters:
 
 #+begin_src emacs-lisp
-(mongodb-insert conn "app" "events"
-              (list (list (cons "_id" (mongodb-new-object-id))
-                          (cons "createdAt" (mongodb-datetime 1704164645678))
-                          (cons "counter" (mongodb-int64 9223372036854775807)))))
+(mongodb-insert
+ conn "app" "events"
+ (list (list (cons "_id" (mongodb-new-object-id))
+             (cons "createdAt" (mongodb-datetime 1704164645678))
+             (cons "counter" (mongodb-int64 9223372036854775807)))))
 #+end_src
-
-* SQL and Query Surfaces
-
-=mongodb.el= does not implement SQL.  MongoDB's native wire protocol accepts
-MongoDB command documents, not SQL text.
-
-A non-JDBC SQL layer can still be built on top of this package, but it should
-be a separate caller-facing package or application surface.  That layer would
-parse SQL, map the supported subset to MongoDB commands or aggregation
-pipelines, then call public APIs such as =mongodb-command=, =mongodb-find=, and
-=mongodb-aggregate=.  It should not add a SQL parser, relational planner, JDBC
-driver, ODBC bridge, =mongosqld= client, or GUI/query-console code to
-=mongodb.el= core.
 
 * Tests
 
-Run unit tests from this repository:
+Run unit tests:
 
 #+begin_src sh
 emacs -Q --batch -L . -l ert -l test/mongodb-test.el \
@@ -121,29 +67,8 @@ emacs -Q --batch -L . -l ert -l test/mongodb-test.el \
 Byte-compile:
 
 #+begin_src sh
-emacs -Q --batch -L . -f batch-byte-compile mongodb*.el test/mongodb-test.el
+emacs -Q --batch -L . -f batch-byte-compile mongodb.el test/mongodb-test.el
 #+end_src
 
-* Module Layout
-
-=mongodb.el= remains the public entry point.  Implementation modules are split by
-stable protocol responsibility:
-
-- =mongodb-bson.el= contains BSON value wrappers, BSON encode/decode, byte
-  primitives, checksums, and cryptographic byte helpers.
-- =mongodb-wire.el= contains OP_MSG, OP_COMPRESSED, legacy OP_REPLY frame
-  encoding/decoding, snappy/zlib/zstd wire compression helpers, and responseTo
-  validation.  zstd uses the optional =mongodb-zstd-program= executable.
-- =mongodb-params.el= contains URI parsing, SRV DNS resolution, connection
-  params normalization, TLS params, credentials, read/write concern, server API,
-  and pool option helpers.
-- =mongodb-auth.el= contains native SCRAM, X.509, PLAIN, MONGODB-AWS, and
-  MONGODB-OIDC authentication plus ObjectId/session id byte helpers.
-- =mongodb.el= assembles the client, including connection-state transport
-  send/receive glue, command helpers, server selection, transactions, pooling,
-  and lifecycle management.
-
-* Documentation
-
-See [[file:docs/native-client.org][docs/native-client.org]] for current API and
-capability notes.
+For protocol changes, also run a live smoke test against a local MongoDB server
+and rerun the consuming Clutch MongoDB adapter tests.
