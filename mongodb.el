@@ -218,15 +218,6 @@ PATTERN is the regex pattern.  OPTIONS is a BSON regex option string."
   "Return VALUE packed as little-endian int64."
   (mongodb--pack-uint-le value 8))
 
-(defun mongodb--pack-uint16-le (value)
-  "Return VALUE packed as little-endian uint16."
-  (mongodb--pack-uint-le value 2))
-
-(defun mongodb--pack-uint16-be (value)
-  "Return VALUE packed as big-endian uint16."
-  (unibyte-string (logand (ash value -8) #xff)
-                  (logand value #xff)))
-
 (defun mongodb--read-byte (reader)
   "Read one byte from READER."
   (let* ((pos (mongodb--reader-pos reader))
@@ -239,6 +230,9 @@ PATTERN is the regex pattern.  OPTIONS is a BSON regex option string."
 
 (defun mongodb--read-bytes (reader size)
   "Read SIZE raw bytes from READER."
+  (unless (and (integerp size) (>= size 0))
+    (signal 'mongodb-error
+            (list (format "Invalid MongoDB wire byte count: %S" size))))
   (let* ((pos (mongodb--reader-pos reader))
          (end (+ pos size))
          (data (mongodb--reader-data reader)))
@@ -1028,16 +1022,6 @@ Arguments: NEGATIVE, COEFFICIENT, EXPONENT."
          (cl-loop for shift from 24 downto 0 by 8
                   collect (logand (ash value (- shift)) #xff))))
 
-(defun mongodb--adler32 (data)
-  "Return the Adler-32 checksum for byte string DATA."
-  (setq data (mongodb--byte-string data))
-  (let ((a 1)
-        (b 0))
-    (dotimes (i (length data))
-      (setq a (mod (+ a (aref data i)) 65521))
-      (setq b (mod (+ b a) 65521)))
-    (logior (ash b 16) a)))
-
 (defconst mongodb--crc32c-table
   (apply
    #'vector
@@ -1147,8 +1131,6 @@ Arguments: SECRET, SALT, ITERATIONS."
 (defconst mongodb--op-msg-checksum-present #x1)
 
 (defconst mongodb--op-msg-more-to-come #x2)
-
-(defconst mongodb--op-msg-exhaust-allowed #x10000)
 
 (defconst mongodb--op-msg-required-flag-mask #xffff)
 
@@ -1330,24 +1312,11 @@ Signal when a reply sets moreToCome unless ALLOW-MORE-TO-COME is non-nil."
          (signal 'mongodb-error
                  (list "MongoDB OP_MSG reply contained no body document"))))))
 
-(defun mongodb--decode-op-msg (message &optional allow-more-to-come)
-  "Decode an OP_MSG MESSAGE and return its body document.
-Signal when a reply sets moreToCome unless ALLOW-MORE-TO-COME is non-nil."
-  (mongodb--decoded-message-document
-   (mongodb--decode-op-msg-frame message allow-more-to-come)))
-
 (defun mongodb--decode-message-frame (message &optional allow-more-to-come)
   "Decode a MongoDB OP_MSG wire MESSAGE and return a decoded frame.
 
 Arguments: MESSAGE, ALLOW-MORE-TO-COME."
   (mongodb--decode-op-msg-frame message allow-more-to-come))
-
-(defun mongodb--decode-message (message &optional allow-more-to-come)
-  "Decode a MongoDB wire MESSAGE and return its body document.
-
-Arguments: MESSAGE, ALLOW-MORE-TO-COME."
-  (mongodb--decoded-message-document
-   (mongodb--decode-message-frame message allow-more-to-come)))
 
 (defun mongodb--validate-response-to (frame expected-response-to)
   "Signal unless FRAME's responseTo matches EXPECTED-RESPONSE-TO."
@@ -1381,7 +1350,8 @@ Arguments: MESSAGE, ALLOW-MORE-TO-COME."
   (max-message-size-bytes 48000000)
   (max-write-batch-size 100000)
   (closed nil)
-  live)
+  live
+  (busy nil))
 
 (defconst mongodb--scram-auth-mechanisms '("SCRAM-SHA-256" "SCRAM-SHA-1"))
 
@@ -1423,11 +1393,22 @@ Arguments: MESSAGE, ALLOW-MORE-TO-COME."
 
 (defun mongodb--truthy-string-p (value)
   "Return non-nil when VALUE is a truthy MongoDB URI boolean."
-  (and value (member (downcase value) '("true" "1"))))
+  (and value (not (null (member (downcase value) '("true" "1"))))))
 
 (defun mongodb--falsey-string-p (value)
   "Return non-nil when VALUE is a falsey MongoDB URI boolean."
-  (and value (member (downcase value) '("false" "0"))))
+  (and value (not (null (member (downcase value) '("false" "0"))))))
+
+(defun mongodb--parse-uri-boolean (value option)
+  "Return URI boolean VALUE for OPTION, or nil when VALUE is absent."
+  (cond
+   ((null value) nil)
+   ((mongodb--truthy-string-p value) t)
+   ((mongodb--falsey-string-p value) nil)
+   (t
+    (signal 'mongodb-error
+            (list (format "Invalid MongoDB URI boolean for %s: %S"
+                          option value))))))
 
 (defun mongodb--parse-host-port (hostspec)
   "Return (HOST . PORT) parsed from HOSTSPEC."
@@ -1443,8 +1424,12 @@ Arguments: MESSAGE, ALLOW-MORE-TO-COME."
   "Return normalized MongoDB connection PARAMS."
   (let* ((params (if (stringp params) (list :url params) params))
          (url (plist-get params :url))
-         query hostspec path user password options endpoint database)
+         query hostspec path user password options endpoint database
+         tls-option tls-option-present allow-invalid tls tls-verify)
     (when url
+      (when (string-prefix-p "mongodb+srv://" url)
+        (signal 'mongodb-error
+                (list "mongodb+srv URLs are not supported by this lightweight client")))
       (unless (string-match (concat "\\`mongodb://"
                                     "\\(?:\\([^@/?]+\\)@\\)?"
                                     "\\([^/?]+\\)"
@@ -1453,9 +1438,6 @@ Arguments: MESSAGE, ALLOW-MORE-TO-COME."
                             url)
         (signal 'mongodb-error
                 (list (format "Unsupported MongoDB URL: %s" url))))
-      (when (string-match-p "\\`mongodb\\+srv://" url)
-        (signal 'mongodb-error
-                (list "mongodb+srv URLs are not supported by this lightweight client")))
       (let ((userinfo (match-string 1 url)))
         (setq hostspec (match-string 2 url))
         (setq path (match-string 3 url))
@@ -1466,6 +1448,30 @@ Arguments: MESSAGE, ALLOW-MORE-TO-COME."
             (setq user (mongodb--url-decode raw-user))
             (setq password (mongodb--url-decode raw-pass))))))
     (setq options (mongodb--parse-query query))
+    (setq tls-option-present (or (plist-member params :tls)
+                                 (plist-member params :ssl)))
+    (setq tls-option (if (plist-member params :tls)
+                         (plist-get params :tls)
+                       (plist-get params :ssl)))
+    (setq tls (if tls-option-present
+                  (and tls-option (not (eq tls-option :false)))
+                (mongodb--parse-uri-boolean
+                 (or (mongodb--query-option options "tls")
+                     (mongodb--query-option options "ssl"))
+                 "tls")))
+    (setq allow-invalid
+          (mongodb--query-option options "tlsAllowInvalidCertificates"))
+    (when allow-invalid
+      (mongodb--parse-uri-boolean allow-invalid
+                                  "tlsAllowInvalidCertificates"))
+    (setq tls-verify
+          (cond
+           ((plist-member params :tls-verify)
+            (let ((value (plist-get params :tls-verify)))
+              (and value (not (eq value :false)))))
+           ((mongodb--truthy-string-p allow-invalid) nil)
+           ((mongodb--falsey-string-p allow-invalid) t)
+           (t mongodb-tls-verify-server)))
     (setq endpoint
           (mongodb--parse-host-port
            (or hostspec
@@ -1487,16 +1493,8 @@ Arguments: MESSAGE, ALLOW-MORE-TO-COME."
                            database)
           :auth-mechanism (or (plist-get params :auth-mechanism)
                               (mongodb--query-option options "authMechanism"))
-          :tls (or (plist-get params :tls)
-                   (plist-get params :ssl)
-                   (mongodb--truthy-string-p
-                    (or (mongodb--query-option options "tls")
-                        (mongodb--query-option options "ssl"))))
-          :tls-verify (if (or (mongodb--falsey-string-p
-                               (mongodb--query-option options "tlsAllowInvalidCertificates"))
-                              (eq (plist-get params :tls-verify) :false))
-                          :false
-                        (plist-get params :tls-verify)))))
+          :tls tls
+          :tls-verify tls-verify)))
 
 (defun mongodb--params-credential (params)
   "Return MongoDB credential parsed from normalized PARAMS."
@@ -1524,13 +1522,6 @@ Arguments: MESSAGE, ALLOW-MORE-TO-COME."
                              (garbage-collect))
                      nil nil t))))
     (substring bytes 0 count)))
-
-(defun mongodb--uuid-v4-bytes ()
-  "Return a locally generated RFC 4122 version 4 UUID as 16 bytes."
-  (let ((bytes (copy-sequence (mongodb--random-bytes 16))))
-    (aset bytes 6 (logior #x40 (logand (aref bytes 6) #x0f)))
-    (aset bytes 8 (logior #x80 (logand (aref bytes 8) #x3f)))
-    bytes))
 
 (defun mongodb--uint24-value (bytes)
   "Return the unsigned 24-bit integer represented by BYTES."
@@ -1848,18 +1839,29 @@ values."
     (setf (mongodb-conn-request-id conn) next)
     next))
 
-(defun mongodb--wait-for-bytes (conn count timeout)
-  "Wait until CONN has at least COUNT bytes before TIMEOUT, then return them."
+(defun mongodb--ensure-command-ready (conn)
+  "Ensure CONN can start a command."
+  (unless (mongodb-live-p conn)
+    (signal 'mongodb-error (list "MongoDB connection closed")))
+  (when (mongodb-conn-busy conn)
+    (signal 'mongodb-error
+            (list "MongoDB connection is already running a command"))))
+
+(defun mongodb--wait-for-bytes (conn count deadline)
+  "Wait until CONN has COUNT bytes before absolute DEADLINE."
+  (unless (and (integerp count) (>= count 0))
+    (signal 'mongodb-error
+            (list (format "Invalid MongoDB wire byte count: %S" count))))
   (let ((proc (mongodb-conn-process conn))
-        (buffer (mongodb-conn-buffer conn))
-        (deadline (+ (float-time) (or timeout mongodb-timeout-seconds))))
+        (buffer (mongodb-conn-buffer conn)))
     (with-current-buffer buffer
       (while (< (buffer-size) count)
         (unless (process-live-p proc)
           (signal 'mongodb-error (list "MongoDB connection closed")))
-        (when (> (float-time) deadline)
-          (signal 'mongodb-error (list "MongoDB response timed out")))
-        (accept-process-output proc 0.05))
+        (let ((remaining (- deadline (float-time))))
+          (when (<= remaining 0)
+            (signal 'mongodb-error (list "MongoDB response timed out")))
+          (accept-process-output proc (min remaining 0.05))))
       (let ((data (buffer-substring-no-properties (point-min) (+ (point-min) count))))
         (delete-region (point-min) (+ (point-min) count))
         (mongodb--byte-string data)))))
@@ -1867,23 +1869,45 @@ values."
 (defun mongodb--recv-message-frame (conn timeout expected-response-to)
   "Receive one MongoDB message frame from CONN within TIMEOUT.
 EXPECTED-RESPONSE-TO, when non-nil, must match the reply header."
-  (let* ((header (mongodb--wait-for-bytes conn 4 timeout))
+  (let* ((deadline (+ (float-time) (or timeout mongodb-timeout-seconds)))
+         (header (mongodb--wait-for-bytes conn 4 deadline))
          (length (mongodb--read-int32-from-string header))
-         (body (mongodb--wait-for-bytes conn (- length 4) timeout))
-         (frame (mongodb--decode-message-frame (concat header body))))
-    (mongodb--validate-response-to frame expected-response-to)
-    frame))
+         (maximum (mongodb-conn-max-message-size-bytes conn)))
+    (unless (and (integerp maximum)
+                 (>= length 16)
+                 (<= length maximum))
+      (signal 'mongodb-error
+              (list (format "Invalid MongoDB wire message length: %s" length))))
+    (let* ((body (mongodb--wait-for-bytes conn (- length 4) deadline))
+           (frame (mongodb--decode-message-frame (concat header body))))
+      (mongodb--validate-response-to frame expected-response-to)
+      frame)))
 
 (defun mongodb--send-document (conn document &optional timeout sequences)
   "Send command DOCUMENT through CONN and return the reply document."
+  (mongodb--ensure-command-ready conn)
   (let* ((request-id (mongodb--next-request-id conn))
          (message (mongodb--make-op-msg request-id document nil nil sequences)))
     (when (> (length message) (mongodb-conn-max-message-size-bytes conn))
       (signal 'mongodb-error
               (list "MongoDB command exceeds maxMessageSizeBytes")))
-    (process-send-string (mongodb-conn-process conn) message)
-    (mongodb--decoded-message-document
-     (mongodb--recv-message-frame conn timeout request-id))))
+    (setf (mongodb-conn-busy conn) t)
+    (unwind-protect
+        (condition-case err
+            (progn
+              (process-send-string (mongodb-conn-process conn) message)
+              (mongodb--decoded-message-document
+               (mongodb--recv-message-frame conn timeout request-id)))
+          (mongodb-error
+           (mongodb-disconnect conn)
+           (signal (car err) (cdr err)))
+          (quit
+           (mongodb-disconnect conn)
+           (signal (car err) (cdr err)))
+          (error
+           (mongodb-disconnect conn)
+           (signal 'mongodb-error (list (error-message-string err)))))
+      (setf (mongodb-conn-busy conn) nil))))
 
 (defun mongodb--os-type ()
   "Return a compact MongoDB client metadata OS type."
@@ -1911,13 +1935,22 @@ EXPECTED-RESPONSE-TO, when non-nil, must match the reply header."
                                     (mongodb--credential-username credential)))))
     ("$db" . "admin")))
 
+(defun mongodb--hello-limit (hello field minimum)
+  "Return positive integer FIELD from HELLO, bounded by MINIMUM."
+  (when-let* ((entry (assoc field hello)))
+    (let ((value (cdr entry)))
+      (unless (and (integerp value) (>= value minimum))
+        (signal 'mongodb-error
+                (list (format "Invalid MongoDB hello %s: %S" field value))))
+      value)))
+
 (defun mongodb--apply-hello-limits (conn hello)
-  "Apply server HELLO wire limits to CONN."
-  (when-let* ((value (cdr (assoc "maxBsonObjectSize" hello))))
+  "Validate and apply server HELLO wire limits to CONN."
+  (when-let* ((value (mongodb--hello-limit hello "maxBsonObjectSize" 5)))
     (setf (mongodb-conn-max-bson-object-size conn) value))
-  (when-let* ((value (cdr (assoc "maxMessageSizeBytes" hello))))
+  (when-let* ((value (mongodb--hello-limit hello "maxMessageSizeBytes" 16)))
     (setf (mongodb-conn-max-message-size-bytes conn) value))
-  (when-let* ((value (cdr (assoc "maxWriteBatchSize" hello))))
+  (when-let* ((value (mongodb--hello-limit hello "maxWriteBatchSize" 1)))
     (setf (mongodb-conn-max-write-batch-size conn) value)))
 
 (defun mongodb--response-ok-p (response)
@@ -1989,10 +2022,6 @@ EXPECTED-RESPONSE-TO, when non-nil, must match the reply header."
       (mongodb--signal-command-error response))
     response))
 
-(defun mongodb--operation-command (conn database command &optional timeout sequences)
-  "Run an operation COMMAND on DATABASE through CONN."
-  (mongodb-command conn database command timeout sequences))
-
 (defun mongodb--check-write-response (response)
   "Signal if a write RESPONSE contains write errors."
   (when (or (cdr (assoc "writeErrors" response))
@@ -2004,22 +2033,41 @@ EXPECTED-RESPONSE-TO, when non-nil, must match the reply header."
   "Return non-nil when GnuTLS is available."
   (and (fboundp 'gnutls-available-p) (gnutls-available-p)))
 
-(defun mongodb--upgrade-to-tls (proc host timeout)
-  "Upgrade PROC to TLS for HOST within TIMEOUT."
+(defun mongodb--upgrade-to-tls (proc host timeout verify-server)
+  "Upgrade PROC to TLS for HOST within TIMEOUT.
+When VERIFY-SERVER is non-nil, reject certificate and hostname failures."
   (unless (mongodb--tls-available-p)
     (signal 'mongodb-error (list "MongoDB TLS requires GnuTLS support")))
   (gnutls-negotiate
    :process proc
    :type 'gnutls-x509pki
    :hostname host
-   :priority "NORMAL"
-   :verify-flags nil)
+   :priority-string "NORMAL"
+   :verify-error verify-server
+   :verify-hostname-error verify-server)
   (let ((deadline (+ (float-time) timeout)))
     (while (and (eq (process-status proc) 'open)
                 (process-contact proc :gnutls-boot-parameters))
       (when (> (float-time) deadline)
         (signal 'mongodb-error (list "MongoDB TLS negotiation timed out")))
-      (accept-process-output proc 0.05))))
+      (accept-process-output proc 0.05)))
+  (unless (process-live-p proc)
+    (signal 'mongodb-error (list "MongoDB TLS connection closed"))))
+
+(defun mongodb--wait-for-connect (proc host port timeout)
+  "Wait for PROC to connect to HOST and PORT within TIMEOUT."
+  (let ((deadline (+ (float-time) timeout)))
+    (while (eq (process-status proc) 'connect)
+      (let ((remaining (- deadline (float-time))))
+        (when (<= remaining 0)
+          (signal 'mongodb-error
+                  (list (format "Timed out connecting to MongoDB at %s:%s"
+                                host port))))
+        (accept-process-output proc (min remaining 0.05))))
+    (unless (memq (process-status proc) '(open run))
+      (signal 'mongodb-error
+              (list (format "Failed to connect to MongoDB at %s:%s"
+                            host port))))))
 
 (defun mongodb-connect (params)
   "Connect to MongoDB using PARAMS and return a connection object."
@@ -2041,10 +2089,15 @@ EXPECTED-RESPONSE-TO, when non-nil, must match the reply header."
                  :buffer buffer
                  :host host
                  :service port
+                 :nowait t
                  :coding 'binary
                  :noquery t))
+          (mongodb--wait-for-connect proc host port
+                                     mongodb-connect-timeout-seconds)
           (when (plist-get params :tls)
-            (mongodb--upgrade-to-tls proc host mongodb-connect-timeout-seconds))
+            (mongodb--upgrade-to-tls
+             proc host mongodb-connect-timeout-seconds
+             (plist-get params :tls-verify)))
           (setq conn
                 (make-mongodb-conn
                  :process proc
@@ -2072,10 +2125,14 @@ EXPECTED-RESPONSE-TO, when non-nil, must match the reply header."
             (when credential
               (mongodb--authenticate conn credential hello)))
           conn)
+      (mongodb-error
+       (when (process-live-p proc) (delete-process proc))
+       (when (buffer-live-p buffer) (kill-buffer buffer))
+       (signal (car err) (cdr err)))
       (error
        (when (process-live-p proc) (delete-process proc))
        (when (buffer-live-p buffer) (kill-buffer buffer))
-       (signal (car err) (cdr err))))))
+       (signal 'mongodb-error (list (error-message-string err)))))))
 
 (defun mongodb-disconnect (conn)
   "Disconnect MongoDB CONN."
@@ -2277,17 +2334,6 @@ OPTIONS are appended to the aggregate command after cursor normalization."
                    `(("explain" . ,(mongodb-document command))
                      ,@(when-let* ((v (mongodb--explain-verbosity verbosity)))
                          `(("verbosity" . ,v))))))
-
-(defun mongodb--document-field (document field)
-  "Return FIELD from DOCUMENT."
-  (cdr (assoc field (mongodb--document-pairs document))))
-
-(defun mongodb--document-set-field (pairs field value)
-  "Return PAIRS with FIELD set to VALUE."
-  (let ((existing (assoc field pairs)))
-    (if existing
-        (progn (setcdr existing value) pairs)
-      (append pairs (list (cons field value))))))
 
 (defun mongodb--document-with-generated-id (document)
   "Return DOCUMENT with generated _id when it has none."

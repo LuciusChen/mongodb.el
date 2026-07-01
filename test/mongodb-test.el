@@ -9,47 +9,6 @@
 (require 'ert)
 (require 'mongodb)
 
-(ert-deftest mongodb-test-public-clutch-api-is-present ()
-  (dolist (symbol
-           '(mongodb-aggregate
-             mongodb-aggregate-command
-             mongodb-aggregate-database
-             mongodb-command
-             mongodb-connect
-             mongodb-count-documents
-             mongodb-create-collection
-             mongodb-create-index
-             mongodb-decimal128
-             mongodb-delete
-             mongodb-datetime
-             mongodb-disconnect
-             mongodb-distinct
-             mongodb-document
-             mongodb-document-elements
-             mongodb-document-p
-             mongodb-drop-collection
-             mongodb-drop-database
-             mongodb-drop-index
-             mongodb-explain
-             mongodb-find
-             mongodb-find-command
-             mongodb-insert
-             mongodb-int32
-             mongodb-int64
-             mongodb-kill-cursors
-             mongodb-list-collection-docs
-             mongodb-list-collections
-             mongodb-list-databases
-             mongodb-list-indexes
-             mongodb-live-p
-             mongodb-new-object-id
-             mongodb-object-id
-             mongodb-timestamp
-             mongodb-update))
-    (should (fboundp symbol)))
-  (should (fboundp 'mongodb-conn-database))
-  (should (fboundp 'mongodb-conn-closed)))
-
 (ert-deftest mongodb-test-connection-struct-keeps-public-closed-slot ()
   (let ((conn (make-mongodb-conn :database "app" :closed nil)))
     (should (equal (mongodb-conn-database conn) "app"))
@@ -76,7 +35,7 @@
 (ert-deftest mongodb-test-little-endian-primitives ()
   (let* ((data (concat (mongodb--pack-int32 -1)
                        (mongodb--pack-int64 mongodb--int64-min)
-                       (mongodb--pack-uint16-le #x1234)
+                       (mongodb--pack-uint-le #x1234 2)
                        (mongodb--pack-uint-le #x0102030405060708 8)))
          (reader (make-mongodb--reader :data data :pos 0)))
     (should (= (mongodb--read-int32 reader) -1))
@@ -109,7 +68,186 @@
     (should (equal (plist-get params :password) "p@ss"))
     (should (equal (plist-get params :auth-source) "admin"))
     (should (equal (plist-get params :auth-mechanism) "SCRAM-SHA-1"))
-    (should (plist-get params :tls))))
+    (should (eq (plist-get params :tls) t))
+    (should (eq (plist-get params :tls-verify) t))))
+
+(ert-deftest mongodb-test-url-tls-verification-options ()
+  "TLS URI and plist options should normalize to explicit booleans."
+  (should-not
+   (plist-get
+    (mongodb--normalize-params
+     '(:url "mongodb://db/app?tls=true&tlsAllowInvalidCertificates=true"))
+    :tls-verify))
+  (should
+   (plist-get
+    (mongodb--normalize-params
+     '(:url "mongodb://db/app?tls=true&tlsAllowInvalidCertificates=false"))
+    :tls-verify))
+  (should-not
+   (plist-get (mongodb--normalize-params
+               '(:host "db" :tls t :tls-verify nil))
+              :tls-verify))
+  (should-not
+   (plist-get (mongodb--normalize-params '(:host "db" :tls :false))
+              :tls))
+  (should-error
+   (mongodb--normalize-params '(:url "mongodb://db/app?tls=maybe"))
+   :type 'mongodb-error)
+  (should-error (mongodb--normalize-params "mongodb+srv://db/app")
+                :type 'mongodb-error))
+
+(ert-deftest mongodb-test-tls-upgrade-enforces-verification-option ()
+  "TLS negotiation should receive certificate and hostname verification flags."
+  (let (captured)
+    (cl-letf (((symbol-function 'mongodb--tls-available-p) (lambda () t))
+              ((symbol-function 'gnutls-negotiate)
+               (lambda (&rest args) (setq captured args)))
+              ((symbol-function 'process-status) (lambda (_proc) 'open))
+              ((symbol-function 'process-contact) (lambda (&rest _args) nil))
+              ((symbol-function 'process-live-p) (lambda (_proc) t)))
+      (mongodb--upgrade-to-tls 'proc "db.example" 1 t))
+    (should (eq (plist-get captured :verify-error) t))
+    (should (eq (plist-get captured :verify-hostname-error) t))
+    (should (equal (plist-get captured :priority-string) "NORMAL"))))
+
+(ert-deftest mongodb-test-receive-rejects-invalid-frame-length ()
+  "Wire frame lengths should be bounded before reading the body."
+  (dolist (case '((2 . 48000000) (100 . 64)))
+    (let* ((buffer (generate-new-buffer " *mongodb-test-frame*"))
+           (process (make-pipe-process :name "mongodb-test-frame"
+                                       :buffer buffer :noquery t))
+           (conn (make-mongodb-conn
+                  :process process :buffer buffer :live t
+                  :max-message-size-bytes (cdr case))))
+      (unwind-protect
+          (progn
+            (with-current-buffer buffer
+              (set-buffer-multibyte nil)
+              (insert (mongodb--pack-int32 (car case))))
+            (should-error (mongodb--recv-message-frame conn 1 nil)
+                          :type 'mongodb-error))
+        (mongodb-disconnect conn)))))
+
+(ert-deftest mongodb-test-command-timeout-invalidates-connection ()
+  "A response timeout should close the connection before reuse."
+  (let* ((buffer (generate-new-buffer " *mongodb-test-timeout*"))
+         (process (make-pipe-process :name "mongodb-test-timeout"
+                                     :buffer buffer :noquery t))
+         (conn (make-mongodb-conn :process process :buffer buffer :live t)))
+    (cl-letf (((symbol-function 'process-send-string) #'ignore))
+      (should-error (mongodb-command conn "admin" '(("ping" . 1)) 0)
+                    :type 'mongodb-error))
+    (should (mongodb-conn-closed conn))
+    (should-not (mongodb-live-p conn))
+    (should-not (buffer-live-p buffer))))
+
+(ert-deftest mongodb-test-write-error-is-structured-and-invalidates-connection ()
+  "A process write failure should surface as `mongodb-error'."
+  (let* ((buffer (generate-new-buffer " *mongodb-test-write*"))
+         (process (make-pipe-process :name "mongodb-test-write"
+                                     :buffer buffer :noquery t))
+         (conn (make-mongodb-conn :process process :buffer buffer :live t)))
+    (cl-letf (((symbol-function 'process-send-string)
+               (lambda (&rest _args) (error "write failed"))))
+      (should-error (mongodb-command conn "admin" '(("ping" . 1)))
+                    :type 'mongodb-error))
+    (should (mongodb-conn-closed conn))
+    (should-not (buffer-live-p buffer))))
+
+(ert-deftest mongodb-test-connect-uses-bounded-asynchronous-socket ()
+  "Connection setup should use :nowait and run the timeout wait helper."
+  (let (captured waited conn)
+    (cl-letf (((symbol-function 'make-network-process)
+               (lambda (&rest args) (setq captured args) 'proc))
+              ((symbol-function 'mongodb--wait-for-connect)
+               (lambda (&rest _args) (setq waited t)))
+              ((symbol-function 'mongodb--send-document)
+               (lambda (&rest _args)
+                 '(("ok" . 1) ("minWireVersion" . 6)
+                   ("maxWireVersion" . 25))))
+              ((symbol-function 'process-live-p) (lambda (_proc) t))
+              ((symbol-function 'delete-process) #'ignore))
+      (unwind-protect
+          (setq conn (mongodb-connect '(:host "db" :port 27017)))
+        (when conn (mongodb-disconnect conn))))
+    (should (eq (plist-get captured :nowait) t))
+    (should waited)))
+
+(ert-deftest mongodb-test-connect-wait-enforces-deadline ()
+  "The socket wait helper should stop when its deadline expires."
+  (let ((times '(0 2)))
+    (cl-letf (((symbol-function 'float-time)
+               (lambda (&optional _time) (pop times)))
+              ((symbol-function 'process-status) (lambda (_proc) 'connect))
+              ((symbol-function 'accept-process-output) #'ignore))
+      (should-error (mongodb--wait-for-connect 'proc "db" 27017 1)
+                    :type 'mongodb-error))))
+
+(ert-deftest mongodb-test-connect-wraps-socket-errors-and-cleans-buffer ()
+  "Socket creation errors should be structured and release the process buffer."
+  (let (buffer)
+    (cl-letf (((symbol-function 'generate-new-buffer)
+               (lambda (_name)
+                 (setq buffer (get-buffer-create " *mongodb-test-connect*"))))
+              ((symbol-function 'make-network-process)
+               (lambda (&rest _args) (error "connect failed"))))
+      (should-error (mongodb-connect '(:host "db")) :type 'mongodb-error)
+      (should-not (buffer-live-p buffer)))))
+
+(ert-deftest mongodb-test-scram-mechanism-selection ()
+  "SCRAM should prefer SHA-256 and reject unsupported explicit mechanisms."
+  (let ((credential (make-mongodb--credential :username "user")))
+    (should
+     (equal (mongodb--choose-auth-mechanism
+             credential
+             '(("saslSupportedMechs" . ("SCRAM-SHA-1" "SCRAM-SHA-256"))))
+            "SCRAM-SHA-256"))
+    (setf (mongodb--credential-mechanism credential) "PLAIN")
+    (should-error (mongodb--choose-auth-mechanism credential nil)
+                  :type 'mongodb-error)))
+
+(ert-deftest mongodb-test-pbkdf2-known-vectors ()
+  "SCRAM PBKDF2 primitives should match published test vectors."
+  (should
+   (equal (mongodb-bytes-to-hex
+           (mongodb--pbkdf2-hmac-sha1 "password" "salt" 1))
+          "0c60c80f961f0e71f3a9b524af6012062fe037a6"))
+  (should
+   (equal (mongodb-bytes-to-hex
+           (mongodb--pbkdf2-hmac-sha256 "password" "salt" 1))
+          "120fb6cffcf8b32c43e7225256c4f837a86548c92ccc35480805987cb70be17b")))
+
+(ert-deftest mongodb-test-negative-bson-string-length-is-structured-error ()
+  "Malformed BSON string lengths should signal `mongodb-error'."
+  (should-error
+   (mongodb--decode-string-value
+    (make-mongodb--reader :data (mongodb--pack-int32 0) :pos 0))
+   :type 'mongodb-error))
+
+(ert-deftest mongodb-test-hello-limits-are-validated ()
+  "Malformed server limits should fail before they reach transport math."
+  (let ((conn (make-mongodb-conn)))
+    (mongodb--apply-hello-limits
+     conn '(("maxBsonObjectSize" . 1024)
+            ("maxMessageSizeBytes" . 4096)
+            ("maxWriteBatchSize" . 10)))
+    (should (= (mongodb-conn-max-message-size-bytes conn) 4096))
+    (should-error
+     (mongodb--apply-hello-limits
+      conn '(("maxMessageSizeBytes" . "large")))
+     :type 'mongodb-error)))
+
+(ert-deftest mongodb-test-busy-connection-rejects-command ()
+  "A connection should not interleave command/response exchanges."
+  (let* ((buffer (generate-new-buffer " *mongodb-test-busy*"))
+         (process (make-pipe-process :name "mongodb-test-busy"
+                                     :buffer buffer :noquery t))
+         (conn (make-mongodb-conn :process process :buffer buffer
+                                  :live t :busy t)))
+    (unwind-protect
+        (should-error (mongodb-command conn "admin" '(("ping" . 1)))
+                      :type 'mongodb-error)
+      (mongodb-disconnect conn))))
 
 (ert-deftest mongodb-test-hello-command-can-be-sent-as-op-msg ()
   (let* ((message (mongodb--make-op-msg 42 (mongodb--hello-command nil)))

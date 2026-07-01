@@ -14,7 +14,10 @@ as Clutch.
 Supported:
 
 - BSON encode/decode and explicit BSON wrapper values
-- direct TCP connections, optional TLS, =mongodb://= URLs, and plist params
+- bounded direct TCP connections, optional TLS, =mongodb://= URLs, and plist
+  params
+- certificate and hostname verification for TLS by default; use
+  =:tls-verify nil= only for explicitly insecure endpoints
 - SCRAM-SHA-256 and SCRAM-SHA-1 authentication
 - OP_MSG command execution and cursor =getMore= / =killCursors=
 - helpers for find, aggregate, count, distinct, insert, update, delete,
@@ -44,6 +47,10 @@ Run arbitrary command documents with =mongodb-command=:
 #+begin_src emacs-lisp
 (mongodb-command conn "admin" '(("ping" . 1)))
 #+end_src
+
+Each connection executes one command at a time.  Response timeouts, malformed
+wire frames, and transport failures close the connection so it cannot be reused
+after protocol synchronization is lost.
 
 Use explicit BSON wrappers when the wire type matters:
 
