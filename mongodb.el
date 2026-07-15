@@ -6,7 +6,7 @@
 ;; Author: Lucius Chen <chenyh572@gmail.com>
 ;; Assisted-by: OpenAI Codex:gpt-5.5
 ;; Maintainer: Lucius Chen <chenyh572@gmail.com>
-;; Version: 0.1.0
+;; Version: 0.1.1
 ;; Package-Requires: ((emacs "29.1"))
 ;; Keywords: data, tools
 ;; URL: https://github.com/LuciusChen/mongodb.el
@@ -46,7 +46,22 @@
   :type 'boolean
   :group 'mongodb)
 
-(defconst mongodb-version "0.1.0")
+(defcustom mongodb-scram-max-iterations 1000000
+  "Maximum SCRAM PBKDF2 iteration count accepted from a server."
+  :type 'integer
+  :group 'mongodb)
+
+(defcustom mongodb-scram-max-rounds 4
+  "Maximum number of SCRAM continuation replies accepted."
+  :type 'integer
+  :group 'mongodb)
+
+(defcustom mongodb-max-cursor-documents 10000
+  "Maximum documents collected by one cursor helper call."
+  :type 'integer
+  :group 'mongodb)
+
+(defconst mongodb-version "0.1.1")
 
 
 
@@ -179,7 +194,13 @@ PATTERN is the regex pattern.  OPTIONS is a BSON regex option string."
 
 (cl-defstruct mongodb--reader
   data
-  (pos 0))
+  (pos 0)
+  limit)
+
+(defun mongodb--reader-limit-position (reader)
+  "Return the exclusive read boundary for READER."
+  (or (mongodb--reader-limit reader)
+      (length (mongodb--reader-data reader))))
 
 ;;;; Little-endian primitives
 
@@ -222,7 +243,7 @@ PATTERN is the regex pattern.  OPTIONS is a BSON regex option string."
   "Read one byte from READER."
   (let* ((pos (mongodb--reader-pos reader))
          (data (mongodb--reader-data reader)))
-    (when (>= pos (length data))
+    (when (>= pos (mongodb--reader-limit-position reader))
       (signal 'mongodb-error
               (list "MongoDB wire response ended unexpectedly")))
     (setf (mongodb--reader-pos reader) (1+ pos))
@@ -236,7 +257,7 @@ PATTERN is the regex pattern.  OPTIONS is a BSON regex option string."
   (let* ((pos (mongodb--reader-pos reader))
          (end (+ pos size))
          (data (mongodb--reader-data reader)))
-    (when (> end (length data))
+    (when (> end (mongodb--reader-limit-position reader))
       (signal 'mongodb-error
               (list "MongoDB wire response ended unexpectedly")))
     (setf (mongodb--reader-pos reader) end)
@@ -247,7 +268,7 @@ PATTERN is the regex pattern.  OPTIONS is a BSON regex option string."
   (let* ((pos (mongodb--reader-pos reader))
          (end (+ pos bytes))
          (data (mongodb--reader-data reader)))
-    (when (> end (length data))
+    (when (> end (mongodb--reader-limit-position reader))
       (signal 'mongodb-error
               (list "MongoDB wire response ended unexpectedly")))
     (setf (mongodb--reader-pos reader) end)
@@ -346,12 +367,62 @@ PATTERN is the regex pattern.  OPTIONS is a BSON regex option string."
   "Read a null-terminated UTF-8 string from READER."
   (let* ((data (mongodb--reader-data reader))
          (start (mongodb--reader-pos reader))
-         (end (cl-position 0 data :start start)))
+         (end (cl-position 0 data :start start
+                           :end (mongodb--reader-limit-position reader))))
     (unless end
       (signal 'mongodb-error
               (list "MongoDB wire response contains an unterminated cstring")))
     (setf (mongodb--reader-pos reader) (1+ end))
-    (decode-coding-string (substring data start end) 'utf-8 t)))
+    (mongodb--decode-utf8-strict (substring data start end))))
+
+(defun mongodb--utf8-continuation-p (byte)
+  "Return non-nil when BYTE is a UTF-8 continuation byte."
+  (and byte (<= #x80 byte) (<= byte #xbf)))
+
+(defun mongodb--valid-utf8-p (bytes)
+  "Return non-nil when BYTES is structurally valid UTF-8."
+  (let ((pos 0)
+        (length (length bytes))
+        valid)
+    (setq valid t)
+    (while (and valid (< pos length))
+      (let ((first (aref bytes pos)))
+        (cond
+         ((<= first #x7f) (setq pos (1+ pos)))
+         ((<= #xc2 first #xdf)
+          (setq valid (mongodb--utf8-continuation-p
+                       (and (< (1+ pos) length) (aref bytes (1+ pos))))
+                pos (+ pos 2)))
+         ((<= #xe0 first #xef)
+          (let ((second (and (< (1+ pos) length) (aref bytes (1+ pos))))
+                (third (and (< (+ pos 2) length) (aref bytes (+ pos 2)))))
+            (setq valid
+                  (and second
+                       (if (= first #xe0) (<= #xa0 second #xbf)
+                         (if (= first #xed) (<= #x80 second #x9f)
+                           (mongodb--utf8-continuation-p second)))
+                       (mongodb--utf8-continuation-p third))
+                  pos (+ pos 3))))
+         ((<= #xf0 first #xf4)
+          (let ((second (and (< (1+ pos) length) (aref bytes (1+ pos))))
+                (third (and (< (+ pos 2) length) (aref bytes (+ pos 2))))
+                (fourth (and (< (+ pos 3) length) (aref bytes (+ pos 3)))))
+            (setq valid
+                  (and second
+                       (if (= first #xf0) (<= #x90 second #xbf)
+                         (if (= first #xf4) (<= #x80 second #x8f)
+                           (mongodb--utf8-continuation-p second)))
+                       (mongodb--utf8-continuation-p third)
+                       (mongodb--utf8-continuation-p fourth))
+                  pos (+ pos 4))))
+         (t (setq valid nil)))))
+    valid))
+
+(defun mongodb--decode-utf8-strict (bytes)
+  "Decode UTF-8 BYTES, rejecting malformed input."
+  (unless (mongodb--valid-utf8-p bytes)
+    (signal 'mongodb-error (list "MongoDB BSON contains invalid UTF-8")))
+  (decode-coding-string bytes 'utf-8 t))
 
 (defun mongodb--encode-cstring (string)
   "Return STRING encoded as BSON cstring."
@@ -370,12 +441,15 @@ PATTERN is the regex pattern.  OPTIONS is a BSON regex option string."
 
 (defun mongodb--decode-string-value (reader)
   "Read a BSON string value from READER."
-  (let* ((length (mongodb--read-int32 reader))
-         (bytes (mongodb--read-bytes reader (1- length))))
-    (unless (zerop (mongodb--read-byte reader))
+  (let ((length (mongodb--read-int32 reader)))
+    (unless (>= length 1)
       (signal 'mongodb-error
-              (list "MongoDB BSON string is not null-terminated")))
-    (decode-coding-string bytes 'utf-8 t)))
+              (list (format "Invalid MongoDB BSON string length: %s" length))))
+    (let ((bytes (mongodb--read-bytes reader (1- length))))
+      (unless (zerop (mongodb--read-byte reader))
+        (signal 'mongodb-error
+                (list "MongoDB BSON string is not null-terminated")))
+      (mongodb--decode-utf8-strict bytes))))
 
 ;;;; BSON
 
@@ -895,8 +969,12 @@ Arguments: NEGATIVE, COEFFICIENT, EXPONENT."
             ((= combination 31)
              "NaN")
             ((>= combination 24)
-             (signal 'mongodb-error
-                     (list "Unsupported MongoDB Decimal128 combination field")))
+             ;; BID steering encodings in this range have a non-canonical
+             ;; coefficient.  BSON requires decoding them as signed zero
+             ;; while preserving the alternate exponent field.
+             (let ((exponent (- (logand (ash high -47) #x3fff)
+                                mongodb--decimal128-exponent-bias)))
+               (mongodb--format-decimal128 negative 0 exponent)))
             (t
              (let* ((exponent (- (logand (ash high -49) #x3fff)
                                  mongodb--decimal128-exponent-bias))
@@ -922,9 +1000,13 @@ Arguments: NEGATIVE, COEFFICIENT, EXPONENT."
        (#x05 (mongodb--decode-binary reader))
        (#x06 '(("$undefined" . t)))
        (#x07 (mongodb--decode-object-id reader))
-       (#x08 (if (zerop (mongodb--read-byte reader))
-                 :false
-               t))
+       (#x08
+        (pcase (mongodb--read-byte reader)
+          (0 :false)
+          (1 t)
+          (value
+           (signal 'mongodb-error
+                   (list (format "Invalid MongoDB BSON boolean: %s" value))))))
        (#x09 (mongodb--decode-datetime reader))
        (#x0a nil)
        (#x0b (mongodb--decode-regex reader))
@@ -948,23 +1030,38 @@ Arguments: NEGATIVE, COEFFICIENT, EXPONENT."
   (let* ((start (mongodb--reader-pos reader))
          (length (mongodb--read-int32 reader))
          (end (+ start length))
+         (parent-limit (mongodb--reader-limit-position reader))
          pairs)
     (when (or (< length 5)
-              (> end (length (mongodb--reader-data reader))))
+              (> end parent-limit))
       (signal 'mongodb-error
               (list (format "Invalid MongoDB BSON document length: %s" length))))
-    (while (< (mongodb--reader-pos reader) (1- end))
-      (push (mongodb--decode-element reader) pairs))
-    (unless (zerop (mongodb--read-byte reader))
-      (signal 'mongodb-error
-              (list "MongoDB BSON document is not null-terminated")))
-    (setf (mongodb--reader-pos reader) end)
+    (setf (mongodb--reader-limit reader) end)
+    (unwind-protect
+        (progn
+          (while (< (mongodb--reader-pos reader) (1- end))
+            (when (zerop (aref (mongodb--reader-data reader)
+                               (mongodb--reader-pos reader)))
+              (signal 'mongodb-error
+                      (list "MongoDB BSON document terminates before its declared end")))
+            (push (mongodb--decode-element reader) pairs))
+          (unless (= (mongodb--reader-pos reader) (1- end))
+            (signal 'mongodb-error
+                    (list "MongoDB BSON document exceeds its declared length")))
+          (unless (zerop (mongodb--read-byte reader))
+            (signal 'mongodb-error
+                    (list "MongoDB BSON document is not null-terminated"))))
+      (setf (mongodb--reader-limit reader) parent-limit))
     (nreverse pairs)))
 
 (defun mongodb--decode-document-from-string (data)
   "Decode BSON DATA into an alist."
-  (mongodb--decode-document
-   (make-mongodb--reader :data data :pos 0)))
+  (let* ((reader (make-mongodb--reader :data data :pos 0))
+         (document (mongodb--decode-document reader)))
+    (unless (= (mongodb--reader-pos reader) (length data))
+      (signal 'mongodb-error
+              (list "MongoDB BSON document has trailing bytes")))
+    document))
 
 (defun mongodb--byte-string (string)
   "Return STRING as a unibyte byte string."
@@ -1086,7 +1183,8 @@ The derived key length is SHA-256's 32-byte digest length.
 
 Arguments: SECRET, SALT, ITERATIONS."
   (unless (and (integerp iterations)
-               (> iterations 0))
+               (> iterations 0)
+               (<= iterations mongodb-scram-max-iterations))
     (signal 'mongodb-error
             (list (format "Invalid MongoDB SCRAM iteration count: %S"
                           iterations))))
@@ -1107,7 +1205,8 @@ The derived key length is SHA-1's 20-byte digest length.
 
 Arguments: SECRET, SALT, ITERATIONS."
   (unless (and (integerp iterations)
-               (> iterations 0))
+               (> iterations 0)
+               (<= iterations mongodb-scram-max-iterations))
     (signal 'mongodb-error
             (list (format "Invalid MongoDB SCRAM iteration count: %S"
                           iterations))))
@@ -1176,6 +1275,16 @@ a vector or list of BSON documents."
               identifier-bytes
               document-bytes))))
 
+(defun mongodb--validate-sequence-identifiers (sequences)
+  "Reject duplicate document sequence identifiers in SEQUENCES."
+  (let ((seen (make-hash-table :test #'equal)))
+    (dolist (sequence sequences)
+      (let ((identifier (car sequence)))
+        (when (gethash identifier seen)
+          (signal 'mongodb-error
+                  (list "MongoDB OP_MSG repeats a document sequence identifier")))
+        (puthash identifier t seen)))))
+
 (defun mongodb--make-op-msg
     (request-id document &optional flag-bits checksum sequences response-to)
   "Return an OP_MSG request REQUEST-ID containing DOCUMENT.
@@ -1183,6 +1292,7 @@ FLAG-BITS defaults to zero.  CHECKSUM, when t, appends a computed CRC-32C
 checksum; when an integer, appends that explicit uint32 checksum.  Either
 CHECKSUM value sets the checksumPresent flag.  SEQUENCES is a list of kind 1
 document sequence sections.  RESPONSE-TO defaults to zero."
+  (mongodb--validate-sequence-identifiers sequences)
   (let* ((body-document (mongodb--encode-document document))
          (sequence-bytes (apply #'concat
                                 (mapcar #'mongodb--encode-op-msg-document-sequence
@@ -1246,6 +1356,8 @@ Signal when a reply sets moreToCome unless ALLOW-MORE-TO-COME is non-nil."
          (opcode (mongodb--read-int32 reader))
          (flag-bits nil)
          (sections-end nil)
+         (sequence-identifiers (make-hash-table :test #'equal))
+         body-seen
          document)
     (unless (= length (length message))
       (signal 'mongodb-error
@@ -1268,9 +1380,14 @@ Signal when a reply sets moreToCome unless ALLOW-MORE-TO-COME is non-nil."
     (when (< sections-end (mongodb--reader-pos reader))
       (signal 'mongodb-error
               (list "MongoDB OP_MSG checksum flag set on a truncated message")))
+    (setf (mongodb--reader-limit reader) sections-end)
     (while (< (mongodb--reader-pos reader) sections-end)
       (pcase (mongodb--read-byte reader)
         (0
+         (when body-seen
+           (signal 'mongodb-error
+                   (list "MongoDB OP_MSG contains multiple body sections")))
+         (setq body-seen t)
          (setq document (mongodb--decode-document reader))
          (when (> (mongodb--reader-pos reader) sections-end)
            (signal 'mongodb-error
@@ -1283,10 +1400,20 @@ Signal when a reply sets moreToCome unless ALLOW-MORE-TO-COME is non-nil."
                      (> section-end sections-end))
              (signal 'mongodb-error
                      (list "MongoDB OP_MSG document sequence section has invalid size")))
-           (mongodb--read-cstring reader)
-           (while (< (mongodb--reader-pos reader) section-end)
-             (mongodb--decode-document reader))
-           (setf (mongodb--reader-pos reader) section-end)))
+           (let ((outer-limit (mongodb--reader-limit reader)))
+             (setf (mongodb--reader-limit reader) section-end)
+             (unwind-protect
+                 (let ((identifier (mongodb--read-cstring reader)))
+                   (when (gethash identifier sequence-identifiers)
+                     (signal 'mongodb-error
+                             (list "MongoDB OP_MSG repeats a document sequence identifier")))
+                   (puthash identifier t sequence-identifiers)
+                   (while (< (mongodb--reader-pos reader) section-end)
+                     (mongodb--decode-document reader))
+                   (unless (= (mongodb--reader-pos reader) section-end)
+                     (signal 'mongodb-error
+                             (list "MongoDB OP_MSG document sequence exceeds its section"))))
+               (setf (mongodb--reader-limit reader) outer-limit)))))
         (kind
          (signal 'mongodb-error
                  (list (format "Unexpected MongoDB OP_MSG section kind: %s"
@@ -1294,6 +1421,7 @@ Signal when a reply sets moreToCome unless ALLOW-MORE-TO-COME is non-nil."
     (unless (= (mongodb--reader-pos reader) sections-end)
       (signal 'mongodb-error
               (list "MongoDB OP_MSG sections ended at an unexpected offset")))
+    (setf (mongodb--reader-limit reader) length)
     (when (not (zerop (logand flag-bits mongodb--op-msg-checksum-present)))
       (let ((expected (mongodb--read-uint-le reader 4))
             (actual (mongodb--crc32c (substring message 0 sections-end))))
@@ -1308,9 +1436,10 @@ Signal when a reply sets moreToCome unless ALLOW-MORE-TO-COME is non-nil."
      :opcode opcode
      :flags flag-bits
      :document
-     (or document
-         (signal 'mongodb-error
-                 (list "MongoDB OP_MSG reply contained no body document"))))))
+     (if body-seen
+         document
+       (signal 'mongodb-error
+               (list "MongoDB OP_MSG reply contained no body document"))))))
 
 (defun mongodb--decode-message-frame (message &optional allow-more-to-come)
   "Decode a MongoDB OP_MSG wire MESSAGE and return a decoded frame.
@@ -1489,6 +1618,7 @@ Arguments: MESSAGE, ALLOW-MORE-TO-COME."
                         user)
           :password (or (plist-get params :password) password)
           :auth-source (or (plist-get params :auth-source)
+                           (plist-get params :auth-database)
                            (mongodb--query-option options "authSource")
                            database)
           :auth-mechanism (or (plist-get params :auth-mechanism)
@@ -1700,14 +1830,18 @@ values."
          (server-nonce (cdr (assoc "r" attrs)))
          (salt64 (cdr (assoc "s" attrs)))
          (iterations-text (cdr (assoc "i" attrs)))
-         (iterations (and iterations-text (string-to-number iterations-text))))
+         (iterations (and iterations-text
+                          (string-match-p "\\`[0-9]+\\'" iterations-text)
+                          (string-to-number iterations-text))))
     (unless (and server-nonce (string-prefix-p client-nonce server-nonce))
       (signal 'mongodb-error
               (list "MongoDB SCRAM server nonce does not extend client nonce")))
     (unless salt64
       (signal 'mongodb-error
               (list "MongoDB SCRAM server message is missing salt")))
-    (unless (and iterations (>= iterations 4096))
+    (unless (and iterations
+                 (>= iterations 4096)
+                 (<= iterations mongodb-scram-max-iterations))
       (signal 'mongodb-error
               (list "MongoDB SCRAM server message has invalid iteration count")))
     (let* ((salt (mongodb--base64-decode salt64))
@@ -1784,6 +1918,10 @@ values."
     (when (eq (cdr (assoc "done" start-response)) t)
       (signal 'mongodb-error
               (list "MongoDB SCRAM conversation ended before client proof")))
+    (when (< mongodb-scram-max-rounds 1)
+      (signal 'mongodb-error
+              (list (format "MongoDB SCRAM exceeds %d continuation rounds"
+                            mongodb-scram-max-rounds))))
     (let* ((final-data
             (mongodb--scram-client-final
              mechanism username secret client-first-bare client-nonce server-first))
@@ -1795,8 +1933,9 @@ values."
                ("payload" . ,(mongodb-binary
                                0
                                (mongodb--utf8-bytes
-                                (plist-get final-data :message)))))))
-           server-verified)
+                               (plist-get final-data :message)))))))
+           server-verified
+           (continuation-rounds 1))
       (while continue-response
         (when-let* ((payload (cdr (assoc "payload" continue-response))))
           (let* ((server-final (mongodb--scram-payload-string payload))
@@ -1813,12 +1952,17 @@ values."
               (setq server-verified t))))
         (if (eq (cdr (assoc "done" continue-response)) t)
             (setq continue-response nil)
+          (when (>= continuation-rounds mongodb-scram-max-rounds)
+            (signal 'mongodb-error
+                    (list (format "MongoDB SCRAM exceeds %d continuation rounds"
+                                  mongodb-scram-max-rounds))))
           (setq continue-response
                 (mongodb-command
                  conn source
                  `(("saslContinue" . 1)
                    ("conversationId" . ,conversation-id)
-                   ("payload" . ,(mongodb-binary 0 "")))))))
+                   ("payload" . ,(mongodb-binary 0 "")))))
+          (setq continuation-rounds (1+ continuation-rounds))))
       (unless server-verified
         (signal 'mongodb-error
                 (list "MongoDB SCRAM server signature was not returned"))))))
@@ -1883,9 +2027,67 @@ EXPECTED-RESPONSE-TO, when non-nil, must match the reply header."
       (mongodb--validate-response-to frame expected-response-to)
       frame)))
 
+(defun mongodb--validate-bson-size (conn document description)
+  "Reject DOCUMENT larger than CONN permits, naming DESCRIPTION."
+  (let ((size (length (mongodb--encode-document document)))
+        (maximum (mongodb-conn-max-bson-object-size conn)))
+    (when (> size maximum)
+      (signal 'mongodb-error
+              (list (format "%s exceeds maxBsonObjectSize (%d > %d)"
+                            description size maximum))))
+    size))
+
+(defun mongodb--validate-write-batch (conn document)
+  "Validate embedded write batch fields in command DOCUMENT for CONN."
+  (dolist (field '("documents" "updates" "deletes"))
+    (when-let* ((batch (cdr (assoc field (mongodb--document-pairs document)))))
+      (let ((count (length batch)))
+        (when (> count (mongodb-conn-max-write-batch-size conn))
+          (signal 'mongodb-error
+                  (list (format "MongoDB %s batch exceeds maxWriteBatchSize"
+                                field))))
+        (seq-doseq (item batch)
+          (mongodb--validate-bson-size conn item
+                                       (format "MongoDB %s entry" field)))))))
+
+(defun mongodb--validate-sequences (conn sequences base-message-size)
+  "Validate OP_MSG document SEQUENCES for CONN after BASE-MESSAGE-SIZE."
+  (mongodb--validate-sequence-identifiers sequences)
+  (let ((total 0)
+        (maximum (mongodb-conn-max-message-size-bytes conn)))
+    (dolist (sequence sequences)
+      (let ((identifier (car sequence))
+            (documents (cdr sequence)))
+        (unless (stringp identifier)
+          (signal 'mongodb-error
+                  (list "MongoDB document sequence identifier must be a string")))
+        (when (> (length documents) (mongodb-conn-max-write-batch-size conn))
+          (signal 'mongodb-error
+                  (list "MongoDB document sequence exceeds maxWriteBatchSize")))
+        (cl-incf total (+ 1 4 (length (mongodb--encode-cstring identifier))))
+        (seq-doseq (document documents)
+          (cl-incf total
+                   (mongodb--validate-bson-size
+                    conn document "MongoDB document sequence entry"))
+          (when (> (+ base-message-size total) maximum)
+            (signal 'mongodb-error
+                    (list "MongoDB command exceeds maxMessageSizeBytes"))))))
+    total))
+
 (defun mongodb--send-document (conn document &optional timeout sequences)
   "Send command DOCUMENT through CONN and return the reply document."
   (mongodb--ensure-command-ready conn)
+  (let* ((body-size
+          (mongodb--validate-bson-size conn document "MongoDB command document"))
+         (base-message-size (+ 16 4 1 body-size))
+         sequence-size)
+    (mongodb--validate-write-batch conn document)
+    (setq sequence-size
+          (mongodb--validate-sequences conn sequences base-message-size))
+    (when (> (+ base-message-size sequence-size)
+             (mongodb-conn-max-message-size-bytes conn))
+      (signal 'mongodb-error
+              (list "MongoDB command exceeds maxMessageSizeBytes"))))
   (let* ((request-id (mongodb--next-request-id conn))
          (message (mongodb--make-op-msg request-id document nil nil sequences)))
     (when (> (length message) (mongodb-conn-max-message-size-bytes conn))
@@ -1947,11 +2149,14 @@ EXPECTED-RESPONSE-TO, when non-nil, must match the reply header."
 (defun mongodb--apply-hello-limits (conn hello)
   "Validate and apply server HELLO wire limits to CONN."
   (when-let* ((value (mongodb--hello-limit hello "maxBsonObjectSize" 5)))
-    (setf (mongodb-conn-max-bson-object-size conn) value))
+    (setf (mongodb-conn-max-bson-object-size conn)
+          (min value (mongodb-conn-max-bson-object-size conn))))
   (when-let* ((value (mongodb--hello-limit hello "maxMessageSizeBytes" 16)))
-    (setf (mongodb-conn-max-message-size-bytes conn) value))
+    (setf (mongodb-conn-max-message-size-bytes conn)
+          (min value (mongodb-conn-max-message-size-bytes conn))))
   (when-let* ((value (mongodb--hello-limit hello "maxWriteBatchSize" 1)))
-    (setf (mongodb-conn-max-write-batch-size conn) value)))
+    (setf (mongodb-conn-max-write-batch-size conn)
+          (min value (mongodb-conn-max-write-batch-size conn)))))
 
 (defun mongodb--response-ok-p (response)
   "Return non-nil when MongoDB RESPONSE reports ok."
@@ -2155,17 +2360,39 @@ When VERIFY-SERVER is non-nil, reject certificate and hostname failures."
        (let ((process (mongodb-conn-process conn)))
          (and process (process-live-p process)))))
 
+(defun mongodb-connection-host (conn)
+  "Return the normalized server host for MongoDB CONN."
+  (mongodb-conn-host conn))
+
+(defun mongodb-connection-port (conn)
+  "Return the normalized server port for MongoDB CONN."
+  (mongodb-conn-port conn))
+
+(defun mongodb-connection-username (conn)
+  "Return the normalized username for MongoDB CONN, or nil."
+  (when-let* ((credential (mongodb-conn-credential conn)))
+    (mongodb--credential-username credential)))
+
 (defun mongodb-hello (conn &optional timeout)
   "Run MongoDB hello through CONN within optional TIMEOUT."
   (mongodb-command conn "admin" '(("hello" . 1)) timeout))
 
 (defun mongodb--cursor-batch (cursor key)
   "Return cursor KEY batch from CURSOR."
-  (or (cdr (assoc key cursor)) nil))
+  (let ((entry (and (listp cursor) (assoc key cursor))))
+    (unless (and entry
+                 (or (listp (cdr entry)) (vectorp (cdr entry))))
+      (signal 'mongodb-error
+              (list (format "MongoDB cursor contains invalid %s batch" key))))
+    (cdr entry)))
 
 (defun mongodb--cursor-id (cursor)
   "Return numeric cursor id from CURSOR."
-  (or (cdr (assoc "id" cursor)) 0))
+  (let ((entry (and (listp cursor) (assoc "id" cursor))))
+    (unless (and entry (integerp (cdr entry)))
+      (signal 'mongodb-error
+              (list "MongoDB cursor contains an invalid id")))
+    (cdr entry)))
 
 (defun mongodb--cursor-namespace-collection (cursor database fallback)
   "Return collection name for CURSOR in DATABASE, falling back to FALLBACK."
@@ -2185,21 +2412,45 @@ When VERIFY-SERVER is non-nil, reject certificate and hostname failures."
   "Return all cursor results from RESPONSE using CONN.
 DATABASE, COLLECTION, FIRST-BATCH-KEY, and GET-MORE-OPTIONS describe the cursor
 and subsequent getMore commands."
+  (unless (and (integerp mongodb-max-cursor-documents)
+               (>= mongodb-max-cursor-documents 0))
+    (signal 'mongodb-error
+            (list "mongodb-max-cursor-documents must be a non-negative integer")))
   (let* ((cursor (cdr (assoc "cursor" response)))
-         (batches (list (mongodb--cursor-batch cursor first-batch-key)))
          (cursor-id (mongodb--cursor-id cursor))
-         (collection (mongodb--cursor-namespace-collection cursor database collection)))
-    (while (and (integerp cursor-id) (/= cursor-id 0))
-      (let* ((reply
-              (mongodb-command
-               conn database
-               `(("getMore" . ,cursor-id)
-                 ("collection" . ,collection)
-                 ,@(mongodb--option-pairs get-more-options))))
-             (next (cdr (assoc "cursor" reply))))
-        (push (mongodb--cursor-batch next "nextBatch") batches)
-        (setq cursor-id (mongodb--cursor-id next))))
-    (apply #'append (nreverse batches))))
+         (collection (mongodb--cursor-namespace-collection cursor database collection))
+         head tail
+         (count 0))
+    (cl-labels
+        ((fail-limit ()
+           (when (and (integerp cursor-id) (/= cursor-id 0))
+             (ignore-errors
+               (mongodb-kill-cursors conn database collection (list cursor-id))))
+           (signal 'mongodb-error
+                   (list (format "MongoDB cursor exceeds %d-document limit"
+                                 mongodb-max-cursor-documents))))
+         (add-batch (batch)
+           (seq-doseq (document batch)
+             (when (>= count mongodb-max-cursor-documents)
+               (fail-limit))
+             (let ((cell (list document)))
+               (if tail
+                   (setcdr tail cell)
+                 (setq head cell))
+               (setq tail cell
+                     count (1+ count))))))
+      (add-batch (mongodb--cursor-batch cursor first-batch-key))
+      (while (and (integerp cursor-id) (/= cursor-id 0))
+        (let* ((reply
+                (mongodb-command
+                 conn database
+                 `(("getMore" . ,cursor-id)
+                   ("collection" . ,collection)
+                   ,@(mongodb--option-pairs get-more-options))))
+               (next (cdr (assoc "cursor" reply))))
+          (setq cursor-id (mongodb--cursor-id next))
+          (add-batch (mongodb--cursor-batch next "nextBatch"))))
+      head)))
 
 ;;;; Public command helpers
 
@@ -2355,11 +2606,16 @@ OPTIONS are appended to the aggregate command after cursor normalization."
                 ((listp documents) documents)
                 (t (list documents))))
          (docs (mapcar #'mongodb--document-with-generated-id docs))
+         (sequence-p (> (length docs) 1))
          (response
-          (mongodb-command conn database
-                           `(("insert" . ,collection)
-                             ("documents" . ,(vconcat docs))
-                             ("ordered" . ,(if (eq ordered :false) :false t))))))
+          (mongodb-command
+           conn database
+           `(("insert" . ,collection)
+             ,@(unless sequence-p `(("documents" . ,(vconcat docs))))
+             ("ordered" . ,(if (eq ordered :false) :false t)))
+           nil
+           (when sequence-p
+             (list (cons "documents" (vconcat docs)))))))
     (mongodb--check-write-response response)))
 
 (defun mongodb-delete (conn database collection filter &optional multi)

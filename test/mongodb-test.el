@@ -9,6 +9,13 @@
 (require 'ert)
 (require 'mongodb)
 
+(defun mongodb-test--hex-bytes (hex)
+  "Return unibyte data decoded from HEX."
+  (apply #'unibyte-string
+         (cl-loop for offset from 0 below (length hex) by 2
+                  collect (string-to-number
+                           (substring hex offset (+ offset 2)) 16))))
+
 (ert-deftest mongodb-test-connection-struct-keeps-public-closed-slot ()
   (let ((conn (make-mongodb-conn :database "app" :closed nil)))
     (should (equal (mongodb-conn-database conn) "app"))
@@ -224,6 +231,142 @@
     (make-mongodb--reader :data (mongodb--pack-int32 0) :pos 0))
    :type 'mongodb-error))
 
+(ert-deftest mongodb-test-bson-corpus-decode-errors-are-rejected ()
+  "Reject representative malformed documents from the official BSON corpus."
+  (dolist (hex '("090000000862000200"
+                 "1C00000003666F6F001200000002626172000500000062617A000000"
+                 "0E00000002610002000000E90000"
+                 "0500000000FF"))
+    (should-error
+     (mongodb--decode-document-from-string (mongodb-test--hex-bytes hex))
+     :type 'mongodb-error)))
+
+(ert-deftest mongodb-test-decimal128-noncanonical-coefficients-decode-as-zero ()
+  "Decode the three lossy zero cases from the official BSON corpus."
+  (dolist (case '(("180000001364000000000000000000000000000000106C00" . "0")
+                  ("18000000136400DCBA9876543210DEADBEEF00000010EC00" . "-0")
+                  ("18000000136400FFFFFFFFFFFFFFFFFFFFFFFFFFFF116C00" . "0E+3")))
+    (let* ((document
+            (mongodb--decode-document-from-string
+             (mongodb-test--hex-bytes (car case))))
+           (decimal (cdr (assoc "d" document))))
+      (should (equal (cdr (assoc "$numberDecimal" decimal)) (cdr case))))))
+
+(ert-deftest mongodb-test-auth-database-alias-and-connection-metadata ()
+  "Auth database alias and normalized metadata should be public and stable."
+  (let* ((params (mongodb--normalize-params
+                  '(:url "mongodb://db.example:27018/app"
+                    :username "ada" :auth-database "accounts")))
+         (credential (mongodb--params-credential params))
+         (conn (make-mongodb-conn
+                :host (plist-get params :host)
+                :port (plist-get params :port)
+                :credential credential)))
+    (should (equal (mongodb--credential-source credential) "accounts"))
+    (should (equal (mongodb-connection-host conn) "db.example"))
+    (should (= (mongodb-connection-port conn) 27018))
+    (should (equal (mongodb-connection-username conn) "ada"))))
+
+(ert-deftest mongodb-test-write-limits-reject-before-send ()
+  "Server BSON and write batch limits should be enforced before transport."
+  (let* ((buffer (generate-new-buffer " *mongodb-test-write-limit*"))
+         (process (make-pipe-process :name "mongodb-test-write-limit"
+                                     :buffer buffer :noquery t))
+         (conn (make-mongodb-conn
+                :process process :buffer buffer :live t
+                :max-bson-object-size 64 :max-write-batch-size 1))
+         sent)
+    (unwind-protect
+        (cl-letf (((symbol-function 'process-send-string)
+                   (lambda (&rest _) (setq sent t))))
+          (should-error
+           (mongodb--send-document
+            conn `(("insert" . "items")
+                   ("documents" . ,(vector '(("x" . 1)) '(("x" . 2))))
+                   ("$db" . "app")))
+           :type 'mongodb-error)
+          (should-not sent)
+          (should-error
+           (mongodb--validate-bson-size
+            conn `(("value" . ,(make-string 100 ?x))) "test document")
+           :type 'mongodb-error))
+      (mongodb-disconnect conn))))
+
+(ert-deftest mongodb-test-cursor-document-limit-kills-open-cursor ()
+  "Cursor helpers should kill and reject results beyond their hard cap."
+  (let ((mongodb-max-cursor-documents 2)
+        commands)
+    (cl-letf (((symbol-function 'mongodb-command)
+               (lambda (_conn _database command &rest _)
+                 (push command commands)
+                 (if (assoc "killCursors" command)
+                     '(("ok" . 1))
+                   '(("ok" . 1)
+                     ("cursor" . (("id" . 11)
+                                   ("ns" . "app.users")
+                                   ("nextBatch" . ("c")))))))))
+      (should-error
+       (mongodb--cursor-results
+        :conn "app" "users"
+        '(("cursor" . (("id" . 10)
+                        ("ns" . "app.users")
+                        ("firstBatch" . ("a" "b")))))
+        "firstBatch")
+       :type 'mongodb-error))
+    (let ((kill (cl-find-if (lambda (command) (assoc "killCursors" command))
+                            commands)))
+      (should kill)
+      (should (equal (append (cdr (assoc "cursors" kill)) nil) '(11))))))
+
+(ert-deftest mongodb-test-cursor-envelope-fails-closed ()
+  "Malformed cursor ids and batches should not return partial results."
+  (should-error
+   (mongodb--cursor-results
+    :conn "app" "users"
+    '(("cursor" . (("id" . "not-an-int")
+                    ("ns" . "app.users")
+                    ("firstBatch" . ("partial")))))
+    "firstBatch")
+   :type 'mongodb-error)
+  (should-error
+   (mongodb--cursor-results
+    :conn "app" "users"
+    '(("cursor" . (("id" . 0)
+                    ("ns" . "app.users")
+                    ("firstBatch" . "not-an-array"))))
+    "firstBatch")
+   :type 'mongodb-error))
+
+(ert-deftest mongodb-test-scram-resource-limits ()
+  "SCRAM iteration and continuation work should be bounded."
+  (let ((mongodb-scram-max-iterations 1))
+    (should-error (mongodb--pbkdf2-hmac-sha256 "password" "salt" 2)
+                  :type 'mongodb-error))
+  (let ((mongodb-scram-max-rounds 2)
+        (credential (make-mongodb--credential
+                     :username "user" :password "pw" :source "admin"))
+        (calls 0))
+    (cl-letf (((symbol-function 'mongodb--scram-start-data)
+               (lambda (&rest _)
+                 '(:client-nonce "n" :client-first-bare "n=user,r=n")))
+              ((symbol-function 'mongodb--scram-start-command)
+               (lambda (&rest _) '(("saslStart" . 1))))
+              ((symbol-function 'mongodb--scram-payload-string)
+               (lambda (&rest _) ""))
+              ((symbol-function 'mongodb--scram-client-final)
+               (lambda (&rest _)
+                 (list :message "proof" :server-signature "signature")))
+              ((symbol-function 'mongodb-command)
+               (lambda (&rest _)
+                 (setq calls (1+ calls))
+                 '(("done" . :false)
+                   ("conversationId" . 1)
+                   ("payload" . "")))))
+      (should-error
+       (mongodb--authenticate-scram :conn credential "SCRAM-SHA-256")
+       :type 'mongodb-error))
+    (should (= calls 3))))
+
 (ert-deftest mongodb-test-hello-limits-are-validated ()
   "Malformed server limits should fail before they reach transport math."
   (let ((conn (make-mongodb-conn)))
@@ -235,7 +378,15 @@
     (should-error
      (mongodb--apply-hello-limits
       conn '(("maxMessageSizeBytes" . "large")))
-     :type 'mongodb-error)))
+     :type 'mongodb-error))
+  (let ((conn (make-mongodb-conn)))
+    (mongodb--apply-hello-limits
+     conn `(("maxBsonObjectSize" . ,(* 1024 1024 1024))
+            ("maxMessageSizeBytes" . ,mongodb--int32-max)
+            ("maxWriteBatchSize" . 1000000)))
+    (should (= (mongodb-conn-max-bson-object-size conn) (* 16 1024 1024)))
+    (should (= (mongodb-conn-max-message-size-bytes conn) 48000000))
+    (should (= (mongodb-conn-max-write-batch-size conn) 100000))))
 
 (ert-deftest mongodb-test-busy-connection-rejects-command ()
   "A connection should not interleave command/response exchanges."
@@ -258,6 +409,40 @@
     (should (equal (cdr (assoc "$db" document)) "admin"))
     (should (assoc "os" client))
     (should (assoc "type" (cdr (assoc "os" client))))))
+
+(ert-deftest mongodb-test-op-msg-requires-one-body-and-unique-sequences ()
+  "OP_MSG replies should have one body and unique sequence identifiers."
+  (cl-labels
+      ((frame (sections)
+         (let ((length (+ 16 4 (length sections))))
+           (concat (mongodb--pack-int32 length)
+                   (mongodb--pack-int32 1)
+                   (mongodb--pack-int32 0)
+                   (mongodb--pack-int32 mongodb--op-msg)
+                   (mongodb--pack-int32 0)
+                   sections))))
+    (let ((body (mongodb--encode-document '(("ok" . 1))))
+          (sequence
+           (mongodb--encode-op-msg-document-sequence
+            '("documents" . [(("x" . 1))]))))
+      (should-error
+       (mongodb--decode-message-frame
+        (frame (concat (unibyte-string 0) body
+                       (unibyte-string 0) body)))
+       :type 'mongodb-error)
+      (should
+       (mongodb--decoded-message-document
+        (mongodb--decode-message-frame
+         (frame (concat sequence (unibyte-string 0) body)))))
+      (should-error
+       (mongodb--decode-message-frame
+        (frame (concat (unibyte-string 0) body sequence sequence)))
+       :type 'mongodb-error)
+      (should-not
+       (mongodb--decoded-message-document
+        (mongodb--decode-message-frame
+         (frame (concat (unibyte-string 0)
+                        (mongodb--encode-document nil)))))))))
 
 (ert-deftest mongodb-test-command-with-db-replaces-existing-db ()
   (should (equal (mongodb--command-with-db
@@ -358,6 +543,24 @@
     (let ((docs (cdr (assoc "documents" captured))))
       (should (= (length docs) 1))
       (should (equal (cdr (assoc "name" (aref docs 0))) "Ada")))))
+
+(ert-deftest mongodb-test-multi-insert-uses-document-sequence ()
+  "Multi-document inserts should use an OP_MSG document sequence."
+  (let (captured)
+    (cl-letf (((symbol-function 'mongodb-command)
+               (lambda (_conn _database command timeout sequences)
+                 (setq captured (list command timeout sequences))
+                 '(("ok" . 1)))))
+      (mongodb-insert :conn "app" "users"
+                      '((("name" . "Ada")) (("name" . "Grace")))))
+    (pcase-let ((`(,command ,timeout ,sequences) captured))
+      (should-not timeout)
+      (should-not (assoc "documents" command))
+      (should (equal (caar sequences) "documents"))
+      (let ((documents (cdar sequences)))
+        (should (= (length documents) 2))
+        (should (seq-every-p (lambda (document) (assoc "_id" document))
+                             documents))))))
 
 (ert-deftest mongodb-test-update-and-delete-command-shapes ()
   (let (commands)

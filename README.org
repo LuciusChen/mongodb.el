@@ -52,6 +52,13 @@ Each connection executes one command at a time.  Response timeouts, malformed
 wire frames, and transport failures close the connection so it cannot be reused
 after protocol synchronization is lost.
 
+Version 0.1.1 validates BSON document boundaries, UTF-8 and booleans strictly,
+enforces negotiated write limits, bounds SCRAM work, and caps cursor helpers at
+=mongodb-max-cursor-documents= (10,000 by default).  Plist connections may use
+=:auth-database= as an alias for =:auth-source=.  Normalized connection metadata
+is available through =mongodb-connection-host=, =mongodb-connection-port=, and
+=mongodb-connection-username=.
+
 Use explicit BSON wrappers when the wire type matters:
 
 #+begin_src emacs-lisp
