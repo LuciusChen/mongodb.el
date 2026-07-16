@@ -2236,7 +2236,7 @@ EXPECTED-RESPONSE-TO, when non-nil, must match the reply header."
 
 (defun mongodb--tls-available-p ()
   "Return non-nil when GnuTLS is available."
-  (and (fboundp 'gnutls-available-p) (gnutls-available-p)))
+  (gnutls-available-p))
 
 (defun mongodb--upgrade-to-tls (proc host timeout verify-server)
   "Upgrade PROC to TLS for HOST within TIMEOUT.
@@ -2284,60 +2284,60 @@ When VERIFY-SERVER is non-nil, reject certificate and hostname failures."
          (buffer (generate-new-buffer (format " *mongodb %s:%s*" host port)))
          (proc nil)
          conn)
-    (with-current-buffer buffer
-      (set-buffer-multibyte nil))
-    (condition-case err
-        (progn
-          (setq proc
-                (make-network-process
-                 :name (format "mongodb-%s:%s" host port)
-                 :buffer buffer
-                 :host host
-                 :service port
-                 :nowait t
-                 :coding 'binary
-                 :noquery t))
-          (mongodb--wait-for-connect proc host port
-                                     mongodb-connect-timeout-seconds)
-          (when (plist-get params :tls)
-            (mongodb--upgrade-to-tls
-             proc host mongodb-connect-timeout-seconds
-             (plist-get params :tls-verify)))
-          (setq conn
-                (make-mongodb-conn
-                 :process proc
-                 :buffer buffer
-                 :host host
-                 :port port
-                 :database database
-                 :params params
-                 :credential credential
-                 :closed nil
-                 :live t))
-          (let ((hello (mongodb--send-document
-                        conn (mongodb--hello-command credential)
-                        mongodb-connect-timeout-seconds)))
-            (unless (mongodb--response-ok-p hello)
-              (mongodb--signal-command-error hello))
-            (mongodb--apply-hello-limits conn hello)
-            (let ((min-wire (or (cdr (assoc "minWireVersion" hello)) 0))
-                  (max-wire (or (cdr (assoc "maxWireVersion" hello)) 0)))
-              (when (or (> min-wire mongodb--client-max-wire-version)
-                        (< max-wire mongodb--client-min-wire-version))
-                (signal 'mongodb-error
-                        (list (format "Unsupported MongoDB wire version range: server %s-%s"
-                                      min-wire max-wire)))))
-            (when credential
-              (mongodb--authenticate conn credential hello)))
-          conn)
-      (mongodb-error
-       (when (process-live-p proc) (delete-process proc))
-       (when (buffer-live-p buffer) (kill-buffer buffer))
-       (signal (car err) (cdr err)))
-      (error
-       (when (process-live-p proc) (delete-process proc))
-       (when (buffer-live-p buffer) (kill-buffer buffer))
-       (signal 'mongodb-error (list (error-message-string err)))))))
+    (unwind-protect
+        (condition-case err
+            (progn
+              (with-current-buffer buffer
+                (set-buffer-multibyte nil))
+              (setq proc
+                    (make-network-process
+                     :name (format "mongodb-%s:%s" host port)
+                     :buffer buffer
+                     :host host
+                     :service port
+                     :nowait t
+                     :coding 'binary
+                     :noquery t))
+              (mongodb--wait-for-connect proc host port
+                                         mongodb-connect-timeout-seconds)
+              (when (plist-get params :tls)
+                (mongodb--upgrade-to-tls
+                 proc host mongodb-connect-timeout-seconds
+                 (plist-get params :tls-verify)))
+              (setq conn
+                    (make-mongodb-conn
+                     :process proc
+                     :buffer buffer
+                     :host host
+                     :port port
+                     :database database
+                     :params params
+                     :credential credential
+                     :closed nil
+                     :live t))
+              (let ((hello (mongodb--send-document
+                            conn (mongodb--hello-command credential)
+                            mongodb-connect-timeout-seconds)))
+                (unless (mongodb--response-ok-p hello)
+                  (mongodb--signal-command-error hello))
+                (mongodb--apply-hello-limits conn hello)
+                (let ((min-wire (or (cdr (assoc "minWireVersion" hello)) 0))
+                      (max-wire (or (cdr (assoc "maxWireVersion" hello)) 0)))
+                  (when (or (> min-wire mongodb--client-max-wire-version)
+                            (< max-wire mongodb--client-min-wire-version))
+                    (signal 'mongodb-error
+                            (list (format "Unsupported MongoDB wire version range: server %s-%s"
+                                          min-wire max-wire)))))
+                (when credential
+                  (mongodb--authenticate conn credential hello)))
+              ;; Transfer transport ownership to the returned connection.
+              (prog1 conn (setq proc nil buffer nil)))
+          (mongodb-error
+           (signal (car err) (cdr err)))
+          (error
+           (signal 'mongodb-error (list (error-message-string err)))))
+      (when (process-live-p proc) (delete-process proc))
+      (when (buffer-live-p buffer) (kill-buffer buffer)))))
 
 (defun mongodb-disconnect (conn)
   "Disconnect MongoDB CONN."

@@ -201,6 +201,32 @@
       (should-error (mongodb-connect '(:host "db")) :type 'mongodb-error)
       (should-not (buffer-live-p buffer)))))
 
+(ert-deftest mongodb-test-connect-quit-cleans-transport ()
+  "Quitting after socket setup should release its process and buffer."
+  (let (buffer process quit-seen)
+    (unwind-protect
+        (progn
+          (cl-letf (((symbol-function 'make-network-process)
+                     (lambda (&rest args)
+                       (setq buffer (plist-get args :buffer)
+                             process
+                             (make-pipe-process
+                              :name "mongodb-test-connect-quit"
+                              :buffer buffer :noquery t))))
+                    ((symbol-function 'mongodb--wait-for-connect) #'ignore)
+                    ((symbol-function 'mongodb--send-document)
+                     (lambda (&rest _args) (signal 'quit nil))))
+            (condition-case nil
+                (mongodb-connect '(:host "db" :port 27017))
+              (quit (setq quit-seen t))))
+          (should quit-seen)
+          (should-not (process-live-p process))
+          (should-not (buffer-live-p buffer)))
+      (when (process-live-p process)
+        (delete-process process))
+      (when (buffer-live-p buffer)
+        (kill-buffer buffer)))))
+
 (ert-deftest mongodb-test-scram-mechanism-selection ()
   "SCRAM should prefer SHA-256 and reject unsupported explicit mechanisms."
   (let ((credential (make-mongodb--credential :username "user")))
