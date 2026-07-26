@@ -273,14 +273,16 @@
      (mongodb--decode-document-from-string (mongodb-test--hex-bytes hex))
      :type 'mongodb-error)))
 
-(ert-deftest mongodb-test-decimal128-noncanonical-coefficients-decode-as-zero ()
-  "Decode the three lossy zero cases from the official BSON corpus.
-These are the non-NaN members of the codec's semantic-not-byte class:
-the steering encodings decode as signed zero and re-encode canonically,
-so the roundtrip changes bytes while keeping the value."
+(ert-deftest mongodb-test-noncanonical-decimal128-canonicalizes ()
+  "Non-canonical Decimal128 encodings decode to values, then re-encode canonically.
+The corpus steering encodings decode as signed zero and a garbage-payload
+NaN decodes as plain NaN -- the codec's semantic-not-byte class: the
+roundtrip changes bytes while keeping the value, and the canonical form
+is a fixed point."
   (dolist (case '(("180000001364000000000000000000000000000000106C00" . "0")
                   ("18000000136400DCBA9876543210DEADBEEF00000010EC00" . "-0")
-                  ("18000000136400FFFFFFFFFFFFFFFFFFFFFFFFFFFF116C00" . "0E+3")))
+                  ("18000000136400FFFFFFFFFFFFFFFFFFFFFFFFFFFF116C00" . "0E+3")
+                  ("18000000136400BEBAFECAEFBEADDE341200000000007C00" . "NaN")))
     (let* ((bytes (mongodb-test--hex-bytes (car case)))
            (document (mongodb--decode-document-from-string bytes))
            (decimal (cdr (assoc "d" document))))
@@ -787,28 +789,6 @@ Bare integers re-encode by numeric range, so 0x12 decodes to the
   (should (= (mongodb--cursor-id '(("id" . 9))) 9))
   (should-error (mongodb--cursor-id '(("id" . "nope")))
                 :type 'mongodb-error))
-
-(ert-deftest mongodb-test-noncanonical-decimal128-nan-canonicalizes ()
-  "A non-canonical Decimal128 NaN decodes as NaN and re-encodes canonically.
-Like double NaN payloads, this is semantic equivalence rather than byte
-identity: payload bits and the meaningless NaN sign are not preserved."
-  (let* ((low #xdeadbeefcafebabe)
-         (high (logior (ash #x1f 58) #x1234))
-         (bytes (concat (mongodb--pack-int32 24)
-                        (unibyte-string #x13) "d" (unibyte-string 0)
-                        (mongodb--pack-uint-le low 8)
-                        (mongodb--pack-uint-le high 8)
-                        (unibyte-string 0)))
-         (decoded (mongodb--decode-document-from-string bytes))
-         (value (cdr (assoc "d" decoded))))
-    (should (mongodb-decimal128-p value))
-    (should (equal (mongodb-decimal128-value value) "NaN"))
-    (should-not (equal (mongodb--encode-document decoded) bytes))
-    ;; The canonical form is a fixed point.
-    (let ((canonical (mongodb--encode-document decoded)))
-      (should (equal (mongodb--encode-document
-                      (mongodb--decode-document-from-string canonical))
-                     canonical)))))
 
 (ert-deftest mongodb-test-non-finite-doubles-roundtrip-semantically ()
   "Non-finite doubles decode as native floats and re-encode canonically.
