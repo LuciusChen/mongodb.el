@@ -86,8 +86,9 @@ emacs -Q --batch --eval '(setq load-prefer-newer t)' \
   -L . -l ert -l test/mongodb-test.el \
   --eval '(ert-run-tests-batch-and-exit)'
 
-emacs -Q --batch -L . -f batch-byte-compile mongodb.el test/mongodb-test.el
-rm -f *.elc test/*.elc
+emacs -Q --batch --eval '(setq byte-compile-error-on-warn t)' \
+  -L . -f batch-byte-compile mongodb.el test/mongodb-test.el \
+  && rm -f *.elc test/*.elc
 
 rg -n -P "(?<![A-Za-z0-9-])(clutch|mysql|pg|tramp-rpc)--[A-Za-z0-9-]+" \
   mongodb.el test/*.el
