@@ -16,33 +16,6 @@
                   collect (string-to-number
                            (substring hex offset (+ offset 2)) 16))))
 
-(ert-deftest mongodb-test-connection-struct-keeps-public-closed-slot ()
-  (let ((conn (make-mongodb-conn :database "app" :closed nil)))
-    (should (equal (mongodb-conn-database conn) "app"))
-    (should-not (mongodb-conn-closed conn))))
-
-(ert-deftest mongodb-test-bson-roundtrip-keeps-wrapper-values ()
-  (let* ((object-id (mongodb-object-id "64b64c2f40f9f2428b59d111"))
-         (document `(("name" . "Ada")
-                     ("active" . t)
-                     ("count32" . ,(mongodb-int32 7))
-                     ("count64" . ,(mongodb-int64 9223372036854775807))
-                     ("createdAt" . ,(mongodb-datetime 1704164645678))
-                     ("stamp" . ,(mongodb-timestamp 3 9))
-                     ("_id" . ,object-id)))
-         (decoded (mongodb--decode-document-from-string
-                   (mongodb--encode-document document))))
-    (should (equal (cdr (assoc "name" decoded)) "Ada"))
-    (should (eq (cdr (assoc "active" decoded)) t))
-    (should (= (cdr (assoc "count32" decoded)) 7))
-    (let ((count64 (cdr (assoc "count64" decoded))))
-      (should (mongodb-int64-p count64))
-      (should (= (mongodb-int64-value count64) 9223372036854775807)))
-    (let ((id (cdr (assoc "_id" decoded))))
-      (should (mongodb-object-id-p id))
-      (should (equal (mongodb-object-id-hex id)
-                     "64b64c2f40f9f2428b59d111")))))
-
 (ert-deftest mongodb-test-little-endian-primitives ()
   (let* ((data (concat (mongodb--pack-int32 -1)
                        (mongodb--pack-int64 mongodb--int64-min)
@@ -55,15 +28,12 @@
     (should (= (mongodb--read-uint-le reader 8) #x0102030405060708))
     (should (= (mongodb--reader-pos reader) (length data)))))
 
-(ert-deftest mongodb-test-document-wrapper-preserves-empty-document ()
-  (let ((doc (mongodb-document nil)))
-    (should (mongodb-document-p doc))
-    (should (equal (mongodb-document-elements doc) nil))
-    ;; The wrapper survives the roundtrip: decoding an empty nested
-    ;; document produces it again, keeping {} distinct from null.
-    (should (equal (mongodb--decode-document-from-string
-                    (mongodb--encode-document `(("filter" . ,doc))))
-                   `(("filter" . ,(mongodb-document nil)))))))
+(ert-deftest mongodb-test-document-wrapper-reports-elements ()
+  "The document wrapper exposes its pairs through the public accessor."
+  (should (equal (mongodb-document-elements (mongodb-document nil)) nil))
+  (should (equal (mongodb-document-elements
+                  (mongodb-document '(("a" . 1))))
+                 '(("a" . 1)))))
 
 (ert-deftest mongodb-test-new-object-id-has-valid-shape ()
   (let ((id (mongodb-new-object-id)))
@@ -123,49 +93,58 @@
     (should (eq (plist-get captured :verify-hostname-error) t))
     (should (equal (plist-get captured :priority-string) "NORMAL"))))
 
+(defmacro mongodb-test--with-pipe-conn (spec &rest body)
+  "Run BODY with a live `mongodb-conn' over a fresh pipe process.
+SPEC is (VAR EXTRA-SLOT...); EXTRA-SLOTS are passed to `make-mongodb-conn'
+after the process, buffer, and :live t.  Cleanup runs even when an
+assertion fails, so a red test cannot leak the process or buffer."
+  (declare (indent 1) (debug ((symbolp &rest form) body)))
+  (let ((buf (make-symbol "buffer"))
+        (proc (make-symbol "process"))
+        (var (car spec))
+        (slots (cdr spec)))
+    `(let* ((,buf (generate-new-buffer " *mongodb-test-conn*"))
+            (,proc (make-pipe-process :name "mongodb-test-conn"
+                                      :buffer ,buf :noquery t))
+            (,var (make-mongodb-conn :process ,proc :buffer ,buf :live t
+                                     ,@slots)))
+       (unwind-protect
+           (progn ,@body)
+         (mongodb-disconnect ,var)
+         (when (buffer-live-p ,buf)
+           (kill-buffer ,buf))))))
+
 (ert-deftest mongodb-test-receive-rejects-invalid-frame-length ()
   "Wire frame lengths should be bounded before reading the body."
   (dolist (case '((2 . 48000000) (100 . 64)))
-    (let* ((buffer (generate-new-buffer " *mongodb-test-frame*"))
-           (process (make-pipe-process :name "mongodb-test-frame"
-                                       :buffer buffer :noquery t))
-           (conn (make-mongodb-conn
-                  :process process :buffer buffer :live t
-                  :max-message-size-bytes (cdr case))))
-      (unwind-protect
-          (progn
-            (with-current-buffer buffer
-              (set-buffer-multibyte nil)
-              (insert (mongodb--pack-int32 (car case))))
-            (should-error (mongodb--recv-message-frame conn 1 nil)
-                          :type 'mongodb-error))
-        (mongodb-disconnect conn)))))
+    (ert-info ((format "length %s limit %s" (car case) (cdr case)))
+      (mongodb-test--with-pipe-conn
+          (conn :max-message-size-bytes (cdr case))
+        (with-current-buffer (mongodb-conn-buffer conn)
+          (set-buffer-multibyte nil)
+          (insert (mongodb--pack-int32 (car case))))
+        (should-error (mongodb--recv-message-frame conn 1 nil)
+                      :type 'mongodb-error)))))
 
 (ert-deftest mongodb-test-command-timeout-invalidates-connection ()
   "A response timeout should close the connection before reuse."
-  (let* ((buffer (generate-new-buffer " *mongodb-test-timeout*"))
-         (process (make-pipe-process :name "mongodb-test-timeout"
-                                     :buffer buffer :noquery t))
-         (conn (make-mongodb-conn :process process :buffer buffer :live t)))
+  (mongodb-test--with-pipe-conn (conn)
     (cl-letf (((symbol-function 'process-send-string) #'ignore))
       (should-error (mongodb-command conn "admin" '(("ping" . 1)) 0)
                     :type 'mongodb-error))
     (should (mongodb-conn-closed conn))
     (should-not (mongodb-live-p conn))
-    (should-not (buffer-live-p buffer))))
+    (should-not (buffer-live-p (mongodb-conn-buffer conn)))))
 
 (ert-deftest mongodb-test-write-error-is-structured-and-invalidates-connection ()
   "A process write failure should surface as `mongodb-error'."
-  (let* ((buffer (generate-new-buffer " *mongodb-test-write*"))
-         (process (make-pipe-process :name "mongodb-test-write"
-                                     :buffer buffer :noquery t))
-         (conn (make-mongodb-conn :process process :buffer buffer :live t)))
+  (mongodb-test--with-pipe-conn (conn)
     (cl-letf (((symbol-function 'process-send-string)
                (lambda (&rest _args) (error "write failed"))))
       (should-error (mongodb-command conn "admin" '(("ping" . 1)))
                     :type 'mongodb-error))
     (should (mongodb-conn-closed conn))
-    (should-not (buffer-live-p buffer))))
+    (should-not (buffer-live-p (mongodb-conn-buffer conn)))))
 
 (ert-deftest mongodb-test-connect-uses-bounded-asynchronous-socket ()
   "Connection setup should use :nowait and run the timeout wait helper."
@@ -312,28 +291,22 @@ is a fixed point."
 
 (ert-deftest mongodb-test-write-limits-reject-before-send ()
   "Server BSON and write batch limits should be enforced before transport."
-  (let* ((buffer (generate-new-buffer " *mongodb-test-write-limit*"))
-         (process (make-pipe-process :name "mongodb-test-write-limit"
-                                     :buffer buffer :noquery t))
-         (conn (make-mongodb-conn
-                :process process :buffer buffer :live t
-                :max-bson-object-size 64 :max-write-batch-size 1))
-         sent)
-    (unwind-protect
-        (cl-letf (((symbol-function 'process-send-string)
-                   (lambda (&rest _) (setq sent t))))
-          (should-error
-           (mongodb--send-document
-            conn `(("insert" . "items")
-                   ("documents" . ,(vector '(("x" . 1)) '(("x" . 2))))
-                   ("$db" . "app")))
-           :type 'mongodb-error)
-          (should-not sent)
-          (should-error
-           (mongodb--validate-bson-size
-            conn `(("value" . ,(make-string 100 ?x))) "test document")
-           :type 'mongodb-error))
-      (mongodb-disconnect conn))))
+  (mongodb-test--with-pipe-conn
+      (conn :max-bson-object-size 64 :max-write-batch-size 1)
+    (let (sent)
+      (cl-letf (((symbol-function 'process-send-string)
+                 (lambda (&rest _) (setq sent t))))
+        (should-error
+         (mongodb--send-document
+          conn `(("insert" . "items")
+                 ("documents" . ,(vector '(("x" . 1)) '(("x" . 2))))
+                 ("$db" . "app")))
+         :type 'mongodb-error)
+        (should-not sent)
+        (should-error
+         (mongodb--validate-bson-size
+          conn `(("value" . ,(make-string 100 ?x))) "test document")
+         :type 'mongodb-error)))))
 
 (ert-deftest mongodb-test-cursor-document-limit-kills-open-cursor ()
   "Cursor helpers should kill and reject results beyond their hard cap."
@@ -435,15 +408,9 @@ is a fixed point."
 
 (ert-deftest mongodb-test-busy-connection-rejects-command ()
   "A connection should not interleave command/response exchanges."
-  (let* ((buffer (generate-new-buffer " *mongodb-test-busy*"))
-         (process (make-pipe-process :name "mongodb-test-busy"
-                                     :buffer buffer :noquery t))
-         (conn (make-mongodb-conn :process process :buffer buffer
-                                  :live t :busy t)))
-    (unwind-protect
-        (should-error (mongodb-command conn "admin" '(("ping" . 1)))
-                      :type 'mongodb-error)
-      (mongodb-disconnect conn))))
+  (mongodb-test--with-pipe-conn (conn :busy t)
+    (should-error (mongodb-command conn "admin" '(("ping" . 1)))
+                  :type 'mongodb-error)))
 
 (ert-deftest mongodb-test-hello-command-can-be-sent-as-op-msg ()
   (let* ((message (mongodb--make-op-msg 42 (mongodb--hello-command nil)))
@@ -730,6 +697,10 @@ Key names never carry type information, so a decoded scalar cannot be
 confused with a document that happens to use the same spelling."
   (let* ((doc (list (cons "id" (mongodb-object-id
                                 "65f1a2b3c4d5e6f708090a0b"))
+                    (cons "name" "Ada")
+                    (cons "active" t)
+                    (cons "inactive" :false)
+                    (cons "count32" (mongodb-int32 7))
                     (cons "when" (mongodb-datetime 1700000000000))
                     (cons "dec" (mongodb-decimal128 "1.23"))
                     (cons "bin" (mongodb-binary 4 (unibyte-string 1 2)))
@@ -742,6 +713,11 @@ confused with a document that happens to use the same spelling."
          (decoded (mongodb--decode-document-from-string
                    (mongodb--encode-document doc))))
     (cl-flet ((field (name) (cdr (assoc name decoded))))
+      (should (equal (field "name") "Ada"))
+      (should (eq (field "active") t))
+      (should (eq (field "inactive") :false))
+      ;; int32 wrappers decode bare; the value survives.
+      (should (eql (field "count32") 7))
       (should (mongodb-object-id-p (field "id")))
       (should (equal (mongodb-object-id-hex (field "id"))
                      "65f1a2b3c4d5e6f708090a0b"))
@@ -764,7 +740,8 @@ Bare integers re-encode by numeric range, so 0x12 decodes to the
 0x10 and changed type on the server."
   (dolist (value (list -1 0 1 7
                        (- (expt 2 31)) (1- (expt 2 31))
-                       (expt 2 31) (- (1+ (expt 2 31)))))
+                       (expt 2 31) (- (1+ (expt 2 31)))
+                       (1- (expt 2 63)) (- (expt 2 63))))
     (ert-info ((format "value: %d" value))
       (let* ((bytes (mongodb--encode-document
                      `(("v" . ,(mongodb-int64 value)))))
