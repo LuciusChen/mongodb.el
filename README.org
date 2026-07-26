@@ -88,17 +88,21 @@ Use explicit BSON wrappers when the wire type matters:
 
 * Tests
 
-Run unit tests:
+Run unit tests (=load-prefer-newer= keeps a stale =.elc= from shadowing
+edited sources):
 
 #+begin_src sh
-emacs -Q --batch -L . -l ert -l test/mongodb-test.el \
+emacs -Q --batch --eval '(setq load-prefer-newer t)' \
+  -L . -l ert -l test/mongodb-test.el \
   --eval '(ert-run-tests-batch-and-exit)'
 #+end_src
 
-Byte-compile:
+Byte-compile, then delete the generated files so they cannot shadow the
+source in later runs:
 
 #+begin_src sh
 emacs -Q --batch -L . -f batch-byte-compile mongodb.el test/mongodb-test.el
+rm -f *.elc test/*.elc
 #+end_src
 
 For protocol changes, also run the live smoke test against a MongoDB server —
@@ -108,6 +112,7 @@ tests:
 
 #+begin_src sh
 MONGODB_TEST_URI=mongodb://127.0.0.1:27017/clutch_test \
-  emacs -Q --batch -L . -l ert -l test/mongodb-test.el \
+  emacs -Q --batch --eval '(setq load-prefer-newer t)' \
+  -L . -l ert -l test/mongodb-test.el \
   --eval '(ert-run-tests-batch-and-exit)'
 #+end_src
