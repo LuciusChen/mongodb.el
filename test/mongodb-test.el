@@ -35,7 +35,9 @@
     (should (equal (cdr (assoc "name" decoded)) "Ada"))
     (should (eq (cdr (assoc "active" decoded)) t))
     (should (= (cdr (assoc "count32" decoded)) 7))
-    (should (= (cdr (assoc "count64" decoded)) 9223372036854775807))
+    (let ((count64 (cdr (assoc "count64" decoded))))
+      (should (mongodb-int64-p count64))
+      (should (= (mongodb-int64-value count64) 9223372036854775807)))
     (let ((id (cdr (assoc "_id" decoded))))
       (should (mongodb-object-id-p id))
       (should (equal (mongodb-object-id-hex id)
@@ -347,7 +349,9 @@
     (let ((kill (cl-find-if (lambda (command) (assoc "killCursors" command))
                             commands)))
       (should kill)
-      (should (equal (append (cdr (assoc "cursors" kill)) nil) '(11))))))
+      (should (equal (mapcar #'mongodb-int64-value
+                             (append (cdr (assoc "cursors" kill)) nil))
+                     '(11))))))
 
 (ert-deftest mongodb-test-cursor-envelope-fails-closed ()
   "Malformed cursor ids and batches should not return partial results."
@@ -532,7 +536,11 @@
                       '(("batchSize" . 2)))
                      '("a" "b" "c" "d"))))
     (setq commands (nreverse commands))
-    (should (equal (mapcar (lambda (command) (cdr (assoc "getMore" command)))
+    ;; Cursor ids ride the wire as int64 wrappers so a small id cannot
+    ;; encode as int32, which the server rejects for getMore.
+    (should (equal (mapcar (lambda (command)
+                             (mongodb-int64-value
+                              (cdr (assoc "getMore" command))))
                            commands)
                    '(10 11)))
     (should (equal (cdr (assoc "collection" (car commands))) "users"))
@@ -645,6 +653,7 @@
         (cons "int32" 41)
         (cons "timestamp" (mongodb-timestamp 7 3))
         (cons "int64" (* 1024 mongodb--int32-max))
+        (cons "int64-small" (mongodb-int64 7))
         (cons "decimal" (mongodb-decimal128 "1.23"))
         (cons "decimal-nan" (mongodb-decimal128 "NaN"))
         (cons "min" (mongodb-min-key))
@@ -737,6 +746,61 @@ confused with a document that happens to use the same spelling."
       (should (mongodb-undefined-p (field "undef")))
       (should (mongodb-min-key-p (field "min")))
       (should (mongodb-max-key-p (field "max"))))))
+
+(ert-deftest mongodb-test-small-int64-keeps-its-width ()
+  "An int64 whose value fits an int32 must stay an int64.
+Bare integers re-encode by numeric range, so 0x12 decodes to the
+`mongodb-int64' wrapper; without it, (mongodb-int64 7) came back as
+0x10 and changed type on the server."
+  (dolist (value (list -1 0 1 7
+                       (- (expt 2 31)) (1- (expt 2 31))
+                       (expt 2 31) (- (1+ (expt 2 31)))))
+    (ert-info ((format "value: %d" value))
+      (let* ((bytes (mongodb--encode-document
+                     `(("v" . ,(mongodb-int64 value)))))
+             (decoded (mongodb--decode-document-from-string bytes))
+             (v (cdr (assoc "v" decoded))))
+        (should (= (aref bytes 4) #x12))
+        (should (mongodb-int64-p v))
+        (should (= (mongodb-int64-value v) value))
+        (should (equal (mongodb--encode-document decoded) bytes)))))
+  ;; Bare int32-range integers keep decoding bare: they re-encode as
+  ;; int32 deterministically.
+  (let* ((bytes (mongodb--encode-document '(("v" . 7))))
+         (decoded (mongodb--decode-document-from-string bytes)))
+    (should (= (aref bytes 4) #x10))
+    (should (eql (cdr (assoc "v" decoded)) 7))
+    (should (equal (mongodb--encode-document decoded) bytes))))
+
+(ert-deftest mongodb-test-cursor-id-accepts-wrapped-int64 ()
+  "Cursor ids arrive as int64 wrappers and unwrap to bare integers."
+  (should (= (mongodb--cursor-id `(("id" . ,(mongodb-int64 7)))) 7))
+  (should (= (mongodb--cursor-id `(("id" . ,(mongodb-int64 0)))) 0))
+  (should (= (mongodb--cursor-id '(("id" . 9))) 9))
+  (should-error (mongodb--cursor-id '(("id" . "nope")))
+                :type 'mongodb-error))
+
+(ert-deftest mongodb-test-noncanonical-decimal128-nan-canonicalizes ()
+  "A non-canonical Decimal128 NaN decodes as NaN and re-encodes canonically.
+Like double NaN payloads, this is semantic equivalence rather than byte
+identity: payload bits and the meaningless NaN sign are not preserved."
+  (let* ((low #xdeadbeefcafebabe)
+         (high (logior (ash #x1f 58) #x1234))
+         (bytes (concat (mongodb--pack-int32 24)
+                        (unibyte-string #x13) "d" (unibyte-string 0)
+                        (mongodb--pack-uint-le low 8)
+                        (mongodb--pack-uint-le high 8)
+                        (unibyte-string 0)))
+         (decoded (mongodb--decode-document-from-string bytes))
+         (value (cdr (assoc "d" decoded))))
+    (should (mongodb-decimal128-p value))
+    (should (equal (mongodb-decimal128-value value) "NaN"))
+    (should-not (equal (mongodb--encode-document decoded) bytes))
+    ;; The canonical form is a fixed point.
+    (let ((canonical (mongodb--encode-document decoded)))
+      (should (equal (mongodb--encode-document
+                      (mongodb--decode-document-from-string canonical))
+                     canonical)))))
 
 (ert-deftest mongodb-test-non-finite-doubles-roundtrip-semantically ()
   "Non-finite doubles decode as native floats and re-encode canonically.

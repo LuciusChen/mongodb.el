@@ -22,9 +22,14 @@ Supported:
   value re-encodes to the BSON type it came from.  Key names never
   carry type information: an alist always encodes as a document, so a
   stored document that happens to contain a =$oid= key survives
-  unchanged.  Non-finite doubles decode to native floats; the sign of a
-  NaN survives while a non-canonical NaN payload re-encodes as the
-  canonical quiet NaN, the codec's one semantic-not-byte equivalence.
+  unchanged.  int64 values keep their =mongodb-int64= wrapper so a
+  small value cannot re-encode as int32; bare integers in int32 range
+  decode bare, since they re-encode as int32 deterministically.
+  Non-finite doubles decode to native floats.  The codec's one class
+  of semantic-not-byte equivalence is non-canonical NaN
+  representations: a double NaN keeps its sign while its payload
+  re-encodes as the canonical quiet NaN, and a non-canonical
+  Decimal128 NaN re-encodes canonically.
 - bounded direct TCP connections, optional TLS, =mongodb://= URLs, and plist
   params
 - certificate and hostname verification for TLS by default; use

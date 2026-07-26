@@ -1015,9 +1015,12 @@ Arguments: NEGATIVE, COEFFICIENT, EXPONENT."
        (#x0d (mongodb--decode-code reader))
        (#x0e (mongodb--decode-symbol reader))
        (#x0f (mongodb--decode-code-with-scope reader))
+       ;; int32 decodes bare: a bare integer in range re-encodes as
+       ;; int32 deterministically.  int64 must keep its wrapper, since a
+       ;; small bare integer would re-encode as int32 and change type.
        (#x10 (mongodb--read-int32 reader))
        (#x11 (mongodb--decode-timestamp reader))
-       (#x12 (mongodb--read-int64 reader))
+       (#x12 (mongodb-int64 (mongodb--read-int64 reader)))
        (#x13 (mongodb--decode-decimal128 reader))
        (#x7f (mongodb-max-key))
        (#xff (mongodb-min-key))
@@ -2388,12 +2391,18 @@ When VERIFY-SERVER is non-nil, reject certificate and hostname failures."
     (cdr entry)))
 
 (defun mongodb--cursor-id (cursor)
-  "Return numeric cursor id from CURSOR."
-  (let ((entry (and (listp cursor) (assoc "id" cursor))))
-    (unless (and entry (integerp (cdr entry)))
+  "Return numeric cursor id from CURSOR.
+The wire value is an int64, which decodes to a `mongodb-int64'; bare
+integers are accepted for callers that construct cursors by hand."
+  (let* ((entry (and (listp cursor) (assoc "id" cursor)))
+         (value (cdr entry))
+         (id (cond ((integerp value) value)
+                   ((mongodb-int64-p value) (mongodb-int64-value value))
+                   ((mongodb-int32-p value) (mongodb-int32-value value)))))
+    (unless (and entry (integerp id))
       (signal 'mongodb-error
               (list "MongoDB cursor contains an invalid id")))
-    (cdr entry)))
+    id))
 
 (defun mongodb--cursor-namespace-collection (cursor database fallback)
   "Return collection name for CURSOR in DATABASE, falling back to FALLBACK."
@@ -2403,10 +2412,17 @@ When VERIFY-SERVER is non-nil, reject certificate and hostname failures."
       fallback)))
 
 (defun mongodb-kill-cursors (conn database collection cursor-ids)
-  "Kill CURSOR-IDS for COLLECTION in DATABASE on CONN."
+  "Kill CURSOR-IDS for COLLECTION in DATABASE on CONN.
+Each id is sent as an int64: the protocol requires longs, and a bare
+integer small enough to fit an int32 would encode as the wrong type."
   (mongodb-command conn database
                    `(("killCursors" . ,collection)
-                     ("cursors" . ,(vconcat cursor-ids)))))
+                     ("cursors" . ,(vconcat
+                                    (mapcar (lambda (id)
+                                              (if (mongodb-int64-p id)
+                                                  id
+                                                (mongodb-int64 id)))
+                                            cursor-ids))))))
 
 (defun mongodb--cursor-results
     (conn database collection response first-batch-key &optional get-more-options)
@@ -2445,7 +2461,9 @@ and subsequent getMore commands."
         (let* ((reply
                 (mongodb-command
                  conn database
-                 `(("getMore" . ,cursor-id)
+                 ;; getMore must be an int64 on the wire; a small bare
+                 ;; cursor id would otherwise encode as int32.
+                 `(("getMore" . ,(mongodb-int64 cursor-id))
                    ("collection" . ,collection)
                    ,@(mongodb--option-pairs get-more-options))))
                (next (cdr (assoc "cursor" reply))))
