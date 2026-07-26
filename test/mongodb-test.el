@@ -274,16 +274,24 @@
      :type 'mongodb-error)))
 
 (ert-deftest mongodb-test-decimal128-noncanonical-coefficients-decode-as-zero ()
-  "Decode the three lossy zero cases from the official BSON corpus."
+  "Decode the three lossy zero cases from the official BSON corpus.
+These are the non-NaN members of the codec's semantic-not-byte class:
+the steering encodings decode as signed zero and re-encode canonically,
+so the roundtrip changes bytes while keeping the value."
   (dolist (case '(("180000001364000000000000000000000000000000106C00" . "0")
                   ("18000000136400DCBA9876543210DEADBEEF00000010EC00" . "-0")
                   ("18000000136400FFFFFFFFFFFFFFFFFFFFFFFFFFFF116C00" . "0E+3")))
-    (let* ((document
-            (mongodb--decode-document-from-string
-             (mongodb-test--hex-bytes (car case))))
+    (let* ((bytes (mongodb-test--hex-bytes (car case)))
+           (document (mongodb--decode-document-from-string bytes))
            (decimal (cdr (assoc "d" document))))
       (should (mongodb-decimal128-p decimal))
-      (should (equal (mongodb-decimal128-value decimal) (cdr case))))))
+      (should (equal (mongodb-decimal128-value decimal) (cdr case)))
+      (let ((canonical (mongodb--encode-document document)))
+        (should-not (equal canonical bytes))
+        ;; The canonical form is a fixed point.
+        (should (equal (mongodb--encode-document
+                        (mongodb--decode-document-from-string canonical))
+                       canonical))))))
 
 (ert-deftest mongodb-test-auth-database-alias-and-connection-metadata ()
   "Auth database alias and normalized metadata should be public and stable."

@@ -26,10 +26,11 @@ Supported:
   small value cannot re-encode as int32; bare integers in int32 range
   decode bare, since they re-encode as int32 deterministically.
   Non-finite doubles decode to native floats.  The codec's one class
-  of semantic-not-byte equivalence is non-canonical NaN
-  representations: a double NaN keeps its sign while its payload
-  re-encodes as the canonical quiet NaN, and a non-canonical
-  Decimal128 NaN re-encodes canonically.
+  of semantic-not-byte equivalence is non-canonical encodings:
+  non-canonical Decimal128 representations — NaN as well as the BSON
+  corpus's steering encodings that decode as signed zero — and double
+  NaN payloads may re-encode canonically.  A double NaN keeps its
+  sign; Decimal128 NaN does not.
 - bounded direct TCP connections, optional TLS, =mongodb://= URLs, and plist
   params
 - certificate and hostname verification for TLS by default; use
