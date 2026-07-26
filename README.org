@@ -14,14 +14,17 @@ as Clutch.
 Supported:
 
 - BSON encode/decode and explicit BSON wrapper values.  Decoding and
-  encoding are inverse operations: arrays decode to vectors, empty
-  embedded documents to the =mongodb-document= wrapper, null to =nil=,
-  false to =:false=, non-finite doubles and the non-scalar BSON types to
-  Extended JSON tagged alists such as =(("$oid" . "…"))=, and the
-  encoder maps every one of those shapes back to the BSON type it came
-  from, so any decoded value can be written back unchanged.  Operator
-  documents such as =$set= or =$gt= are not type tags and encode as
-  plain documents.
+  encoding are inverse operations: arrays decode to vectors, embedded
+  documents to alists (an empty one to the =mongodb-document= wrapper),
+  null to =nil=, false to =:false=, and every non-scalar BSON type to
+  the wrapper struct the encoder already accepts — =mongodb-object-id=,
+  =mongodb-datetime=, =mongodb-decimal128=, and so on — so any decoded
+  value re-encodes to the BSON type it came from.  Key names never
+  carry type information: an alist always encodes as a document, so a
+  stored document that happens to contain a =$oid= key survives
+  unchanged.  Non-finite doubles decode to native floats; the sign of a
+  NaN survives while a non-canonical NaN payload re-encodes as the
+  canonical quiet NaN, the codec's one semantic-not-byte equivalence.
 - bounded direct TCP connections, optional TLS, =mongodb://= URLs, and plist
   params
 - certificate and hostname verification for TLS by default; use

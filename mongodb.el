@@ -323,13 +323,13 @@ PATTERN is the regex pattern.  OPTIONS is a BSON regex option string."
      ((= exponent 0)
       (* sign fraction (expt 2.0 -1074)))
      ((= exponent #x7ff)
-      ;; Non-finite doubles decode as tagged Extended JSON, not as bare
-      ;; strings: a bare "NaN" is indistinguishable from a stored string
-      ;; and would re-encode as one.
-      (list (cons "$numberDouble"
-                  (if (zerop fraction)
-                      (if (> sign 0) "Infinity" "-Infinity")
-                    "NaN"))))
+      ;; Non-finite doubles decode as native floats: a "NaN" string would
+      ;; be indistinguishable from a stored string and re-encode as one.
+      ;; The sign survives; a non-canonical NaN payload does not, so
+      ;; re-encoding produces the canonical quiet NaN of that sign.
+      (if (zerop fraction)
+          (* sign 1.0e+INF)
+        (copysign (/ 0.0 0.0) (float sign))))
      (t
       (* sign
          (+ 1.0 (/ fraction (float (expt 2 52))))
@@ -519,12 +519,10 @@ DOCUMENT may be a `mongodb-document', hash table, alist, or nil.  Signal
              (list (format "Invalid MongoDB ObjectId value: %S" value)))))))
 
 (defun mongodb--decode-object-id (reader)
-  "Read an ObjectId from READER as Extended JSON."
+  "Read an ObjectId from READER as a `mongodb-object-id'."
   (let ((bytes (mongodb--read-bytes reader 12)))
-    (list (cons "$oid"
-                (mapconcat (lambda (byte) (format "%02x" byte))
-                           bytes
-                           "")))))
+    (mongodb-object-id
+     (mapconcat (lambda (byte) (format "%02x" byte)) bytes ""))))
 
 (defun mongodb--uint32-value (value name)
   "Return VALUE as an unsigned 32-bit integer for MongoDB field NAME."
@@ -727,155 +725,12 @@ DOCUMENT may be a `mongodb-document', hash table, alist, or nil.  Signal
               for index from 0
               collect (cons (number-to-string index) value)))))
 
-(defconst mongodb--extended-json-type-tags
-  '("$oid" "$date" "$numberDouble" "$numberDecimal" "$numberInt" "$numberLong"
-    "$timestamp" "$binary" "$regularExpression" "$dbPointer" "$code" "$scope"
-    "$symbol" "$minKey" "$maxKey" "$undefined")
-  "Extended JSON keys that name BSON types rather than query operators.
-`mongodb-bson-decode' produces values tagged with these keys; the encoder
-recognizes them so decoded documents re-encode to their original types.
-Operator keys such as $set or $gt are not listed and stay documents.")
-
-(defun mongodb--extended-json-number (text tag)
-  "Return TEXT parsed as a double for Extended JSON TAG."
-  (pcase text
-    ("NaN" (/ 0.0 0.0))
-    ("Infinity" 1.0e+INF)
-    ("-Infinity" -1.0e+INF)
-    ((and (pred stringp)
-          (guard (string-match-p
-                  "\\`[+-]?\\(?:[0-9]+\\.?[0-9]*\\|\\.[0-9]+\\)\\(?:[eE][+-]?[0-9]+\\)?\\'"
-                  text)))
-     (float (string-to-number text)))
-    (_ (signal 'mongodb-error
-               (list (format "Invalid MongoDB Extended JSON %s value: %S"
-                             tag text))))))
-
-(defun mongodb--extended-json-value (pairs)
-  "Return the BSON wrapper for Extended JSON tagged PAIRS, or nil.
-PAIRS is tagged when its first key is one of
-`mongodb--extended-json-type-tags' -- the shapes `mongodb-bson-decode'
-produces.  Other values, including operator documents like $set, return
-nil and encode as plain documents.  A recognized tag with an invalid
-payload signals `mongodb-error': encoding it as a document would
-silently change its type, which is how a decoded ObjectId used to
-degrade into an embedded document."
-  (when (and (consp pairs)
-             (consp (car pairs))
-             (stringp (caar pairs))
-             (member (caar pairs) mongodb--extended-json-type-tags))
-    (let ((tag (caar pairs))
-          (payload (cdar pairs))
-          (rest (cdr pairs)))
-      (cl-labels
-          ((invalid ()
-             (signal 'mongodb-error
-                     (list (format "Invalid MongoDB Extended JSON %s value: %S"
-                                   tag pairs))))
-           (payload-field (field)
-             (let ((pair (and (consp payload)
-                              (consp (car-safe payload))
-                              (assoc field payload))))
-               (if pair (cdr pair) (invalid))))
-           (singleton ()
-             (when rest (invalid))))
-        (pcase tag
-          ("$oid"
-           (singleton)
-           (if (stringp payload) (mongodb-object-id payload) (invalid)))
-          ("$date"
-           (singleton)
-           (if (integerp payload) (mongodb-datetime payload) (invalid)))
-          ("$numberDouble"
-           (singleton)
-           (if (stringp payload)
-               (mongodb--extended-json-number payload tag)
-             (invalid)))
-          ("$numberDecimal"
-           (singleton)
-           (if (stringp payload) (mongodb-decimal128 payload) (invalid)))
-          ("$numberInt"
-           (singleton)
-           (cond ((integerp payload) (mongodb-int32 payload))
-                 ((and (stringp payload)
-                       (string-match-p "\\`[+-]?[0-9]+\\'" payload))
-                  (mongodb-int32 (string-to-number payload)))
-                 (t (invalid))))
-          ("$numberLong"
-           (singleton)
-           (cond ((integerp payload) (mongodb-int64 payload))
-                 ((and (stringp payload)
-                       (string-match-p "\\`[+-]?[0-9]+\\'" payload))
-                  (mongodb-int64 (string-to-number payload)))
-                 (t (invalid))))
-          ("$timestamp"
-           (singleton)
-           (let ((time (payload-field "t"))
-                 (increment (payload-field "i")))
-             (if (and (integerp time) (integerp increment))
-                 (mongodb-timestamp time increment)
-               (invalid))))
-          ("$binary"
-           (singleton)
-           (let ((subtype (payload-field "subType"))
-                 (bytes (payload-field "bytes")))
-             (unless (and (stringp subtype)
-                          (string-match-p "\\`[0-9a-fA-F]\\{1,2\\}\\'" subtype)
-                          (stringp bytes))
-               (invalid))
-             (mongodb-binary (string-to-number subtype 16)
-                             (condition-case nil
-                                 (base64-decode-string bytes)
-                               (error (invalid))))))
-          ("$regularExpression"
-           (singleton)
-           (let ((pattern (payload-field "pattern"))
-                 (options (payload-field "options")))
-             (if (and (stringp pattern) (stringp options))
-                 (mongodb-regex pattern options)
-               (invalid))))
-          ("$dbPointer"
-           (singleton)
-           (let ((ref (payload-field "$ref"))
-                 (id (payload-field "$id")))
-             (unless (stringp ref) (invalid))
-             (mongodb-db-pointer
-              ref
-              (cond ((mongodb-object-id-p id) id)
-                    ((and (consp id) (consp (car id))
-                          (equal (caar id) "$oid")
-                          (null (cdr id))
-                          (stringp (cdar id)))
-                     (mongodb-object-id (cdar id)))
-                    (t (invalid))))))
-          ("$symbol"
-           (singleton)
-           (if (stringp payload) (mongodb-symbol payload) (invalid)))
-          ("$minKey"
-           (singleton)
-           (if (eql payload 1) (mongodb-min-key) (invalid)))
-          ("$maxKey"
-           (singleton)
-           (if (eql payload 1) (mongodb-max-key) (invalid)))
-          ("$undefined"
-           (singleton)
-           (if (eq payload t) (mongodb-undefined) (invalid)))
-          ((or "$code" "$scope")
-           (let ((code-pair (assoc "$code" pairs))
-                 (scope-pair (assoc "$scope" pairs)))
-             (unless (and code-pair
-                          (stringp (cdr code-pair))
-                          (= (length pairs) (if scope-pair 2 1)))
-               (invalid))
-             (mongodb-code (cdr code-pair)
-                           (and scope-pair (cdr scope-pair))))))))))
-
 (defun mongodb--encode-element (key value)
   "Return BSON element KEY with VALUE.
-Extended JSON tagged values are recognized first, so shapes produced by
-`mongodb-bson-decode' encode back to the BSON types they came from."
-  (let* ((name (mongodb--encode-cstring key))
-         (value (or (mongodb--extended-json-value value) value)))
+An alist always encodes as an embedded document, whatever its keys look
+like; the BSON scalar types decode to their wrapper structs, so key names
+never decide a value's type."
+  (let ((name (mongodb--encode-cstring key)))
     (cond
      ((floatp value)
       (concat (unibyte-string #x01)
@@ -992,7 +847,7 @@ Extended JSON tagged values are recognized first, so shapes produced by
     (concat (mongodb--pack-int32 length) body)))
 
 (defun mongodb--decode-binary (reader)
-  "Read BSON binary from READER as Extended JSON-ish data."
+  "Read BSON binary from READER as a `mongodb-binary'."
   (let* ((size (mongodb--read-int32 reader))
          (subtype (mongodb--read-byte reader))
          (bytes (if (= subtype 2)
@@ -1003,51 +858,41 @@ Extended JSON tagged values are recognized first, so shapes produced by
                                               size inner-size))))
                       (mongodb--read-bytes reader inner-size))
                   (mongodb--read-bytes reader size))))
-    (list (cons "$binary"
-                (list (cons "subType" (format "%02x" subtype))
-                      (cons "bytes"
-                            (base64-encode-string bytes t)))))))
+    (mongodb-binary subtype bytes)))
 
 (defun mongodb--decode-datetime (reader)
-  "Read BSON UTC datetime from READER as Extended JSON-ish data."
-  (let ((millis (mongodb--read-int64 reader)))
-    (list (cons "$date" millis))))
+  "Read BSON UTC datetime from READER as a `mongodb-datetime'."
+  (mongodb-datetime (mongodb--read-int64 reader)))
 
 (defun mongodb--decode-timestamp (reader)
-  "Read BSON timestamp from READER as Extended JSON-ish data."
+  "Read BSON timestamp from READER as a `mongodb-timestamp'."
   (let* ((raw (mongodb--read-uint-le reader 8))
          (increment (logand raw #xffffffff))
          (time (logand (ash raw -32) #xffffffff)))
-    (list (cons "$timestamp"
-                (list (cons "t" time)
-                      (cons "i" increment))))))
+    (mongodb-timestamp time increment)))
 
 (defun mongodb--decode-regex (reader)
-  "Read BSON regex from READER as Extended JSON."
+  "Read BSON regex from READER as a `mongodb-regex'."
   (let ((pattern (mongodb--read-cstring reader))
         (options (mongodb--read-cstring reader)))
-    (list (cons "$regularExpression"
-                (list (cons "pattern" pattern)
-                      (cons "options" options))))))
+    (mongodb-regex pattern options)))
 
 (defun mongodb--decode-db-pointer (reader)
-  "Read BSON DBPointer from READER as Extended JSON."
+  "Read BSON DBPointer from READER as a `mongodb-db-pointer'."
   (let ((namespace (mongodb--decode-string-value reader))
         (object-id (mongodb--decode-object-id reader)))
-    (list (cons "$dbPointer"
-                (list (cons "$ref" namespace)
-                      (cons "$id" object-id))))))
+    (mongodb-db-pointer namespace object-id)))
 
 (defun mongodb--decode-code (reader)
-  "Read BSON JavaScript code from READER as Extended JSON."
-  (list (cons "$code" (mongodb--decode-string-value reader))))
+  "Read BSON JavaScript code from READER as a `mongodb-code'."
+  (mongodb-code (mongodb--decode-string-value reader)))
 
 (defun mongodb--decode-symbol (reader)
-  "Read BSON Symbol from READER as Extended JSON."
-  (list (cons "$symbol" (mongodb--decode-string-value reader))))
+  "Read BSON Symbol from READER as a `mongodb-symbol'."
+  (mongodb-symbol (mongodb--decode-string-value reader)))
 
 (defun mongodb--decode-code-with-scope (reader)
-  "Read BSON JavaScript code with scope from READER as Extended JSON."
+  "Read BSON JavaScript code with scope from READER as a `mongodb-code'."
   (let* ((start (mongodb--reader-pos reader))
          (length (mongodb--read-int32 reader))
          (end (+ start length))
@@ -1057,10 +902,9 @@ Extended JSON tagged values are recognized first, so shapes produced by
       (signal 'mongodb-error
               (list (format "Invalid MongoDB code-with-scope length: %S"
                             length))))
-    (list (cons "$code" code)
-          ;; An empty scope stays a document so re-encoding keeps the
-          ;; code-with-scope type instead of degrading to plain code.
-          (cons "$scope" (or scope (mongodb-document nil))))))
+    ;; An empty scope stays a document value so re-encoding keeps the
+    ;; code-with-scope type instead of degrading to plain code.
+    (mongodb-code code (or scope (mongodb-document nil)))))
 
 (defun mongodb--decimal128-scientific-string (digits exponent)
   "Return Decimal128 DIGITS formatted with adjusted EXPONENT."
@@ -1108,33 +952,32 @@ Arguments: NEGATIVE, COEFFICIENT, EXPONENT."
                 digits adjusted)))))))))))
 
 (defun mongodb--decode-decimal128 (reader)
-  "Read BSON Decimal128 from READER as Extended JSON."
+  "Read BSON Decimal128 from READER as a `mongodb-decimal128'."
   (let* ((low (mongodb--read-uint-le reader 8))
          (high (mongodb--read-uint-le reader 8))
          (negative (not (zerop (logand high (expt 2 63)))))
          (combination (logand (ash high -58) #x1f)))
-    (list
-     (cons "$numberDecimal"
-           (cond
-            ((= combination 30)
-             (if negative "-Infinity" "Infinity"))
-            ((= combination 31)
-             "NaN")
-            ((>= combination 24)
-             ;; BID steering encodings in this range have a non-canonical
-             ;; coefficient.  BSON requires decoding them as signed zero
-             ;; while preserving the alternate exponent field.
-             (let ((exponent (- (logand (ash high -47) #x3fff)
-                                mongodb--decimal128-exponent-bias)))
-               (mongodb--format-decimal128 negative 0 exponent)))
-            (t
-             (let* ((exponent (- (logand (ash high -49) #x3fff)
-                                 mongodb--decimal128-exponent-bias))
-                    (coefficient
-                     (logior
-                      (ash (logand high (1- (expt 2 49))) 64)
-                      low)))
-               (mongodb--format-decimal128 negative coefficient exponent))))))))
+    (mongodb-decimal128
+     (cond
+      ((= combination 30)
+       (if negative "-Infinity" "Infinity"))
+      ((= combination 31)
+       "NaN")
+      ((>= combination 24)
+       ;; BID steering encodings in this range have a non-canonical
+       ;; coefficient.  BSON requires decoding them as signed zero
+       ;; while preserving the alternate exponent field.
+       (let ((exponent (- (logand (ash high -47) #x3fff)
+                          mongodb--decimal128-exponent-bias)))
+         (mongodb--format-decimal128 negative 0 exponent)))
+      (t
+       (let* ((exponent (- (logand (ash high -49) #x3fff)
+                           mongodb--decimal128-exponent-bias))
+              (coefficient
+               (logior
+                (ash (logand high (1- (expt 2 49))) 64)
+                low)))
+         (mongodb--format-decimal128 negative coefficient exponent)))))))
 
 (defun mongodb--decode-element (reader)
   "Read one BSON element from READER."
@@ -1156,7 +999,7 @@ Arguments: NEGATIVE, COEFFICIENT, EXPONENT."
        (#x04 (vconcat (mapcar #'cdr
                               (mongodb--decode-document reader))))
        (#x05 (mongodb--decode-binary reader))
-       (#x06 '(("$undefined" . t)))
+       (#x06 (mongodb-undefined))
        (#x07 (mongodb--decode-object-id reader))
        (#x08
         (pcase (mongodb--read-byte reader)
@@ -1176,8 +1019,8 @@ Arguments: NEGATIVE, COEFFICIENT, EXPONENT."
        (#x11 (mongodb--decode-timestamp reader))
        (#x12 (mongodb--read-int64 reader))
        (#x13 (mongodb--decode-decimal128 reader))
-       (#x7f '(("$maxKey" . 1)))
-       (#xff '(("$minKey" . 1)))
+       (#x7f (mongodb-max-key))
+       (#xff (mongodb-min-key))
        (_
         (signal 'mongodb-error
                 (list (format "Unsupported MongoDB BSON type 0x%02x for %s"

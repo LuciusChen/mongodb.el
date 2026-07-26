@@ -36,8 +36,10 @@
     (should (eq (cdr (assoc "active" decoded)) t))
     (should (= (cdr (assoc "count32" decoded)) 7))
     (should (= (cdr (assoc "count64" decoded)) 9223372036854775807))
-    (should (equal (cdr (assoc "_id" decoded))
-                   '(("$oid" . "64b64c2f40f9f2428b59d111"))))))
+    (let ((id (cdr (assoc "_id" decoded))))
+      (should (mongodb-object-id-p id))
+      (should (equal (mongodb-object-id-hex id)
+                     "64b64c2f40f9f2428b59d111")))))
 
 (ert-deftest mongodb-test-little-endian-primitives ()
   (let* ((data (concat (mongodb--pack-int32 -1)
@@ -278,7 +280,8 @@
             (mongodb--decode-document-from-string
              (mongodb-test--hex-bytes (car case))))
            (decimal (cdr (assoc "d" document))))
-      (should (equal (cdr (assoc "$numberDecimal" decimal)) (cdr case))))))
+      (should (mongodb-decimal128-p decimal))
+      (should (equal (mongodb-decimal128-value decimal) (cdr case))))))
 
 (ert-deftest mongodb-test-auth-database-alias-and-connection-metadata ()
   "Auth database alias and normalized metadata should be public and stable."
@@ -651,7 +654,9 @@
 (ert-deftest mongodb-test-bson-decode-encode-is-byte-identical ()
   "Decoding a document and re-encoding it reproduces the exact bytes.
 This is the property that makes generated mutations safe: any value read
-from the server can be written back without changing its BSON type."
+from the server can be written back without changing its BSON type.  The
+one canonicalization is NaN payloads, covered separately: this document
+carries the canonical quiet NaN, which roundtrips byte-identically."
   (let* ((bytes (mongodb--encode-document (mongodb-test--all-types-document)))
          (decoded (mongodb--decode-document-from-string bytes))
          (re-encoded (mongodb--encode-document decoded)))
@@ -681,52 +686,88 @@ from the server can be written back without changing its BSON type."
     (should (vectorp docs))
     (should (equal (aref docs 0) '(("a" . 1))))))
 
-(ert-deftest mongodb-test-extended-json-tags-encode-to-bson-types ()
-  "Tagged Extended JSON values encode to their BSON types, not documents."
-  (dolist (case `((,(list (cons "$oid" "65f1a2b3c4d5e6f708090a0b")) #x07)
-                  ((("$date" . 1700000000000)) #x09)
-                  ((("$numberDouble" . "NaN")) #x01)
-                  ((("$numberDecimal" . "1.23")) #x13)
-                  ((("$numberInt" . "41")) #x10)
-                  ((("$numberLong" . "9999999999")) #x12)
-                  ((("$timestamp" . (("t" . 7) ("i" . 3)))) #x11)
-                  ((("$binary" . (("subType" . "00") ("bytes" . "AQID"))))
-                   #x05)
-                  ((("$regularExpression" . (("pattern" . "^a")
-                                             ("options" . "i"))))
-                   #x0b)
-                  ((("$code" . "x=1")) #x0d)
-                  ((("$code" . "x=1") ("$scope" . (("k" . 1)))) #x0f)
-                  ((("$symbol" . "s")) #x0e)
-                  ((("$minKey" . 1)) #xff)
-                  ((("$maxKey" . 1)) #x7f)
-                  ((("$undefined" . t)) #x06)))
-    (pcase-let ((`(,value ,wire-type) case))
-      (ert-info ((format "tag: %S" (caar value)))
-        (should (= (aref (mongodb--encode-element "k" value) 0)
-                   wire-type))))))
-
-(ert-deftest mongodb-test-extended-json-invalid-payload-fails-loudly ()
-  "A recognized tag with a malformed payload signals instead of degrading."
-  (dolist (value '((("$oid" . 42))
-                   (("$oid" . "65f1a2b3c4d5e6f708090a0b") ("extra" . 1))
-                   (("$date" . "not-millis"))
-                   (("$numberDouble" . "wat"))
-                   (("$timestamp" . (("t" . 7))))
-                   (("$binary" . (("subType" . "zz") ("bytes" . "AQID"))))
-                   (("$scope" . (("k" . 1))))
-                   (("$minKey" . 2))))
-    (ert-info ((format "value: %S" value))
-      (should-error (mongodb--encode-element "k" value)
-                    :type 'mongodb-error))))
-
-(ert-deftest mongodb-test-operator-documents-still-encode-as-documents ()
-  "Query and update operators keep encoding as plain documents."
-  (dolist (value '((("$set" . (("a" . 1))))
+(ert-deftest mongodb-test-alists-always-encode-as-documents ()
+  "An alist encodes as an embedded document whatever its keys look like.
+A legitimate nested document whose first key is \"$oid\" must survive the
+roundtrip as a document; inferring types from key names would silently
+turn it into an ObjectId."
+  (dolist (value '((("$oid" . "65f1a2b3c4d5e6f708090a0b"))
+                   (("$set" . (("a" . 1))))
                    (("$gt" . 5))
-                   (("$in" . [1 2]))))
+                   (("$numberDouble" . "NaN"))
+                   (("$minKey" . 1))))
     (ert-info ((format "value: %S" value))
-      (should (= (aref (mongodb--encode-element "k" value) 0) #x03)))))
+      (should (= (aref (mongodb--encode-element "k" value) 0) #x03))))
+  (let* ((bytes (mongodb--encode-document
+                 '(("v" . (("$oid" . "65f1a2b3c4d5e6f708090a0b"))))))
+         (decoded (mongodb--decode-document-from-string bytes)))
+    (should (equal (mongodb--encode-document decoded) bytes))
+    (should (equal (cdr (assoc "v" decoded))
+                   '(("$oid" . "65f1a2b3c4d5e6f708090a0b"))))))
+
+(ert-deftest mongodb-test-scalar-types-decode-to-wrapper-structs ()
+  "BSON scalar types decode to the wrapper structs the encoder accepts.
+Key names never carry type information, so a decoded scalar cannot be
+confused with a document that happens to use the same spelling."
+  (let* ((doc (list (cons "id" (mongodb-object-id
+                                "65f1a2b3c4d5e6f708090a0b"))
+                    (cons "when" (mongodb-datetime 1700000000000))
+                    (cons "dec" (mongodb-decimal128 "1.23"))
+                    (cons "bin" (mongodb-binary 4 (unibyte-string 1 2)))
+                    (cons "re" (mongodb-regex "^a" "i"))
+                    (cons "ts" (mongodb-timestamp 7 3))
+                    (cons "sym" (mongodb-symbol "s"))
+                    (cons "undef" (mongodb-undefined))
+                    (cons "min" (mongodb-min-key))
+                    (cons "max" (mongodb-max-key))))
+         (decoded (mongodb--decode-document-from-string
+                   (mongodb--encode-document doc))))
+    (cl-flet ((field (name) (cdr (assoc name decoded))))
+      (should (mongodb-object-id-p (field "id")))
+      (should (equal (mongodb-object-id-hex (field "id"))
+                     "65f1a2b3c4d5e6f708090a0b"))
+      (should (mongodb-datetime-p (field "when")))
+      (should (mongodb-decimal128-p (field "dec")))
+      (should (equal (mongodb-decimal128-value (field "dec")) "1.23"))
+      (should (mongodb-binary-p (field "bin")))
+      (should (= (mongodb-binary-subtype (field "bin")) 4))
+      (should (mongodb-regex-p (field "re")))
+      (should (mongodb-timestamp-p (field "ts")))
+      (should (mongodb-symbol-p (field "sym")))
+      (should (mongodb-undefined-p (field "undef")))
+      (should (mongodb-min-key-p (field "min")))
+      (should (mongodb-max-key-p (field "max"))))))
+
+(ert-deftest mongodb-test-non-finite-doubles-roundtrip-semantically ()
+  "Non-finite doubles decode as native floats and re-encode canonically.
+The sign survives; a non-canonical NaN payload does not, so the
+roundtrip is semantic equivalence rather than byte identity for NaN."
+  (let* ((doc (list (cons "nan" (/ 0.0 0.0))
+                    (cons "neg-nan" (copysign (/ 0.0 0.0) -1.0))
+                    (cons "inf" 1.0e+INF)
+                    (cons "ninf" -1.0e+INF)))
+         (bytes (mongodb--encode-document doc))
+         (decoded (mongodb--decode-document-from-string bytes)))
+    ;; Canonical NaN bit patterns roundtrip byte-identically.
+    (should (equal (mongodb--encode-document decoded) bytes))
+    (should (isnan (cdr (assoc "nan" decoded))))
+    (should (isnan (cdr (assoc "neg-nan" decoded))))
+    (should (< (copysign 1.0 (cdr (assoc "neg-nan" decoded))) 0))
+    (should (= (cdr (assoc "inf" decoded)) 1.0e+INF))
+    (should (= (cdr (assoc "ninf" decoded)) -1.0e+INF))
+    ;; A non-canonical NaN payload collapses to the canonical quiet NaN
+    ;; of the same sign: same semantics, not the same bytes.
+    (let* ((payload-nan (concat (mongodb--pack-int32 16)
+                                (unibyte-string #x01) "n" (unibyte-string 0)
+                                (unibyte-string #xbe #xba #xfe #xca
+                                                #x00 #x00 #xf8 #x7f)
+                                (unibyte-string 0)))
+           (redecoded (mongodb--decode-document-from-string payload-nan)))
+      (should (isnan (cdr (assoc "n" redecoded))))
+      (should-not (equal (mongodb--encode-document redecoded) payload-nan))
+      (should (isnan (cdr (assoc "n" (mongodb--decode-document-from-string
+                                      (mongodb--encode-document
+                                       redecoded)))))))))
 
 ;;;; Live smoke tests (need a reachable MongoDB server)
 
