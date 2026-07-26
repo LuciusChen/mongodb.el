@@ -2263,6 +2263,14 @@ When VERIFY-SERVER is non-nil, reject certificate and hostname failures."
   (unless (process-live-p proc)
     (signal 'mongodb-error (list "MongoDB TLS connection closed"))))
 
+(defun mongodb--process-sentinel (process event)
+  "Record MongoDB PROCESS termination EVENT without touching its buffer.
+The default sentinel inserts EVENT text into the process buffer, where
+it would sit among unread wire bytes; a reply already buffered when the
+peer closes must stay parseable."
+  (unless (process-live-p process)
+    (process-put process 'mongodb-error (string-trim event))))
+
 (defun mongodb--wait-for-connect (proc host port timeout)
   "Wait for PROC to connect to HOST and PORT within TIMEOUT."
   (let ((deadline (+ (float-time) timeout)))
@@ -2302,6 +2310,10 @@ When VERIFY-SERVER is non-nil, reject certificate and hostname failures."
                      :nowait t
                      :coding 'binary
                      :noquery t))
+              ;; The default sentinel inserts close-event prose into the
+              ;; process buffer, mixing text into the wire bytes; record
+              ;; the event as process metadata instead.
+              (set-process-sentinel proc #'mongodb--process-sentinel)
               (mongodb--wait-for-connect proc host port
                                          mongodb-connect-timeout-seconds)
               (when (plist-get params :tls)

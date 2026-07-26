@@ -114,6 +114,28 @@ assertion fails, so a red test cannot leak the process or buffer."
          (when (buffer-live-p ,buf)
            (kill-buffer ,buf))))))
 
+(ert-deftest mongodb-test-peer-close-keeps-buffered-reply-parseable ()
+  "A close event must not inject prose into the wire buffer.
+The default sentinel writes the event text into the process buffer,
+where it would sit among unread wire bytes; a reply that arrived just
+before the peer closed must stay parseable."
+  (mongodb-test--with-pipe-conn (conn)
+    (let ((proc (mongodb-conn-process conn))
+          (buffer (mongodb-conn-buffer conn))
+          (reply (mongodb--encode-document '(("ok" . 1.0)))))
+      (set-process-sentinel proc #'mongodb--process-sentinel)
+      (with-current-buffer buffer
+        (set-buffer-multibyte nil)
+        (insert reply))
+      (delete-process proc)
+      (accept-process-output nil 0.05)
+      (accept-process-output nil 0.05)
+      (should (process-get proc 'mongodb-error))
+      (should (equal (with-current-buffer buffer (buffer-string)) reply))
+      (should (equal (mongodb--decode-document-from-string
+                      (with-current-buffer buffer (buffer-string)))
+                     '(("ok" . 1.0)))))))
+
 (ert-deftest mongodb-test-receive-rejects-invalid-frame-length ()
   "Wire frame lengths should be bounded before reading the body."
   (dolist (case '((2 . 48000000) (100 . 64)))
@@ -147,10 +169,12 @@ assertion fails, so a red test cannot leak the process or buffer."
     (should-not (buffer-live-p (mongodb-conn-buffer conn)))))
 
 (ert-deftest mongodb-test-connect-uses-bounded-asynchronous-socket ()
-  "Connection setup should use :nowait and run the timeout wait helper."
-  (let (captured waited conn)
+  "Connection setup should use :nowait, wait bounded, and install the sentinel."
+  (let (captured waited sentinel conn)
     (cl-letf (((symbol-function 'make-network-process)
                (lambda (&rest args) (setq captured args) 'proc))
+              ((symbol-function 'set-process-sentinel)
+               (lambda (_proc fn) (setq sentinel fn)))
               ((symbol-function 'mongodb--wait-for-connect)
                (lambda (&rest _args) (setq waited t)))
               ((symbol-function 'mongodb--send-document)
@@ -163,7 +187,9 @@ assertion fails, so a red test cannot leak the process or buffer."
           (setq conn (mongodb-connect '(:host "db" :port 27017)))
         (when conn (mongodb-disconnect conn))))
     (should (eq (plist-get captured :nowait) t))
-    (should waited)))
+    (should waited)
+    ;; The wire-safe sentinel keeps close-event prose out of the buffer.
+    (should (eq sentinel #'mongodb--process-sentinel))))
 
 (ert-deftest mongodb-test-connect-wait-enforces-deadline ()
   "The socket wait helper should stop when its deadline expires."
