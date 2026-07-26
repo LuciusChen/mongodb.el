@@ -13,7 +13,15 @@ as Clutch.
 
 Supported:
 
-- BSON encode/decode and explicit BSON wrapper values
+- BSON encode/decode and explicit BSON wrapper values.  Decoding and
+  encoding are inverse operations: arrays decode to vectors, empty
+  embedded documents to the =mongodb-document= wrapper, null to =nil=,
+  false to =:false=, non-finite doubles and the non-scalar BSON types to
+  Extended JSON tagged alists such as =(("$oid" . "…"))=, and the
+  encoder maps every one of those shapes back to the BSON type it came
+  from, so any decoded value can be written back unchanged.  Operator
+  documents such as =$set= or =$gt= are not type tags and encode as
+  plain documents.
 - bounded direct TCP connections, optional TLS, =mongodb://= URLs, and plist
   params
 - certificate and hostname verification for TLS by default; use
@@ -84,5 +92,13 @@ Byte-compile:
 emacs -Q --batch -L . -f batch-byte-compile mongodb.el test/mongodb-test.el
 #+end_src
 
-For protocol changes, also run a live smoke test against a local MongoDB server
-and rerun the consuming Clutch MongoDB adapter tests.
+For protocol changes, also run the live smoke test against a MongoDB server —
+it inserts a document exercising every BSON type and asserts the stored copy
+re-encodes byte-identically — and rerun the consuming Clutch MongoDB adapter
+tests:
+
+#+begin_src sh
+MONGODB_TEST_URI=mongodb://127.0.0.1:27017/clutch_test \
+  emacs -Q --batch -L . -l ert -l test/mongodb-test.el \
+  --eval '(ert-run-tests-batch-and-exit)'
+#+end_src

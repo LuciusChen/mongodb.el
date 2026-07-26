@@ -55,9 +55,11 @@
   (let ((doc (mongodb-document nil)))
     (should (mongodb-document-p doc))
     (should (equal (mongodb-document-elements doc) nil))
+    ;; The wrapper survives the roundtrip: decoding an empty nested
+    ;; document produces it again, keeping {} distinct from null.
     (should (equal (mongodb--decode-document-from-string
                     (mongodb--encode-document `(("filter" . ,doc))))
-                   '(("filter"))))))
+                   `(("filter" . ,(mongodb-document nil)))))))
 
 (ert-deftest mongodb-test-new-object-id-has-valid-shape ()
   (let ((id (mongodb-new-object-id)))
@@ -608,5 +610,155 @@
       (should (equal (cdr (assoc "delete" delete)) "users"))
       (should (= (cdr (assoc "limit" (aref (cdr (assoc "deletes" delete)) 0)))
                  1)))))
+
+;;;; BSON roundtrip bijectivity
+
+(defun mongodb-test--all-types-document ()
+  "Return a document exercising every BSON type the encoder can write."
+  (list (cons "_id" (mongodb-object-id "65f1a2b3c4d5e6f708090a0b"))
+        (cons "double" 1.5)
+        (cons "nan" (/ 0.0 0.0))
+        (cons "inf" 1.0e+INF)
+        (cons "ninf" -1.0e+INF)
+        (cons "string" "héllo")
+        (cons "doc" (list (cons "nested" 1)))
+        (cons "empty-doc" (mongodb-document nil))
+        (cons "arr" (vector 1 "two" (vector 3)))
+        (cons "empty-arr" (vector))
+        (cons "binary" (mongodb-binary 0 (unibyte-string 1 0 255)))
+        (cons "undef" (mongodb-undefined))
+        (cons "bool-t" t)
+        (cons "bool-f" :false)
+        (cons "date" (mongodb-datetime 1700000000000))
+        (cons "null" nil)
+        (cons "regex" (mongodb-regex "^a.*b$" "i"))
+        (cons "pointer" (mongodb-db-pointer
+                         "db.coll"
+                         (mongodb-object-id "65f1a2b3c4d5e6f708090a0c")))
+        (cons "code" (mongodb-code "function () { return 1; }"))
+        (cons "code-scope" (mongodb-code "x" (list (cons "k" 1))))
+        (cons "code-empty-scope" (mongodb-code "y" (mongodb-document nil)))
+        (cons "symbol" (mongodb-symbol "sym"))
+        (cons "int32" 41)
+        (cons "timestamp" (mongodb-timestamp 7 3))
+        (cons "int64" (* 1024 mongodb--int32-max))
+        (cons "decimal" (mongodb-decimal128 "1.23"))
+        (cons "decimal-nan" (mongodb-decimal128 "NaN"))
+        (cons "min" (mongodb-min-key))
+        (cons "max" (mongodb-max-key))
+        (cons "operator" (list (cons "$set" (list (cons "a" 1)))))))
+
+(ert-deftest mongodb-test-bson-decode-encode-is-byte-identical ()
+  "Decoding a document and re-encoding it reproduces the exact bytes.
+This is the property that makes generated mutations safe: any value read
+from the server can be written back without changing its BSON type."
+  (let* ((bytes (mongodb--encode-document (mongodb-test--all-types-document)))
+         (decoded (mongodb--decode-document-from-string bytes))
+         (re-encoded (mongodb--encode-document decoded)))
+    (should (equal bytes re-encoded))
+    ;; The decoded representation is a fixed point, so a document that
+    ;; roundtrips twice keeps the same shapes.
+    (should (equal decoded
+                   (mongodb--decode-document-from-string re-encoded)))))
+
+(ert-deftest mongodb-test-bson-decode-distinguishes-empty-collections ()
+  "Empty array, empty document, and null decode to three distinct values."
+  (let* ((bytes (mongodb--encode-document
+                 (list (cons "arr" (vector))
+                       (cons "doc" (mongodb-document nil))
+                       (cons "null" nil))))
+         (decoded (mongodb--decode-document-from-string bytes)))
+    (should (equal (cdr (assoc "arr" decoded)) (vector)))
+    (should (mongodb-document-p (cdr (assoc "doc" decoded))))
+    (should (null (cdr (assoc "null" decoded))))))
+
+(ert-deftest mongodb-test-bson-arrays-decode-to-vectors ()
+  "Arrays decode to vectors so they stay distinct from alist documents."
+  (let* ((bytes (mongodb--encode-document
+                 (list (cons "docs" (vector (list (cons "a" 1)))))))
+         (docs (cdr (assoc "docs" (mongodb--decode-document-from-string
+                                   bytes)))))
+    (should (vectorp docs))
+    (should (equal (aref docs 0) '(("a" . 1))))))
+
+(ert-deftest mongodb-test-extended-json-tags-encode-to-bson-types ()
+  "Tagged Extended JSON values encode to their BSON types, not documents."
+  (dolist (case `((,(list (cons "$oid" "65f1a2b3c4d5e6f708090a0b")) #x07)
+                  ((("$date" . 1700000000000)) #x09)
+                  ((("$numberDouble" . "NaN")) #x01)
+                  ((("$numberDecimal" . "1.23")) #x13)
+                  ((("$numberInt" . "41")) #x10)
+                  ((("$numberLong" . "9999999999")) #x12)
+                  ((("$timestamp" . (("t" . 7) ("i" . 3)))) #x11)
+                  ((("$binary" . (("subType" . "00") ("bytes" . "AQID"))))
+                   #x05)
+                  ((("$regularExpression" . (("pattern" . "^a")
+                                             ("options" . "i"))))
+                   #x0b)
+                  ((("$code" . "x=1")) #x0d)
+                  ((("$code" . "x=1") ("$scope" . (("k" . 1)))) #x0f)
+                  ((("$symbol" . "s")) #x0e)
+                  ((("$minKey" . 1)) #xff)
+                  ((("$maxKey" . 1)) #x7f)
+                  ((("$undefined" . t)) #x06)))
+    (pcase-let ((`(,value ,wire-type) case))
+      (ert-info ((format "tag: %S" (caar value)))
+        (should (= (aref (mongodb--encode-element "k" value) 0)
+                   wire-type))))))
+
+(ert-deftest mongodb-test-extended-json-invalid-payload-fails-loudly ()
+  "A recognized tag with a malformed payload signals instead of degrading."
+  (dolist (value '((("$oid" . 42))
+                   (("$oid" . "65f1a2b3c4d5e6f708090a0b") ("extra" . 1))
+                   (("$date" . "not-millis"))
+                   (("$numberDouble" . "wat"))
+                   (("$timestamp" . (("t" . 7))))
+                   (("$binary" . (("subType" . "zz") ("bytes" . "AQID"))))
+                   (("$scope" . (("k" . 1))))
+                   (("$minKey" . 2))))
+    (ert-info ((format "value: %S" value))
+      (should-error (mongodb--encode-element "k" value)
+                    :type 'mongodb-error))))
+
+(ert-deftest mongodb-test-operator-documents-still-encode-as-documents ()
+  "Query and update operators keep encoding as plain documents."
+  (dolist (value '((("$set" . (("a" . 1))))
+                   (("$gt" . 5))
+                   (("$in" . [1 2]))))
+    (ert-info ((format "value: %S" value))
+      (should (= (aref (mongodb--encode-element "k" value) 0) #x03)))))
+
+;;;; Live smoke tests (need a reachable MongoDB server)
+
+(defun mongodb-test--live-params ()
+  "Return connection params for live tests, or nil when unconfigured.
+Set the MONGODB_TEST_URI environment variable, e.g.
+mongodb://127.0.0.1:27017/clutch_test, to enable them."
+  (when-let* ((uri (getenv "MONGODB_TEST_URI")))
+    (list :url uri)))
+
+(ert-deftest mongodb-test-live-roundtrip-through-server ()
+  "Every BSON type survives an insert/find roundtrip through a server."
+  (skip-unless (mongodb-test--live-params))
+  (let* ((conn (mongodb-connect (mongodb-test--live-params)))
+         (database (or (mongodb-conn-database conn) "clutch_test"))
+         (collection "roundtrip_test"))
+    (unwind-protect
+        (let ((doc (mongodb-test--all-types-document)))
+          (ignore-errors
+            (mongodb-command conn database `(("drop" . ,collection))))
+          (mongodb-insert conn database collection (vector doc))
+          (let* ((found (mongodb-find conn database collection
+                                      (list (cons "_id" (cdr (assoc "_id" doc))))))
+                 (stored (car found)))
+            (should stored)
+            ;; What came back re-encodes to the same bytes we stored.
+            (should (equal (mongodb--encode-document stored)
+                           (mongodb--encode-document
+                            (mongodb--decode-document-from-string
+                             (mongodb--encode-document doc)))))))
+      (ignore-errors
+        (mongodb-command conn database `(("drop" . ,collection))))
+      (mongodb-disconnect conn))))
 
 ;;; mongodb-test.el ends here
