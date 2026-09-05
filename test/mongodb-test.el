@@ -250,6 +250,17 @@ before the peer closed must stay parseable."
     (should-error (mongodb--choose-auth-mechanism credential nil)
                   :type 'mongodb-error)))
 
+(ert-deftest mongodb-test-scram-mechanisms-from-bson-array ()
+  "Mechanism selection accepts the vector returned by real BSON decoding."
+  (let ((credential (make-mongodb--credential :username "user")))
+    (dolist (case '((["SCRAM-SHA-1" "SCRAM-SHA-256"] "SCRAM-SHA-256")
+                    (["SCRAM-SHA-1"] "SCRAM-SHA-1")))
+      (let ((hello (mongodb--decode-document-from-string
+                    (mongodb--encode-document
+                     (list (cons "saslSupportedMechs" (car case)))))))
+        (should (equal (mongodb--choose-auth-mechanism credential hello)
+                       (cadr case)))))))
+
 (ert-deftest mongodb-test-pbkdf2-known-vectors ()
   "SCRAM PBKDF2 primitives should match published test vectors."
   (should
@@ -315,24 +326,83 @@ is a fixed point."
     (should (= (mongodb-connection-port conn) 27018))
     (should (equal (mongodb-connection-username conn) "ada"))))
 
+(ert-deftest mongodb-test-insert-encodes-each-document-once ()
+  "A multi-document insert should validate and send the same BSON bytes."
+  (mongodb-test--with-pipe-conn (conn)
+                                (let ((encode (symbol-function 'mongodb--encode-document))
+                                      (documents (cl-loop for i below 100
+                                                          collect `(("_id" . ,i) ("value" . "中文"))))
+                                      (calls 0)
+                                      sent)
+                                  (cl-letf (((symbol-function 'mongodb--encode-document)
+                                             (lambda (document)
+                                               (cl-incf calls)
+                                               (funcall encode document)))
+                                            ((symbol-function 'process-send-string)
+                                             (lambda (_proc bytes) (setq sent bytes)))
+                                            ((symbol-function 'mongodb--recv-message-frame)
+                                             (lambda (&rest _)
+                                               (make-mongodb--decoded-message
+                                                :document '(("ok" . 1) ("n" . 100))))))
+                                    (should (= (cdr (assoc "n" (mongodb-insert
+                                                                conn "app" "items" documents))) 100))
+                                    (should (= calls 101)))
+                                  (let ((decode (symbol-function 'mongodb--decode-document))
+                                        decoded)
+                                    (cl-letf (((symbol-function 'mongodb--decode-document)
+                                               (lambda (reader)
+                                                 (let ((document (funcall decode reader)))
+                                                   (when (assoc "_id" document) (push document decoded))
+                                                   document))))
+                                      (mongodb--decode-message-frame sent))
+                                    (should (equal (nreverse decoded) documents))))))
+
 (ert-deftest mongodb-test-write-limits-reject-before-send ()
   "Server BSON and write batch limits should be enforced before transport."
   (mongodb-test--with-pipe-conn
-      (conn :max-bson-object-size 64 :max-write-batch-size 1)
-    (let (sent)
-      (cl-letf (((symbol-function 'process-send-string)
-                 (lambda (&rest _) (setq sent t))))
-        (should-error
-         (mongodb--send-document
-          conn `(("insert" . "items")
-                 ("documents" . ,(vector '(("x" . 1)) '(("x" . 2))))
-                 ("$db" . "app")))
-         :type 'mongodb-error)
-        (should-not sent)
-        (should-error
-         (mongodb--validate-bson-size
-          conn `(("value" . ,(make-string 100 ?x))) "test document")
-         :type 'mongodb-error)))))
+   (conn :max-bson-object-size 64 :max-write-batch-size 1)
+   (let (sent)
+     (cl-letf (((symbol-function 'process-send-string)
+                (lambda (&rest _) (setq sent t))))
+       (should-error
+        (mongodb--send-document
+         conn `(("insert" . "items")
+                ("documents" . ,(vector '(("x" . 1)) '(("x" . 2))))
+                ("$db" . "app")))
+        :type 'mongodb-error)
+       (should-not sent)
+       (should-error
+        (mongodb-insert
+         conn "app" "items" `(("value" . ,(make-string 100 ?x))))
+        :type 'mongodb-error)))))
+
+(ert-deftest mongodb-test-sequence-limits-reject-before-send ()
+  "Sequence entries, batches and complete frames must obey negotiated limits."
+  (dolist (case '((:max-bson-object-size 64)
+                  (:max-write-batch-size 1)
+                  (:max-message-size-bytes 180)))
+    (mongodb-test--with-pipe-conn (conn)
+                                  (when-let* ((limit (plist-get case :max-bson-object-size)))
+                                    (setf (mongodb-conn-max-bson-object-size conn) limit))
+                                  (when-let* ((limit (plist-get case :max-write-batch-size)))
+                                    (setf (mongodb-conn-max-write-batch-size conn) limit))
+                                  (when-let* ((limit (plist-get case :max-message-size-bytes)))
+                                    (setf (mongodb-conn-max-message-size-bytes conn) limit))
+                                  (cl-letf (((symbol-function 'process-send-string)
+                                             (lambda (&rest _) (ert-fail "Oversized request was sent"))))
+                                    (should-error
+                                     (mongodb-insert conn "app" "items"
+                                                     (vector `(("_id" . 1) ("v" . ,(make-string 100 ?x)))
+                                                             '(("_id" . 2))))
+                                     :type 'mongodb-error)
+                                    (should (mongodb-live-p conn)))))
+  (mongodb-test--with-pipe-conn (conn)
+                                (cl-letf (((symbol-function 'process-send-string)
+                                           (lambda (&rest _) (ert-fail "Invalid sequence was sent"))))
+                                  (should-error
+                                   (mongodb-command conn "app" '(("insert" . "items")) nil
+                                                    '(("documents" . []) ("documents" . [])))
+                                   :type 'mongodb-error))))
 
 (ert-deftest mongodb-test-cursor-document-limit-kills-open-cursor ()
   "Cursor helpers should kill and reject results beyond their hard cap."
@@ -844,6 +914,12 @@ mongodb://127.0.0.1:27017/clutch_test, to enable them."
           (ignore-errors
             (mongodb-command conn database `(("drop" . ,collection))))
           (mongodb-insert conn database collection (vector doc))
+          (let ((batch (cl-loop for i below 100
+                                collect `(("_id" . ,i) ("batch" . t)))))
+            (should (= (cdr (assoc "n" (mongodb-insert
+                                        conn database collection batch))) 100))
+            (should (= (length (mongodb-find
+                               conn database collection '(("batch" . t)))) 100)))
           (let* ((found (mongodb-find conn database collection
                                       (list (cons "_id" (cdr (assoc "_id" doc))))))
                  (stored (car found)))
@@ -856,5 +932,42 @@ mongodb://127.0.0.1:27017/clutch_test, to enable them."
       (ignore-errors
         (mongodb-command conn database `(("drop" . ,collection))))
       (mongodb-disconnect conn))))
+
+(ert-deftest mongodb-test-command-abandonment-invalidates-connection ()
+  "Every nonlocal exit while receiving invalidates the connection."
+  (dolist (exit '(quit throw))
+    (mongodb-test--with-pipe-conn (conn)
+      (let (caught)
+        (cl-letf (((symbol-function 'process-send-string) #'ignore)
+                  ((symbol-function 'mongodb--recv-message-frame)
+                   (lambda (&rest _)
+                     (pcase exit
+                       ('quit (signal 'quit nil))
+                       ('throw (throw 'mongodb-test-exit :aborted))))))
+          (setq caught
+                (catch 'mongodb-test-exit
+                  (condition-case nil
+                      (mongodb-command conn "admin" '(("ping" . 1)))
+                    (quit :aborted)))))
+        (should (eq caught :aborted))
+        (should-not (mongodb-live-p conn))
+        (should-not (mongodb-conn-busy conn))
+        (should-not (buffer-live-p (mongodb-conn-buffer conn)))))))
+
+(ert-deftest mongodb-test-uri-default-auth-source ()
+  "An omitted URI database authenticates in admin, not the work database."
+  (dolist (case '(("mongodb://user:pass@localhost/" "test" "admin")
+                  ("mongodb://user:pass@localhost" "test" "admin")
+                  ("mongodb://user:pass@localhost/app" "app" "app")
+                  ("mongodb://user:pass@localhost/app?authSource=admin"
+                   "app" "admin")
+                  ((:url "mongodb://user:pass@localhost/" :database "app")
+                   "app" "app")
+                  ((:url "mongodb://user:pass@localhost/app"
+                         :auth-source "accounts") "app" "accounts")))
+    (pcase-let* ((`(,input ,database ,auth-source) case)
+                 (params (mongodb--normalize-params input)))
+      (should (equal (plist-get params :database) database))
+      (should (equal (plist-get params :auth-source) auth-source)))))
 
 ;;; mongodb-test.el ends here

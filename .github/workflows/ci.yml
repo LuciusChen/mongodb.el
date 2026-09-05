@@ -1,0 +1,39 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  elisp:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        emacs-version: ["29.1", "30.2"]
+    services:
+      mongodb:
+        image: mongo:7
+        env:
+          MONGO_INITDB_ROOT_USERNAME: audit
+          MONGO_INITDB_ROOT_PASSWORD: test
+        ports: ["27017:27017"]
+        options: >-
+          --health-cmd="mongosh --quiet --eval 'db.adminCommand({ping:1}).ok'"
+          --health-interval=5s --health-timeout=5s --health-retries=30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: purcell/setup-emacs@master
+        with:
+          version: ${{ matrix.emacs-version }}
+      - name: Run unit and authenticated live tests
+        env:
+          MONGODB_TEST_URI: mongodb://audit:test@127.0.0.1:27017/
+        run: |
+          emacs -Q --batch -L . -l test/mongodb-test.el \
+            --eval '(ert-run-tests-batch-and-exit)'
+      - name: Compile without warnings
+        run: |
+          emacs -Q --batch -L . --eval '(setq byte-compile-error-on-warn t)' \
+            -f batch-byte-compile mongodb.el test/mongodb-test.el

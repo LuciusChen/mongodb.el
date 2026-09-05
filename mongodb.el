@@ -1250,10 +1250,11 @@ Arguments: SECRET, SALT, ITERATIONS."
 
 ;;;; OP_MSG framing
 
-(defun mongodb--encode-op-msg-document-sequence (sequence)
+(defun mongodb--encode-op-msg-document-sequence (sequence &optional conn budget)
   "Return a kind 1 OP_MSG document SEQUENCE section.
 SEQUENCE is a cons cell whose car is the sequence identifier and whose cdr is
-a vector or list of BSON documents."
+a vector or list of BSON documents.  CONN supplies negotiated size limits;
+BUDGET, when non-nil, is the remaining message size in bytes."
   (let* ((identifier (car sequence))
          (documents (cdr sequence))
          (document-list (if (vectorp documents)
@@ -1267,13 +1268,24 @@ a vector or list of BSON documents."
       (signal 'mongodb-error
               (list (format "MongoDB OP_MSG sequence documents must be a list or vector: %S"
                             documents))))
-    (let* ((document-bytes (apply #'concat
-                                  (mapcar #'mongodb--encode-document
-                                          document-list)))
-           (identifier-bytes (mongodb--encode-cstring identifier))
-           (section-size (+ 4
-                            (length identifier-bytes)
-                            (length document-bytes))))
+    (when (and conn
+               (> (length document-list) (mongodb-conn-max-write-batch-size conn)))
+      (signal 'mongodb-error
+              (list "MongoDB document sequence exceeds maxWriteBatchSize")))
+    (let* ((identifier-bytes (mongodb--encode-cstring identifier))
+           (section-size (+ 4 (length identifier-bytes)))
+           (document-bytes
+            (apply #'concat
+                   (cl-loop for document in document-list
+                            for bytes = (mongodb--encode-document document)
+                            do (when conn
+                                 (mongodb--check-bson-size
+                                  conn bytes "MongoDB document sequence entry"))
+                            do (cl-incf section-size (length bytes))
+                            do (when (and budget (> (1+ section-size) budget))
+                                 (signal 'mongodb-error
+                                         (list "MongoDB command exceeds maxMessageSizeBytes")))
+                            collect bytes))))
       (concat (unibyte-string 1)
               (mongodb--pack-int32 section-size)
               identifier-bytes
@@ -1289,18 +1301,30 @@ a vector or list of BSON documents."
                   (list "MongoDB OP_MSG repeats a document sequence identifier")))
         (puthash identifier t seen)))))
 
-(defun mongodb--make-op-msg
-    (request-id document &optional flag-bits checksum sequences response-to)
+(cl-defun mongodb--make-op-msg
+    (request-id document &key flag-bits checksum sequences response-to connection)
   "Return an OP_MSG request REQUEST-ID containing DOCUMENT.
 FLAG-BITS defaults to zero.  CHECKSUM, when t, appends a computed CRC-32C
 checksum; when an integer, appends that explicit uint32 checksum.  Either
 CHECKSUM value sets the checksumPresent flag.  SEQUENCES is a list of kind 1
-document sequence sections.  RESPONSE-TO defaults to zero."
+document sequence sections.  RESPONSE-TO defaults to zero.  CONNECTION, when
+non-nil, supplies negotiated BSON, batch and total message size limits."
   (mongodb--validate-sequence-identifiers sequences)
+  (when connection
+    (mongodb--validate-write-batch connection document))
   (let* ((body-document (mongodb--encode-document document))
-         (sequence-bytes (apply #'concat
-                                (mapcar #'mongodb--encode-op-msg-document-sequence
-                                        sequences)))
+         (budget (when connection
+                   (mongodb--check-bson-size
+                    connection body-document "MongoDB command document")
+                   (- (mongodb-conn-max-message-size-bytes connection)
+                      21 (length body-document) (if checksum 4 0))))
+         (sequence-bytes
+          (apply #'concat
+                 (cl-loop for sequence in sequences
+                          for bytes = (mongodb--encode-op-msg-document-sequence
+                                       sequence connection budget)
+                          do (when budget (cl-decf budget (length bytes)))
+                          collect bytes)))
          (flag-bits (if checksum
                         (logior (or flag-bits 0)
                                 mongodb--op-msg-checksum-present)
@@ -1318,6 +1342,10 @@ document sequence sections.  RESPONSE-TO defaults to zero."
                   (mongodb--pack-int32 (or response-to 0))
                   (mongodb--pack-int32 mongodb--op-msg)
                   body-without-checksum)))
+    (when (and connection
+               (> length (mongodb-conn-max-message-size-bytes connection)))
+      (signal 'mongodb-error
+              (list "MongoDB command exceeds maxMessageSizeBytes")))
     (if checksum
         (concat
          message-without-checksum
@@ -1612,11 +1640,10 @@ Arguments: MESSAGE, ALLOW-MORE-TO-COME."
                "127.0.0.1")))
     (setq database
           (or (mongodb--nonempty-string (and path (mongodb--url-decode path)))
-              (plist-get params :database)
-              "test"))
+              (plist-get params :database)))
     (list :host (car endpoint)
           :port (or (plist-get params :port) (cdr endpoint))
-          :database database
+          :database (or database "test")
           :username (or (plist-get params :username)
                         (plist-get params :user)
                         user)
@@ -1624,7 +1651,8 @@ Arguments: MESSAGE, ALLOW-MORE-TO-COME."
           :auth-source (or (plist-get params :auth-source)
                            (plist-get params :auth-database)
                            (mongodb--query-option options "authSource")
-                           database)
+                           database
+                           "admin")
           :auth-mechanism (or (plist-get params :auth-mechanism)
                               (mongodb--query-option options "authMechanism"))
           :tls tls
@@ -1901,8 +1929,8 @@ values."
         (signal 'mongodb-error
                 (list (format "Native MongoDB authentication supports SCRAM-SHA-256 and SCRAM-SHA-1, not %s" mechanism))))
       mechanism)
-     ((member "SCRAM-SHA-256" supported) "SCRAM-SHA-256")
-     ((member "SCRAM-SHA-1" supported) "SCRAM-SHA-1")
+     ((seq-contains-p supported "SCRAM-SHA-256") "SCRAM-SHA-256")
+     ((seq-contains-p supported "SCRAM-SHA-1") "SCRAM-SHA-1")
      (t "SCRAM-SHA-256"))))
 
 (defun mongodb--authenticate-scram (conn credential mechanism)
@@ -2031,9 +2059,9 @@ EXPECTED-RESPONSE-TO, when non-nil, must match the reply header."
       (mongodb--validate-response-to frame expected-response-to)
       frame)))
 
-(defun mongodb--validate-bson-size (conn document description)
-  "Reject DOCUMENT larger than CONN permits, naming DESCRIPTION."
-  (let ((size (length (mongodb--encode-document document)))
+(defun mongodb--check-bson-size (conn bytes description)
+  "Reject encoded BSON BYTES larger than CONN permits, naming DESCRIPTION."
+  (let ((size (length bytes))
         (maximum (mongodb-conn-max-bson-object-size conn)))
     (when (> size maximum)
       (signal 'mongodb-error
@@ -2042,77 +2070,38 @@ EXPECTED-RESPONSE-TO, when non-nil, must match the reply header."
     size))
 
 (defun mongodb--validate-write-batch (conn document)
-  "Validate embedded write batch fields in command DOCUMENT for CONN."
+  "Validate embedded write batch counts in command DOCUMENT for CONN.
+The containing BSON size check also bounds every embedded document."
   (dolist (field '("documents" "updates" "deletes"))
     (when-let* ((batch (cdr (assoc field (mongodb--document-pairs document)))))
       (let ((count (length batch)))
         (when (> count (mongodb-conn-max-write-batch-size conn))
           (signal 'mongodb-error
                   (list (format "MongoDB %s batch exceeds maxWriteBatchSize"
-                                field))))
-        (seq-doseq (item batch)
-          (mongodb--validate-bson-size conn item
-                                       (format "MongoDB %s entry" field)))))))
-
-(defun mongodb--validate-sequences (conn sequences base-message-size)
-  "Validate OP_MSG document SEQUENCES for CONN after BASE-MESSAGE-SIZE."
-  (mongodb--validate-sequence-identifiers sequences)
-  (let ((total 0)
-        (maximum (mongodb-conn-max-message-size-bytes conn)))
-    (dolist (sequence sequences)
-      (let ((identifier (car sequence))
-            (documents (cdr sequence)))
-        (unless (stringp identifier)
-          (signal 'mongodb-error
-                  (list "MongoDB document sequence identifier must be a string")))
-        (when (> (length documents) (mongodb-conn-max-write-batch-size conn))
-          (signal 'mongodb-error
-                  (list "MongoDB document sequence exceeds maxWriteBatchSize")))
-        (cl-incf total (+ 1 4 (length (mongodb--encode-cstring identifier))))
-        (seq-doseq (document documents)
-          (cl-incf total
-                   (mongodb--validate-bson-size
-                    conn document "MongoDB document sequence entry"))
-          (when (> (+ base-message-size total) maximum)
-            (signal 'mongodb-error
-                    (list "MongoDB command exceeds maxMessageSizeBytes"))))))
-    total))
+                                field))))))))
 
 (defun mongodb--send-document (conn document &optional timeout sequences)
   "Send command DOCUMENT through CONN and return the reply document."
   (mongodb--ensure-command-ready conn)
-  (let* ((body-size
-          (mongodb--validate-bson-size conn document "MongoDB command document"))
-         (base-message-size (+ 16 4 1 body-size))
-         sequence-size)
-    (mongodb--validate-write-batch conn document)
-    (setq sequence-size
-          (mongodb--validate-sequences conn sequences base-message-size))
-    (when (> (+ base-message-size sequence-size)
-             (mongodb-conn-max-message-size-bytes conn))
-      (signal 'mongodb-error
-              (list "MongoDB command exceeds maxMessageSizeBytes"))))
   (let* ((request-id (mongodb--next-request-id conn))
-         (message (mongodb--make-op-msg request-id document nil nil sequences)))
-    (when (> (length message) (mongodb-conn-max-message-size-bytes conn))
-      (signal 'mongodb-error
-              (list "MongoDB command exceeds maxMessageSizeBytes")))
+         (message (mongodb--make-op-msg request-id document
+                                        :sequences sequences :connection conn))
+         completed)
     (setf (mongodb-conn-busy conn) t)
     (unwind-protect
         (condition-case err
-            (progn
-              (process-send-string (mongodb-conn-process conn) message)
-              (mongodb--decoded-message-document
-               (mongodb--recv-message-frame conn timeout request-id)))
+            (prog1
+                (progn
+                  (process-send-string (mongodb-conn-process conn) message)
+                  (mongodb--decoded-message-document
+                   (mongodb--recv-message-frame conn timeout request-id)))
+              (setq completed t))
           (mongodb-error
-           (mongodb-disconnect conn)
-           (signal (car err) (cdr err)))
-          (quit
-           (mongodb-disconnect conn)
            (signal (car err) (cdr err)))
           (error
-           (mongodb-disconnect conn)
            (signal 'mongodb-error (list (error-message-string err)))))
+      (unless completed
+        (mongodb-disconnect conn))
       (setf (mongodb-conn-busy conn) nil))))
 
 (defun mongodb--os-type ()
