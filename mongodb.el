@@ -157,25 +157,6 @@ SUBTYPE is the BSON binary subtype byte.  DATA is a unibyte string."
   subtype
   data)
 
-(defun mongodb-uuid (uuid)
-  "Return UUID encoded as BSON binary subtype 4.
-UUID must be a canonical RFC 4122 string."
-  (unless (and (stringp uuid)
-               (string-match-p
-                (concat "\\`[0-9a-fA-F]\\{8\\}-"
-                        "[0-9a-fA-F]\\{4\\}-"
-                        "[0-9a-fA-F]\\{4\\}-"
-                        "[0-9a-fA-F]\\{4\\}-"
-                        "[0-9a-fA-F]\\{12\\}\\'")
-                uuid))
-    (signal 'mongodb-error
-            (list (format "Invalid MongoDB UUID: %S" uuid))))
-  (mongodb-binary
-   4
-   (mongodb--hex-to-bytes (replace-regexp-in-string "-" "" uuid nil t)
-                        32
-                        "UUID")))
-
 (cl-defstruct (mongodb-regex
                (:constructor mongodb-regex (pattern &optional options)))
   "MongoDB BSON regular expression wrapper.
@@ -205,13 +186,8 @@ PATTERN is the regex pattern.  OPTIONS is a BSON regex option string."
 ;;;; Little-endian primitives
 
 (defun mongodb--pack-uint-le (value bytes)
-  "Return VALUE packed as unsigned little-endian BYTES."
-  (when (< value 0)
-    (setq value (+ value (expt 2 (* 8 bytes)))))
+  "Return VALUE packed as little-endian BYTES (4 or 8)."
   (pcase bytes
-    (2
-     (unibyte-string (logand value #xff)
-                     (logand (ash value -8) #xff)))
     (4
      (unibyte-string (logand value #xff)
                      (logand (ash value -8) #xff)
@@ -225,11 +201,7 @@ PATTERN is the regex pattern.  OPTIONS is a BSON regex option string."
                      (logand (ash value -32) #xff)
                      (logand (ash value -40) #xff)
                      (logand (ash value -48) #xff)
-                     (logand (ash value -56) #xff)))
-    (_
-     (apply #'unibyte-string
-            (cl-loop for shift from 0 below (* 8 bytes) by 8
-                     collect (logand (ash value (- shift)) #xff))))))
+                     (logand (ash value -56) #xff)))))
 
 (defun mongodb--pack-int32 (value)
   "Return VALUE packed as little-endian int32."
@@ -264,7 +236,7 @@ PATTERN is the regex pattern.  OPTIONS is a BSON regex option string."
     (substring data pos end)))
 
 (defun mongodb--read-uint-le (reader bytes)
-  "Read an unsigned little-endian integer of BYTES from READER."
+  "Read an unsigned little-endian integer of BYTES (4 or 8) from READER."
   (let* ((pos (mongodb--reader-pos reader))
          (end (+ pos bytes))
          (data (mongodb--reader-data reader)))
@@ -273,9 +245,6 @@ PATTERN is the regex pattern.  OPTIONS is a BSON regex option string."
               (list "MongoDB wire response ended unexpectedly")))
     (setf (mongodb--reader-pos reader) end)
     (pcase bytes
-      (2
-       (logior (aref data pos)
-               (ash (aref data (+ pos 1)) 8)))
       (4
        (logior (aref data pos)
                (ash (aref data (+ pos 1)) 8)
@@ -289,15 +258,7 @@ PATTERN is the regex pattern.  OPTIONS is a BSON regex option string."
                (ash (aref data (+ pos 4)) 32)
                (ash (aref data (+ pos 5)) 40)
                (ash (aref data (+ pos 6)) 48)
-               (ash (aref data (+ pos 7)) 56)))
-      (_
-       (let ((value 0)
-             (i 0))
-         (while (< i bytes)
-           (setq value (logior value
-                               (ash (aref data (+ pos i)) (* 8 i))))
-           (setq i (1+ i)))
-         value)))))
+               (ash (aref data (+ pos 7)) 56))))))
 
 (defun mongodb--read-int32 (reader)
   "Read a little-endian int32 from READER."
@@ -482,10 +443,6 @@ PATTERN is the regex pattern.  OPTIONS is a BSON regex option string."
       (hash-table-p value)
       (and (consp value)
            (consp (car value)))))
-
-(defun mongodb-document-value-p (value)
-  "Return non-nil when VALUE can encode as a BSON document."
-  (mongodb--document-value-p value))
 
 (defun mongodb-document-elements (document)
   "Return BSON key/value pairs for DOCUMENT.
@@ -860,10 +817,6 @@ never decide a value's type."
                   (mongodb--read-bytes reader size))))
     (mongodb-binary subtype bytes)))
 
-(defun mongodb--decode-datetime (reader)
-  "Read BSON UTC datetime from READER as a `mongodb-datetime'."
-  (mongodb-datetime (mongodb--read-int64 reader)))
-
 (defun mongodb--decode-timestamp (reader)
   "Read BSON timestamp from READER as a `mongodb-timestamp'."
   (let* ((raw (mongodb--read-uint-le reader 8))
@@ -882,14 +835,6 @@ never decide a value's type."
   (let ((namespace (mongodb--decode-string-value reader))
         (object-id (mongodb--decode-object-id reader)))
     (mongodb-db-pointer namespace object-id)))
-
-(defun mongodb--decode-code (reader)
-  "Read BSON JavaScript code from READER as a `mongodb-code'."
-  (mongodb-code (mongodb--decode-string-value reader)))
-
-(defun mongodb--decode-symbol (reader)
-  "Read BSON Symbol from READER as a `mongodb-symbol'."
-  (mongodb-symbol (mongodb--decode-string-value reader)))
 
 (defun mongodb--decode-code-with-scope (reader)
   "Read BSON JavaScript code with scope from READER as a `mongodb-code'."
@@ -1008,12 +953,12 @@ Arguments: NEGATIVE, COEFFICIENT, EXPONENT."
           (value
            (signal 'mongodb-error
                    (list (format "Invalid MongoDB BSON boolean: %s" value))))))
-       (#x09 (mongodb--decode-datetime reader))
+       (#x09 (mongodb-datetime (mongodb--read-int64 reader)))
        (#x0a nil)
        (#x0b (mongodb--decode-regex reader))
        (#x0c (mongodb--decode-db-pointer reader))
-       (#x0d (mongodb--decode-code reader))
-       (#x0e (mongodb--decode-symbol reader))
+       (#x0d (mongodb-code (mongodb--decode-string-value reader)))
+       (#x0e (mongodb-symbol (mongodb--decode-string-value reader)))
        (#x0f (mongodb--decode-code-with-scope reader))
        ;; int32 decodes bare: a bare integer in range re-encodes as
        ;; int32 deterministically.  int64 must keep its wrapper, since a
@@ -1073,28 +1018,6 @@ Arguments: NEGATIVE, COEFFICIENT, EXPONENT."
       (encode-coding-string string 'raw-text t)
     string))
 
-(defun mongodb-byte-string (string)
-  "Return STRING as a unibyte byte string."
-  (mongodb--byte-string string))
-
-(defun mongodb--binary-value-data (value)
-  "Return raw bytes from BSON binary VALUE."
-  (cond
-   ((mongodb-binary-p value)
-    (mongodb--byte-string (mongodb-binary-data value)))
-   ((and (consp value)
-         (consp (car value))
-         (assoc "$binary" value))
-    (let* ((binary (cdr (assoc "$binary" value)))
-           (bytes (cdr (assoc "bytes" binary))))
-      (unless (stringp bytes)
-        (signal 'mongodb-error
-                (list (format "Invalid MongoDB binary value: %S" value))))
-      (base64-decode-string bytes)))
-   (t
-    (signal 'mongodb-error
-            (list (format "Expected MongoDB binary value, got: %S" value))))))
-
 (defun mongodb--utf8-bytes (string)
   "Return STRING encoded as unibyte UTF-8."
   (encode-coding-string (format "%s" string) 'utf-8 t))
@@ -1112,10 +1035,6 @@ Arguments: NEGATIVE, COEFFICIENT, EXPONENT."
   (mapconcat (lambda (byte) (format "%02x" byte))
              (mongodb--byte-string bytes)
              ""))
-
-(defun mongodb-bytes-to-hex (bytes)
-  "Return BYTES rendered as lowercase hexadecimal."
-  (mongodb--bytes-to-hex bytes))
 
 (defun mongodb--pack-uint32-be (value)
   "Return VALUE packed as unsigned big-endian uint32."
@@ -1216,8 +1135,6 @@ HMAC is a function of key and data.  The derived key is one digest long."
 (cl-defstruct mongodb--decoded-message
   request-id
   response-to
-  opcode
-  flags
   document)
 
 ;;;; OP_MSG framing
@@ -1273,13 +1190,9 @@ BUDGET, when non-nil, is the remaining message size in bytes."
                   (list "MongoDB OP_MSG repeats a document sequence identifier")))
         (puthash identifier t seen)))))
 
-(cl-defun mongodb--make-op-msg
-    (request-id document &key flag-bits checksum sequences response-to connection)
+(cl-defun mongodb--make-op-msg (request-id document &key sequences connection)
   "Return an OP_MSG request REQUEST-ID containing DOCUMENT.
-FLAG-BITS defaults to zero.  CHECKSUM, when t, appends a computed CRC-32C
-checksum; when an integer, appends that explicit uint32 checksum.  Either
-CHECKSUM value sets the checksumPresent flag.  SEQUENCES is a list of kind 1
-document sequence sections.  RESPONSE-TO defaults to zero.  CONNECTION, when
+SEQUENCES is a list of kind 1 document sequence sections.  CONNECTION, when
 non-nil, supplies negotiated BSON, batch and total message size limits."
   (mongodb--validate-sequence-identifiers sequences)
   (when connection
@@ -1289,7 +1202,7 @@ non-nil, supplies negotiated BSON, batch and total message size limits."
                    (mongodb--check-bson-size
                     connection body-document "MongoDB command document")
                    (- (mongodb-conn-max-message-size-bytes connection)
-                      21 (length body-document) (if checksum 4 0))))
+                      21 (length body-document))))
          (sequence-bytes
           (apply #'concat
                  (cl-loop for sequence in sequences
@@ -1297,47 +1210,21 @@ non-nil, supplies negotiated BSON, batch and total message size limits."
                                        sequence connection budget)
                           do (when budget (cl-decf budget (length bytes)))
                           collect bytes)))
-         (flag-bits (if checksum
-                        (logior (or flag-bits 0)
-                                mongodb--op-msg-checksum-present)
-                      (or flag-bits 0)))
-         (body-without-checksum (concat (mongodb--pack-int32 flag-bits)
-                                        (unibyte-string 0)
-                                        body-document
-                                        sequence-bytes))
-         (length (+ 16
-                    (length body-without-checksum)
-                    (if checksum 4 0)))
-         (message-without-checksum
-          (concat (mongodb--pack-int32 length)
-                  (mongodb--pack-int32 request-id)
-                  (mongodb--pack-int32 (or response-to 0))
-                  (mongodb--pack-int32 mongodb--op-msg)
-                  body-without-checksum)))
+         (body (concat (mongodb--pack-int32 0)
+                       (unibyte-string 0)
+                       body-document
+                       sequence-bytes))
+         (length (+ 16 (length body)))
+         (message (concat (mongodb--pack-int32 length)
+                          (mongodb--pack-int32 request-id)
+                          (mongodb--pack-int32 0)
+                          (mongodb--pack-int32 mongodb--op-msg)
+                          body)))
     (when (and connection
                (> length (mongodb-conn-max-message-size-bytes connection)))
       (signal 'mongodb-error
               (list "MongoDB command exceeds maxMessageSizeBytes")))
-    (if checksum
-        (concat
-         message-without-checksum
-         (mongodb--pack-int32
-          (cond
-           ((eq checksum t)
-            (mongodb--crc32c message-without-checksum))
-           ((integerp checksum)
-            checksum)
-           (t
-            (signal 'mongodb-error
-                    (list (format "Invalid MongoDB OP_MSG checksum value: %S"
-                                  checksum)))))))
-      message-without-checksum)))
-
-
-(defun mongodb--read-int32-from-string (data)
-  "Read the first little-endian int32 from DATA."
-  (mongodb--read-int32
-   (make-mongodb--reader :data data :pos 0)))
+    message))
 
 (defun mongodb--validate-op-msg-flags (flag-bits)
   "Signal when OP_MSG FLAG-BITS contain unknown required flags."
@@ -1350,9 +1237,10 @@ non-nil, supplies negotiated BSON, batch and total message size limits."
               (list (format "Unknown MongoDB OP_MSG required flag bits: %s"
                             unknown-required))))))
 
-(defun mongodb--decode-op-msg-frame (message &optional allow-more-to-come)
+(defun mongodb--decode-message-frame (message)
   "Decode OP_MSG MESSAGE and return a `mongodb--decoded-message'.
-Signal when a reply sets moreToCome unless ALLOW-MORE-TO-COME is non-nil."
+Signal when a reply sets moreToCome: this client never sends exhaustAllowed,
+so a server should never set it."
   (let* ((reader (make-mongodb--reader :data message :pos 0))
          (length (mongodb--read-int32 reader))
          (request-id (mongodb--read-int32 reader))
@@ -1371,9 +1259,7 @@ Signal when a reply sets moreToCome unless ALLOW-MORE-TO-COME is non-nil."
               (list (format "Unexpected MongoDB opcode: %s" opcode))))
     (setq flag-bits (mongodb--read-int32 reader))
     (mongodb--validate-op-msg-flags flag-bits)
-    (when (and (not allow-more-to-come)
-               (not (zerop (logand flag-bits
-                                    mongodb--op-msg-more-to-come))))
+    (when (not (zerop (logand flag-bits mongodb--op-msg-more-to-come)))
       (signal 'mongodb-error
               (list "MongoDB OP_MSG moreToCome flag received without exhaustAllowed request")))
     (setq sections-end
@@ -1437,19 +1323,11 @@ Signal when a reply sets moreToCome unless ALLOW-MORE-TO-COME is non-nil."
     (make-mongodb--decoded-message
      :request-id request-id
      :response-to response-to
-     :opcode opcode
-     :flags flag-bits
      :document
      (if body-seen
          document
        (signal 'mongodb-error
                (list "MongoDB OP_MSG reply contained no body document"))))))
-
-(defun mongodb--decode-message-frame (message &optional allow-more-to-come)
-  "Decode a MongoDB OP_MSG wire MESSAGE and return a decoded frame.
-
-Arguments: MESSAGE, ALLOW-MORE-TO-COME."
-  (mongodb--decode-op-msg-frame message allow-more-to-come))
 
 (defun mongodb--validate-response-to (frame expected-response-to)
   "Signal unless FRAME's responseTo matches EXPECTED-RESPONSE-TO."
@@ -1795,10 +1673,9 @@ TIME, when non-nil, supplies the timestamp component."
     (nreverse attrs)))
 
 (defun mongodb--scram-payload-string (payload)
-  "Return SCRAM PAYLOAD decoded as a UTF-8 string."
-  (if (stringp payload)
-      payload
-    (decode-coding-string (mongodb--binary-value-data payload) 'utf-8 t)))
+  "Return SCRAM PAYLOAD decoded as a UTF-8 string.
+The decoder always returns a `mongodb-binary' for BSON binary values."
+  (decode-coding-string (mongodb-binary-data payload) 'utf-8 t))
 
 (defun mongodb--scram-start-data (credential mechanism)
   "Return SCRAM client-first data for CREDENTIAL and MECHANISM."
@@ -1963,11 +1840,6 @@ values."
         (signal 'mongodb-error
                 (list "MongoDB SCRAM server signature was not returned"))))))
 
-(defun mongodb--authenticate (conn credential hello)
-  "Authenticate CONN with CREDENTIAL using data from HELLO."
-  (mongodb--authenticate-scram
-   conn credential (mongodb--choose-auth-mechanism credential hello)))
-
 ;;;; Wire transport and commands
 
 (defconst mongodb--client-min-wire-version 6)
@@ -2011,7 +1883,8 @@ values."
 EXPECTED-RESPONSE-TO, when non-nil, must match the reply header."
   (let* ((deadline (+ (float-time) (or timeout mongodb-timeout-seconds)))
          (header (mongodb--wait-for-bytes conn 4 deadline))
-         (length (mongodb--read-int32-from-string header))
+         (length (mongodb--read-int32
+                  (make-mongodb--reader :data header :pos 0)))
          (maximum (mongodb-conn-max-message-size-bytes conn)))
     (unless (and (integerp maximum)
                  (>= length 16)
@@ -2121,10 +1994,6 @@ The containing BSON size check also bounds every embedded document."
     (or (eq ok t)
         (and (numberp ok) (= ok 1)))))
 
-(defun mongodb-response-ok-p (response)
-  "Return non-nil when MongoDB RESPONSE reports ok."
-  (mongodb--response-ok-p response))
-
 (defun mongodb--response-message (response)
   "Return an error message from MongoDB RESPONSE."
   (or (cdr (assoc "errmsg" response))
@@ -2152,19 +2021,6 @@ The containing BSON size check also bounds every embedded document."
     (plist-get (if (keywordp (car data)) data (cdr data))
                :error-labels)))
 
-(defun mongodb-error-has-label-p (condition label)
-  "Return non-nil when CONDITION includes MongoDB error LABEL."
-  (member label (mongodb-error-labels condition)))
-
-(defun mongodb--option-pairs (options)
-  "Return MongoDB command option pairs from OPTIONS."
-  (cond
-   ((null options) nil)
-   ((mongodb-document-p options) (mongodb-document-pairs options))
-   ((listp options) options)
-   (t (signal 'mongodb-error
-              (list (format "MongoDB command options must be a document: %S" options))))))
-
 (defun mongodb--remove-option-pairs (keys pairs)
   "Return PAIRS without any entry whose car is in KEYS."
   (cl-remove-if (lambda (pair) (member (car pair) keys)) pairs))
@@ -2191,14 +2047,10 @@ The containing BSON size check also bounds every embedded document."
     (mongodb--signal-command-error response))
   response)
 
-(defun mongodb--tls-available-p ()
-  "Return non-nil when GnuTLS is available."
-  (gnutls-available-p))
-
 (defun mongodb--upgrade-to-tls (proc host timeout verify-server)
   "Upgrade PROC to TLS for HOST within TIMEOUT.
 When VERIFY-SERVER is non-nil, reject certificate and hostname failures."
-  (unless (mongodb--tls-available-p)
+  (unless (gnutls-available-p)
     (signal 'mongodb-error (list "MongoDB TLS requires GnuTLS support")))
   (gnutls-negotiate
    :process proc
@@ -2298,7 +2150,9 @@ peer closes must stay parseable."
                             (list (format "Unsupported MongoDB wire version range: server %s-%s"
                                           min-wire max-wire)))))
                 (when credential
-                  (mongodb--authenticate conn credential hello)))
+                  (mongodb--authenticate-scram
+                   conn credential
+                   (mongodb--choose-auth-mechanism credential hello))))
               ;; Transfer transport ownership to the returned connection.
               (prog1 conn (setq proc nil buffer nil)))
           (mongodb-error
@@ -2341,10 +2195,6 @@ peer closes must stay parseable."
   "Return the normalized username for MongoDB CONN, or nil."
   (when-let* ((credential (mongodb-conn-credential conn)))
     (mongodb--credential-username credential)))
-
-(defun mongodb-hello (conn &optional timeout)
-  "Run MongoDB hello through CONN within optional TIMEOUT."
-  (mongodb-command conn "admin" '(("hello" . 1)) timeout))
 
 (defun mongodb--cursor-batch (cursor key)
   "Return cursor KEY batch from CURSOR."
@@ -2390,10 +2240,10 @@ integer small enough to fit an int32 would encode as the wrong type."
                                             cursor-ids))))))
 
 (defun mongodb--cursor-results
-    (conn database collection response first-batch-key &optional get-more-options)
+    (conn database collection response first-batch-key)
   "Return all cursor results from RESPONSE using CONN.
-DATABASE, COLLECTION, FIRST-BATCH-KEY, and GET-MORE-OPTIONS describe the cursor
-and subsequent getMore commands."
+DATABASE, COLLECTION, and FIRST-BATCH-KEY describe the cursor and subsequent
+getMore commands."
   (unless (and (integerp mongodb-max-cursor-documents)
                (>= mongodb-max-cursor-documents 0))
     (signal 'mongodb-error
@@ -2429,8 +2279,7 @@ and subsequent getMore commands."
                  ;; getMore must be an int64 on the wire; a small bare
                  ;; cursor id would otherwise encode as int32.
                  `(("getMore" . ,(mongodb-int64 cursor-id))
-                   ("collection" . ,collection)
-                   ,@(mongodb--option-pairs get-more-options))))
+                   ("collection" . ,collection))))
                (next (cdr (assoc "cursor" reply))))
           (setq cursor-id (mongodb--cursor-id next))
           (add-batch (mongodb--cursor-batch next "nextBatch"))))
@@ -2452,7 +2301,7 @@ and subsequent getMore commands."
           `(("listCollections" . 1)
             ("cursor" . ,(mongodb-document nil))
             ,@(when filter `(("filter" . ,filter)))
-            ,@(mongodb--option-pairs options)))))
+            ,@(mongodb--document-pairs options)))))
     (mongodb--cursor-results conn database "$cmd.listCollections" response "firstBatch")))
 
 (defun mongodb-list-collections (conn database)
@@ -2464,7 +2313,7 @@ and subsequent getMore commands."
   "Create COLLECTION in DATABASE on CONN."
   (mongodb-command conn database
                    `(("create" . ,collection)
-                     ,@(mongodb--option-pairs options))))
+                     ,@(mongodb--document-pairs options))))
 
 (defun mongodb-list-indexes (conn database collection)
   "Return index documents for COLLECTION in DATABASE on CONN."
@@ -2478,10 +2327,9 @@ and subsequent getMore commands."
     (collection &optional filter projection limit skip sort options)
   "Return a MongoDB find command document for COLLECTION.
 FILTER, PROJECTION, LIMIT, SKIP, SORT, and OPTIONS map to find command fields."
-  (let* ((option-pairs (mongodb--option-pairs options))
+  (let* ((option-pairs (mongodb--document-pairs options))
          (batch-size (or (cdr (assoc "batchSize" option-pairs)) 1000))
-         (extra (mongodb--remove-option-pairs '("batchSize" "maxAwaitTimeMS")
-                                             option-pairs)))
+         (extra (mongodb--remove-option-pairs '("batchSize") option-pairs)))
     `(("find" . ,collection)
       ("filter" . ,(or filter (mongodb-document nil)))
       ("batchSize" . ,batch-size)
@@ -2494,15 +2342,11 @@ FILTER, PROJECTION, LIMIT, SKIP, SORT, and OPTIONS map to find command fields."
 (defun mongodb-find
     (conn database collection &optional filter projection limit skip sort options)
   "Return documents from COLLECTION in DATABASE on CONN."
-  (let* ((option-pairs (mongodb--option-pairs options))
-         (response
-          (mongodb-command conn database
-                           (mongodb-find-command collection filter projection
-                                                 limit skip sort option-pairs))))
-    (mongodb--cursor-results
-     conn database collection response "firstBatch"
-     (let ((max-await (cdr (assoc "maxAwaitTimeMS" option-pairs))))
-       (when max-await `(("maxTimeMS" . ,max-await)))))))
+  (let ((response
+         (mongodb-command conn database
+                          (mongodb-find-command collection filter projection
+                                                limit skip sort options))))
+    (mongodb--cursor-results conn database collection response "firstBatch")))
 
 (defun mongodb-count-documents (conn database collection &optional filter options)
   "Return count for COLLECTION in DATABASE on CONN."
@@ -2510,7 +2354,7 @@ FILTER, PROJECTION, LIMIT, SKIP, SORT, and OPTIONS map to find command fields."
          (mongodb-command conn database
                           `(("count" . ,collection)
                             ,@(when filter `(("query" . ,filter)))
-                            ,@(mongodb--option-pairs options)))))
+                            ,@(mongodb--document-pairs options)))))
     (cdr (assoc "n" response))))
 
 (defun mongodb-distinct (conn database collection field &optional filter options)
@@ -2520,12 +2364,12 @@ FILTER, PROJECTION, LIMIT, SKIP, SORT, and OPTIONS map to find command fields."
                           `(("distinct" . ,collection)
                             ("key" . ,field)
                             ,@(when filter `(("query" . ,filter)))
-                            ,@(mongodb--option-pairs options)))))
+                            ,@(mongodb--document-pairs options)))))
     (cdr (assoc "values" response))))
 
 (defun mongodb--cursor-option (options)
   "Return aggregate cursor option document from OPTIONS."
-  (let* ((pairs (mongodb--option-pairs options))
+  (let* ((pairs (mongodb--document-pairs options))
          (cursor (cdr (assoc "cursor" pairs)))
          (batch-size (cdr (assoc "batchSize" pairs))))
     (or cursor
@@ -2535,7 +2379,7 @@ FILTER, PROJECTION, LIMIT, SKIP, SORT, and OPTIONS map to find command fields."
 (defun mongodb-aggregate-command (collection pipeline &optional options)
   "Return a MongoDB aggregate command document for COLLECTION and PIPELINE.
 OPTIONS are appended to the aggregate command after cursor normalization."
-  (let* ((pairs (mongodb--option-pairs options))
+  (let* ((pairs (mongodb--document-pairs options))
          (extra (mongodb--remove-option-pairs '("cursor" "batchSize") pairs)))
     `(("aggregate" . ,collection)
       ("pipeline" . ,(if (vectorp pipeline) pipeline (vconcat pipeline)))
@@ -2548,13 +2392,6 @@ OPTIONS are appended to the aggregate command after cursor normalization."
          (mongodb-command conn database
                           (mongodb-aggregate-command collection pipeline options))))
     (mongodb--cursor-results conn database collection response "firstBatch")))
-
-(defun mongodb-aggregate-database (conn database pipeline &optional options)
-  "Return database-level aggregation results for DATABASE on CONN."
-  (let ((response
-         (mongodb-command conn database
-                          (mongodb-aggregate-command 1 pipeline options))))
-    (mongodb--cursor-results conn database "$cmd.aggregate" response "firstBatch")))
 
 (defun mongodb--explain-verbosity (verbosity)
   "Return MongoDB explain VERBOSITY."
@@ -2613,7 +2450,7 @@ OPTIONS are appended to the aggregate command after cursor normalization."
 
 (defun mongodb-update (conn database collection filter update &optional multi options)
   "Update documents in COLLECTION in DATABASE on CONN."
-  (let* ((pairs (mongodb--option-pairs options))
+  (let* ((pairs (mongodb--document-pairs options))
          (upsert (cdr (assoc "upsert" pairs)))
          (extra (mongodb--remove-option-pairs '("upsert" "multi") pairs)))
     (mongodb--check-write-response
@@ -2634,7 +2471,7 @@ OPTIONS are appended to the aggregate command after cursor normalization."
 
 (defun mongodb-create-index (conn database collection keys &optional options)
   "Create one index with KEYS on COLLECTION in DATABASE on CONN."
-  (let* ((pairs (mongodb--option-pairs options))
+  (let* ((pairs (mongodb--document-pairs options))
          (name (or (cdr (assoc "name" pairs)) (mongodb--index-name keys)))
          (extra (mongodb--remove-option-pairs '("key" "name") pairs)))
     (mongodb-command conn database
