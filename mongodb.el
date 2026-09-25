@@ -157,25 +157,6 @@ SUBTYPE is the BSON binary subtype byte.  DATA is a unibyte string."
   subtype
   data)
 
-(defun mongodb-uuid (uuid)
-  "Return UUID encoded as BSON binary subtype 4.
-UUID must be a canonical RFC 4122 string."
-  (unless (and (stringp uuid)
-               (string-match-p
-                (concat "\\`[0-9a-fA-F]\\{8\\}-"
-                        "[0-9a-fA-F]\\{4\\}-"
-                        "[0-9a-fA-F]\\{4\\}-"
-                        "[0-9a-fA-F]\\{4\\}-"
-                        "[0-9a-fA-F]\\{12\\}\\'")
-                uuid))
-    (signal 'mongodb-error
-            (list (format "Invalid MongoDB UUID: %S" uuid))))
-  (mongodb-binary
-   4
-   (mongodb--hex-to-bytes (replace-regexp-in-string "-" "" uuid nil t)
-                        32
-                        "UUID")))
-
 (cl-defstruct (mongodb-regex
                (:constructor mongodb-regex (pattern &optional options)))
   "MongoDB BSON regular expression wrapper.
@@ -482,10 +463,6 @@ PATTERN is the regex pattern.  OPTIONS is a BSON regex option string."
       (hash-table-p value)
       (and (consp value)
            (consp (car value)))))
-
-(defun mongodb-document-value-p (value)
-  "Return non-nil when VALUE can encode as a BSON document."
-  (mongodb--document-value-p value))
 
 (defun mongodb-document-elements (document)
   "Return BSON key/value pairs for DOCUMENT.
@@ -1073,10 +1050,6 @@ Arguments: NEGATIVE, COEFFICIENT, EXPONENT."
       (encode-coding-string string 'raw-text t)
     string))
 
-(defun mongodb-byte-string (string)
-  "Return STRING as a unibyte byte string."
-  (mongodb--byte-string string))
-
 (defun mongodb--binary-value-data (value)
   "Return raw bytes from BSON binary VALUE."
   (cond
@@ -1112,10 +1085,6 @@ Arguments: NEGATIVE, COEFFICIENT, EXPONENT."
   (mapconcat (lambda (byte) (format "%02x" byte))
              (mongodb--byte-string bytes)
              ""))
-
-(defun mongodb-bytes-to-hex (bytes)
-  "Return BYTES rendered as lowercase hexadecimal."
-  (mongodb--bytes-to-hex bytes))
 
 (defun mongodb--pack-uint32-be (value)
   "Return VALUE packed as unsigned big-endian uint32."
@@ -2121,10 +2090,6 @@ The containing BSON size check also bounds every embedded document."
     (or (eq ok t)
         (and (numberp ok) (= ok 1)))))
 
-(defun mongodb-response-ok-p (response)
-  "Return non-nil when MongoDB RESPONSE reports ok."
-  (mongodb--response-ok-p response))
-
 (defun mongodb--response-message (response)
   "Return an error message from MongoDB RESPONSE."
   (or (cdr (assoc "errmsg" response))
@@ -2151,10 +2116,6 @@ The containing BSON size check also bounds every embedded document."
   (let ((data (cdr condition)))
     (plist-get (if (keywordp (car data)) data (cdr data))
                :error-labels)))
-
-(defun mongodb-error-has-label-p (condition label)
-  "Return non-nil when CONDITION includes MongoDB error LABEL."
-  (member label (mongodb-error-labels condition)))
 
 (defun mongodb--option-pairs (options)
   "Return MongoDB command option pairs from OPTIONS."
@@ -2341,10 +2302,6 @@ peer closes must stay parseable."
   "Return the normalized username for MongoDB CONN, or nil."
   (when-let* ((credential (mongodb-conn-credential conn)))
     (mongodb--credential-username credential)))
-
-(defun mongodb-hello (conn &optional timeout)
-  "Run MongoDB hello through CONN within optional TIMEOUT."
-  (mongodb-command conn "admin" '(("hello" . 1)) timeout))
 
 (defun mongodb--cursor-batch (cursor key)
   "Return cursor KEY batch from CURSOR."
@@ -2548,13 +2505,6 @@ OPTIONS are appended to the aggregate command after cursor normalization."
          (mongodb-command conn database
                           (mongodb-aggregate-command collection pipeline options))))
     (mongodb--cursor-results conn database collection response "firstBatch")))
-
-(defun mongodb-aggregate-database (conn database pipeline &optional options)
-  "Return database-level aggregation results for DATABASE on CONN."
-  (let ((response
-         (mongodb-command conn database
-                          (mongodb-aggregate-command 1 pipeline options))))
-    (mongodb--cursor-results conn database "$cmd.aggregate" response "firstBatch")))
 
 (defun mongodb--explain-verbosity (verbosity)
   "Return MongoDB explain VERBOSITY."

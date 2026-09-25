@@ -276,17 +276,17 @@ and hmac, including a password whose non-breaking space SASLprep would change."
                           "r=fixed-server,s=c2FsdA==,i=4096")))
       (should (equal (plist-get result :message)
                      (concat "c=biws,r=fixed-server,p=" proof)))
-      (should (equal (mongodb-bytes-to-hex (plist-get result :server-signature))
+      (should (equal (mongodb--bytes-to-hex (plist-get result :server-signature))
                      signature)))))
 
 (ert-deftest mongodb-test-pbkdf2-known-vectors ()
   "SCRAM PBKDF2 primitives should match published test vectors."
   (should
-   (equal (mongodb-bytes-to-hex
+   (equal (mongodb--bytes-to-hex
            (mongodb--pbkdf2 #'mongodb--hmac-sha1 "password" "salt" 1))
           "0c60c80f961f0e71f3a9b524af6012062fe037a6"))
   (should
-   (equal (mongodb-bytes-to-hex
+   (equal (mongodb--bytes-to-hex
            (mongodb--pbkdf2 #'mongodb--hmac-sha256 "password" "salt" 1))
           "120fb6cffcf8b32c43e7225256c4f837a86548c92ccc35480805987cb70be17b")))
 
@@ -306,9 +306,9 @@ Expected digests were independently checked with Python hashlib.pbkdf2_hmac."
                    "8c1da390e3d2cbeb127a294f6dd25165691c4df9"
                    "7a26a4077c666be9ba44d66eb32365539518c38ddf34b2429b739c29920def7f")))
     (pcase-let ((`(,secret ,salt ,iterations ,sha1 ,sha256) case))
-      (should (equal (mongodb-bytes-to-hex
+      (should (equal (mongodb--bytes-to-hex
                       (mongodb--pbkdf2 #'mongodb--hmac-sha1 secret salt iterations)) sha1))
-      (should (equal (mongodb-bytes-to-hex
+      (should (equal (mongodb--bytes-to-hex
                       (mongodb--pbkdf2 #'mongodb--hmac-sha256 secret salt iterations)) sha256)))))
 
 (ert-deftest mongodb-test-pbkdf2-iteration-boundaries ()
@@ -681,7 +681,7 @@ is a fixed point."
     (mongodb-error
      (should (equal (mongodb-error-labels err)
                     '("RetryableWriteError" "TransientTransactionError")))
-     (should (mongodb-error-has-label-p err "RetryableWriteError")))))
+     (should (member "RetryableWriteError" (mongodb-error-labels err))))))
 
 (ert-deftest mongodb-test-insert-builds-command-with-generated-id ()
   (let (captured)
