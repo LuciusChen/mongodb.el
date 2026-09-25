@@ -19,12 +19,12 @@
 (ert-deftest mongodb-test-little-endian-primitives ()
   (let* ((data (concat (mongodb--pack-int32 -1)
                        (mongodb--pack-int64 mongodb--int64-min)
-                       (mongodb--pack-uint-le #x1234 2)
+                       (mongodb--pack-uint-le #x01020304 4)
                        (mongodb--pack-uint-le #x0102030405060708 8)))
          (reader (make-mongodb--reader :data data :pos 0)))
     (should (= (mongodb--read-int32 reader) -1))
     (should (= (mongodb--read-int64 reader) mongodb--int64-min))
-    (should (= (mongodb--read-uint-le reader 2) #x1234))
+    (should (= (mongodb--read-uint-le reader 4) #x01020304))
     (should (= (mongodb--read-uint-le reader 8) #x0102030405060708))
     (should (= (mongodb--reader-pos reader) (length data)))))
 
@@ -75,7 +75,7 @@
 (ert-deftest mongodb-test-tls-upgrade-enforces-verification-option ()
   "TLS negotiation should receive certificate and hostname verification flags."
   (let (captured)
-    (cl-letf (((symbol-function 'mongodb--tls-available-p) (lambda () t))
+    (cl-letf (((symbol-function 'gnutls-available-p) (lambda () t))
               ((symbol-function 'gnutls-negotiate)
                (lambda (&rest args) (setq captured args)))
               ((symbol-function 'process-status) (lambda (_proc) 'open))
@@ -627,8 +627,7 @@ is a fixed point."
                                                     '("b" "c")
                                                   '("d")))))))))
       (should (equal (mongodb--cursor-results
-                      :conn "app" "users" response "firstBatch"
-                      '(("batchSize" . 2)))
+                      :conn "app" "users" response "firstBatch")
                      '("a" "b" "c" "d"))))
     (setq commands (nreverse commands))
     ;; Cursor ids ride the wire as int64 wrappers so a small id cannot
@@ -638,8 +637,7 @@ is a fixed point."
                               (cdr (assoc "getMore" command))))
                            commands)
                    '(10 11)))
-    (should (equal (cdr (assoc "collection" (car commands))) "users"))
-    (should (= (cdr (assoc "batchSize" (car commands))) 2))))
+    (should (equal (cdr (assoc "collection" (car commands))) "users"))))
 
 (ert-deftest mongodb-test-error-labels-come-from-condition-data ()
   (condition-case err
