@@ -94,6 +94,13 @@ rg -n -P "(?<![A-Za-z0-9-])(clutch|mysql|pg|tramp-rpc)--[A-Za-z0-9-]+" \
   mongodb.el test/*.el
 ```
 
+For protocol changes, also run the live smoke test with `MONGODB_TEST_URI`;
+the command is under Tests in `README.org`.  CI's URI names no mechanism and
+default negotiation selects SCRAM-SHA-256, so CI does not test SCRAM-SHA-1.
+After changing authentication, run the live test once with
+`authMechanism=SCRAM-SHA-1` and once with `authMechanism=SCRAM-SHA-256` in the
+URI, using accounts allowed to use each.
+
 If the sibling Clutch checkout is present:
 
 ```bash
@@ -103,3 +110,14 @@ rg -n -P "require 'mongodb-(wire|bson|params|auth)|(?<![A-Za-z0-9-])mongodb--[A-
 
 This must return no matches.  Clutch must use `(require 'mongodb)` and public
 `mongodb-` APIs only.
+
+## Releases
+
+- Record user-visible changes in `CHANGELOG.md` under `Unreleased` in the same
+  change; pure test or internal cleanup needs no entry.
+- Only a release changes `;; Version:` in `mongodb.el`, moves the `Unreleased`
+  entries under the new version, and is tagged `vX.Y.Z`.  Keep
+  version-specific prose out of `README.org`.
+- mongodb.el has not been released: it is not on MELPA and no version has been
+  tagged, so callers such as Clutch install it from GitHub.  The "before
+  public release" rules above still apply.
