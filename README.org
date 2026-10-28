@@ -116,3 +116,7 @@ MONGODB_TEST_URI=mongodb://127.0.0.1:27017/clutch_test \
   -L . -l ert -l test/mongodb-test.el \
   --eval '(ert-run-tests-batch-and-exit)'
 #+end_src
+
+* License
+
+mongodb.el is released under the GNU General Public License, version 3 or later.  See [[file:LICENSE][LICENSE]].
