@@ -2117,26 +2117,25 @@ CONN remains busy until CALLBACK starts; CALLBACK may start another command."
          (process (mongodb-conn-process conn))
          (pending (make-mongodb--pending :request-id id :callback callback
                                          :filter (process-filter process)))
-         sent)
+         started)
     (unless (and (numberp timeout) (>= timeout 0))
       (signal 'mongodb-error '("MongoDB response timeout must be non-negative")))
-    (setf (mongodb-conn-pending conn) pending (mongodb-conn-busy conn) t)
-    (process-put process 'mongodb-connection conn)
-    (set-process-filter process #'mongodb--async-filter)
     (unwind-protect
         (condition-case err
             (progn
+              (setf (mongodb-conn-pending conn) pending (mongodb-conn-busy conn) t)
+              (process-put process 'mongodb-connection conn)
+              (set-process-filter process #'mongodb--async-filter)
               (process-send-string process message)
-              (setq sent t)
               (when (eq pending (mongodb-conn-pending conn))
                 (setf (mongodb--pending-timer pending)
                       (run-at-time timeout nil
                                    (lambda ()
                                      (when (eq pending (mongodb-conn-pending conn))
                                        (mongodb--fail-async conn '(mongodb-error "MongoDB response timed out")))))))
-              t)
+              (setq started t))
           (error (signal 'mongodb-error (list (error-message-string err)))))
-      (unless sent
+      (unless started
         (mongodb--clear-pending conn)
         (mongodb-disconnect conn)))))
 

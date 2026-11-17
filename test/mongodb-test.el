@@ -1025,25 +1025,41 @@ roundtrip is semantic equivalence rather than byte identity for NaN."
             (should (equal (caaar commands) "killCursors"))))))))
 
 (ert-deftest mongodb-test-async-dispatch-abandonment ()
-  "Dispatch exits close the transport and do not deliver a callback."
-  (dolist (case '(error quit throw))
-    (mongodb-test--with-pipe-conn (conn)
-      (let ((calls 0))
-        (cl-letf (((symbol-function 'process-send-string)
-                   (lambda (&rest _)
-                     (pcase case
-                       ('error (error "write failed"))
-                       ('quit (signal 'quit nil))
-                       ('throw (throw 'dispatch-exit t))))))
-          (catch 'dispatch-exit
-            (condition-case nil
-                (mongodb-command-async conn "app" '(("ping" . 1))
-                                       (lambda (&rest _) (cl-incf calls)))
-              ((mongodb-error quit) nil))))
-        (accept-process-output nil .01)
-        (should-not (mongodb-live-p conn))
-        (should-not (mongodb-busy-p conn))
-        (should (= calls 0))))))
+  "Dispatch exits at each installation stage close the transport without delivery."
+  (dolist (stage '(filter send timer))
+    (dolist (case '(error quit throw))
+      (ert-info ((format "%s during %s" case stage))
+        (mongodb-test--with-pipe-conn (conn)
+          (let ((calls 0)
+                (filter (symbol-function 'set-process-filter))
+                (schedule (symbol-function 'run-at-time)))
+            (cl-labels ((abandon ()
+                          (pcase case
+                            ('error (error "dispatch failed"))
+                            ('quit (signal 'quit nil))
+                            ('throw (throw 'dispatch-exit t)))))
+              (cl-letf (((symbol-function 'set-process-filter)
+                         (lambda (process function)
+                           (when (and (eq stage 'filter)
+                                      (eq function #'mongodb--async-filter))
+                             (abandon))
+                           (funcall filter process function)))
+                        ((symbol-function 'process-send-string)
+                         (lambda (&rest _) (when (eq stage 'send) (abandon))))
+                        ((symbol-function 'run-at-time)
+                         (lambda (seconds repeat function &rest args)
+                           (when (and (eq stage 'timer) (= seconds 1)) (abandon))
+                           (apply schedule seconds repeat function args))))
+                (catch 'dispatch-exit
+                  (condition-case nil
+                      (mongodb-command-async conn "app" '(("ping" . 1))
+                                             (lambda (&rest _) (cl-incf calls)) 1)
+                    ((mongodb-error quit) nil)))))
+            (accept-process-output nil .01)
+            (should-not (mongodb-live-p conn))
+            (should-not (mongodb-busy-p conn))
+            (should-not (mongodb-conn-pending conn))
+            (should (= calls 0))))))))
 
 ;;;; Live smoke tests (need a reachable MongoDB server)
 
