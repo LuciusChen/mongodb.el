@@ -1362,7 +1362,8 @@ so a server should never set it."
   (max-write-batch-size 100000)
   (closed nil)
   live
-  (busy nil))
+  (busy nil)
+  pending)
 
 (defconst mongodb--scram-auth-mechanisms '("SCRAM-SHA-256" "SCRAM-SHA-1"))
 
@@ -1878,23 +1879,83 @@ values."
         (delete-region (point-min) (+ (point-min) count))
         (mongodb--byte-string data)))))
 
-(defun mongodb--recv-message-frame (conn timeout expected-response-to)
-  "Receive one MongoDB message frame from CONN within TIMEOUT.
-EXPECTED-RESPONSE-TO, when non-nil, must match the reply header."
-  (let* ((deadline (+ (float-time) (or timeout mongodb-timeout-seconds)))
-         (header (mongodb--wait-for-bytes conn 4 deadline))
-         (length (mongodb--read-int32
-                  (make-mongodb--reader :data header :pos 0)))
-         (maximum (mongodb-conn-max-message-size-bytes conn)))
-    (unless (and (integerp maximum)
-                 (>= length 16)
-                 (<= length maximum))
+(cl-defstruct mongodb--pending
+  request-id callback timer filter)
+
+(defun mongodb--message-length (conn header)
+  "Validate and return the wire length in HEADER for CONN."
+  (let ((length (mongodb--read-int32 (make-mongodb--reader :data (mongodb--byte-string header) :pos 0)))
+        (maximum (mongodb-conn-max-message-size-bytes conn)))
+    (unless (and (integerp maximum) (>= length 16) (<= length maximum))
       (signal 'mongodb-error
               (list (format "Invalid MongoDB wire message length: %s" length))))
-    (let* ((body (mongodb--wait-for-bytes conn (- length 4) deadline))
-           (frame (mongodb--decode-message-frame (concat header body))))
-      (mongodb--validate-response-to frame expected-response-to)
-      frame)))
+    length))
+
+(defun mongodb--recv-message-frame (conn timeout expected-response-to)
+  "Receive one MongoDB frame from CONN within TIMEOUT.
+EXPECTED-RESPONSE-TO must match the reply header when non-nil."
+  (let* ((deadline (+ (float-time) (or timeout mongodb-timeout-seconds)))
+         (header (mongodb--wait-for-bytes conn 4 deadline))
+         (length (mongodb--message-length conn header))
+         (body (mongodb--wait-for-bytes conn (- length 4) deadline))
+         (frame (mongodb--decode-message-frame (concat header body))))
+    (mongodb--validate-response-to frame expected-response-to)
+    frame))
+
+(defun mongodb--clear-pending (conn)
+  "Release pending request resources on CONN and return its old request."
+  (when-let* ((pending (mongodb-conn-pending conn)))
+    (setf (mongodb-conn-pending conn) nil)
+    (when (mongodb--pending-timer pending)
+      (cancel-timer (mongodb--pending-timer pending)))
+    (set-process-filter (mongodb-conn-process conn) (mongodb--pending-filter pending))
+    pending))
+
+(defun mongodb--finish-async (conn result error)
+  "Deliver RESULT or ERROR for CONN's pending command exactly once."
+  (when-let* ((pending (mongodb--clear-pending conn)))
+    ;; Hold busy until delivery, so a cursor continuation can send getMore
+    ;; before another caller reuses the transport.
+    (run-at-time 0 nil
+                 (lambda ()
+                   (setf (mongodb-conn-busy conn) nil)
+                   (funcall (mongodb--pending-callback pending) result error)))))
+
+(defun mongodb--fail-async (conn error)
+  "Fail CONN's pending command with ERROR and close the unsafe transport."
+  (mongodb--finish-async conn nil
+                        (if (eq (car error) 'mongodb-error) error
+                          (list 'mongodb-error (error-message-string error))))
+  (mongodb-disconnect conn))
+
+(defun mongodb--read-async (conn)
+  "Consume a complete buffered reply on CONN without waiting for more bytes."
+  (when-let* ((pending (mongodb-conn-pending conn)))
+    (with-current-buffer (mongodb-conn-buffer conn)
+      (when (>= (buffer-size) 4)
+        (let ((length (mongodb--message-length
+                       conn (buffer-substring-no-properties (point-min) (+ (point-min) 4)))))
+          (when (>= (buffer-size) length)
+            (let ((frame (mongodb--decode-message-frame
+                          (mongodb--byte-string
+                           (buffer-substring-no-properties (point-min) (+ (point-min) length))))))
+              (mongodb--validate-response-to frame (mongodb--pending-request-id pending))
+              (delete-region (point-min) (+ (point-min) length))
+              (let* ((response (mongodb--decoded-message-document frame))
+                     (error (unless (mongodb--response-ok-p response)
+                              (condition-case err (mongodb--signal-command-error response)
+                                (mongodb-error err)))))
+                (mongodb--finish-async conn (unless error response) error)))))))))
+
+(defun mongodb--async-filter (process bytes)
+  "Append binary BYTES from PROCESS and consume its complete async reply."
+  (when-let* ((conn (process-get process 'mongodb-connection)))
+    (condition-case err
+        (with-current-buffer (mongodb-conn-buffer conn)
+          (let ((inhibit-read-only t))
+            (save-excursion (goto-char (point-max)) (insert bytes)))
+          (mongodb--read-async conn))
+      (error (mongodb--fail-async conn err)))))
 
 (defun mongodb--check-bson-size (conn bytes description)
   "Reject encoded BSON BYTES larger than CONN permits, naming DESCRIPTION."
@@ -2040,6 +2101,48 @@ The containing BSON size check also bounds every embedded document."
       (mongodb--signal-command-error response))
     response))
 
+(defun mongodb-command-async (conn database command callback &optional timeout sequences)
+  "Start COMMAND on CONN in DATABASE without waiting and return t.
+Call CALLBACK with (RESULT ERROR) from a timer exactly once after acceptance.
+A server error leaves the transport usable.  A wire error, disconnect or
+TIMEOUT closes it.  TIMEOUT defaults to `mongodb-timeout-seconds' and uses
+the same total-response budget as `mongodb-command'.  SEQUENCES are encoded
+as by that command.  Dispatch errors signal immediately without a callback.
+CONN remains busy until CALLBACK starts; CALLBACK may start another command."
+  (mongodb--ensure-command-ready conn)
+  (let* ((timeout (or timeout mongodb-timeout-seconds))
+         (id (mongodb--next-request-id conn))
+         (message (mongodb--make-op-msg id (mongodb--command-with-db database command)
+                                        :sequences sequences :connection conn))
+         (process (mongodb-conn-process conn))
+         (pending (make-mongodb--pending :request-id id :callback callback
+                                         :filter (process-filter process)))
+         started)
+    (unless (and (numberp timeout) (>= timeout 0))
+      (signal 'mongodb-error '("MongoDB response timeout must be non-negative")))
+    (unwind-protect
+        (condition-case err
+            (progn
+              (setf (mongodb-conn-pending conn) pending (mongodb-conn-busy conn) t)
+              (process-put process 'mongodb-connection conn)
+              (set-process-filter process #'mongodb--async-filter)
+              (process-send-string process message)
+              (when (eq pending (mongodb-conn-pending conn))
+                (setf (mongodb--pending-timer pending)
+                      (run-at-time timeout nil
+                                   (lambda ()
+                                     (when (eq pending (mongodb-conn-pending conn))
+                                       (mongodb--fail-async conn '(mongodb-error "MongoDB response timed out")))))))
+              (setq started t))
+          (error (signal 'mongodb-error (list (error-message-string err)))))
+      (unless started
+        (mongodb--clear-pending conn)
+        (mongodb-disconnect conn)))))
+
+(defun mongodb-busy-p (conn)
+  "Return non-nil while CONN owns a command or its deferred reply."
+  (and (mongodb-conn-p conn) (mongodb-conn-busy conn)))
+
 (defun mongodb--check-write-response (response)
   "Signal if a write RESPONSE contains write errors."
   (when (or (cdr (assoc "writeErrors" response))
@@ -2069,12 +2172,17 @@ When VERIFY-SERVER is non-nil, reject certificate and hostname failures."
     (signal 'mongodb-error (list "MongoDB TLS connection closed"))))
 
 (defun mongodb--process-sentinel (process event)
-  "Record MongoDB PROCESS termination EVENT without touching its buffer.
-The default sentinel inserts EVENT text into the process buffer, where
-it would sit among unread wire bytes; a reply already buffered when the
-peer closes must stay parseable."
+  "Record PROCESS termination EVENT, preserving any complete buffered reply."
   (unless (process-live-p process)
-    (process-put process 'mongodb-error (string-trim event))))
+    (process-put process 'mongodb-error (string-trim event))
+    (when-let* ((conn (process-get process 'mongodb-connection))
+                ((mongodb-conn-pending conn)))
+      (condition-case err
+          (progn
+            (mongodb--read-async conn)
+            (when (mongodb-conn-pending conn)
+              (mongodb--fail-async conn '(mongodb-error "MongoDB connection closed"))))
+        (error (mongodb--fail-async conn err))))))
 
 (defun mongodb--wait-for-connect (proc host port timeout)
   "Wait for PROC to connect to HOST and PORT within TIMEOUT."
@@ -2165,6 +2273,8 @@ peer closes must stay parseable."
 (defun mongodb-disconnect (conn)
   "Disconnect MongoDB CONN."
   (when (mongodb-conn-p conn)
+    (mongodb--finish-async conn nil '(mongodb-error "MongoDB connection closed"))
+    (setf (mongodb-conn-busy conn) nil)
     (setf (mongodb-conn-live conn) nil)
     (setf (mongodb-conn-closed conn) t)
     (let ((process (mongodb-conn-process conn))
@@ -2226,18 +2336,20 @@ integers are accepted for callers that construct cursors by hand."
         (substring ns (1+ (length database)))
       fallback)))
 
+(defun mongodb--kill-cursors-command (collection cursor-ids)
+  "Build the kill command for CURSOR-IDS in COLLECTION using int64 ids."
+  `(("killCursors" . ,collection)
+    ("cursors" . ,(vconcat (mapcar (lambda (id)
+                                     (if (mongodb-int64-p id) id (mongodb-int64 id)))
+                                   cursor-ids)))))
+
+(defun mongodb--get-more-command (collection cursor-id)
+  "Build a getMore command for CURSOR-ID in COLLECTION using an int64 id."
+  `(("getMore" . ,(mongodb-int64 cursor-id)) ("collection" . ,collection)))
+
 (defun mongodb-kill-cursors (conn database collection cursor-ids)
-  "Kill CURSOR-IDS for COLLECTION in DATABASE on CONN.
-Each id is sent as an int64: the protocol requires longs, and a bare
-integer small enough to fit an int32 would encode as the wrong type."
-  (mongodb-command conn database
-                   `(("killCursors" . ,collection)
-                     ("cursors" . ,(vconcat
-                                    (mapcar (lambda (id)
-                                              (if (mongodb-int64-p id)
-                                                  id
-                                                (mongodb-int64 id)))
-                                            cursor-ids))))))
+  "Kill CURSOR-IDS for COLLECTION in DATABASE on CONN."
+  (mongodb-command conn database (mongodb--kill-cursors-command collection cursor-ids)))
 
 (defun mongodb--cursor-results
     (conn database collection response first-batch-key)
@@ -2276,14 +2388,70 @@ getMore commands."
         (let* ((reply
                 (mongodb-command
                  conn database
-                 ;; getMore must be an int64 on the wire; a small bare
-                 ;; cursor id would otherwise encode as int32.
-                 `(("getMore" . ,(mongodb-int64 cursor-id))
-                   ("collection" . ,collection))))
+                 (mongodb--get-more-command collection cursor-id)))
                (next (cdr (assoc "cursor" reply))))
           (setq cursor-id (mongodb--cursor-id next))
           (add-batch (mongodb--cursor-batch next "nextBatch"))))
       head)))
+
+(defun mongodb--cursor-async (conn database collection command callback)
+  "Collect COMMAND's cursor on CONN in DATABASE and deliver CALLBACK.
+COLLECTION is the fallback name until the server reports its cursor namespace.
+CALLBACK receives (DOCUMENTS ERROR), with the same document budget as the
+synchronous cursor helpers.  Every wire command keeps its response timeout."
+  (let ((limit mongodb-max-cursor-documents)
+        (timeout mongodb-timeout-seconds)
+        (cursor-id 0) (count 0) batches settled)
+    (unless (and (integerp limit) (>= limit 0))
+      (signal 'mongodb-error '("mongodb-max-cursor-documents must be a non-negative integer")))
+    (cl-labels
+        ((finish (documents error)
+           (unless settled
+             (setq settled t)
+             (funcall callback documents error)))
+         (fail (error)
+           (if (and (/= cursor-id 0) (mongodb-live-p conn))
+               (let ((dispatch-error
+                      (condition-case err
+                          (progn
+                            (mongodb-command-async
+                             conn database (mongodb--kill-cursors-command collection (list cursor-id))
+                             (lambda (&rest _) (finish nil error)) timeout)
+                            nil)
+                        (mongodb-error err))))
+                 (when dispatch-error (finish nil error)))
+             (finish nil error)))
+         (receive (response error key)
+           (if error (fail error)
+             (let ((decode-error
+                    (condition-case err
+                        (let ((cursor (cdr (assoc "cursor" response))))
+                          (setq cursor-id (mongodb--cursor-id cursor)
+                                collection (mongodb--cursor-namespace-collection cursor database collection))
+                          (let ((batch (mongodb--cursor-batch cursor key)))
+                            (setq count (+ count (length batch)))
+                            (when (> count limit)
+                              (signal 'mongodb-error
+                                      (list (format "MongoDB cursor exceeds %d-document limit" limit))))
+                            (push (append batch nil) batches))
+                          nil)
+                      (mongodb-error err))))
+               (cond
+                (decode-error (fail decode-error))
+                ((zerop cursor-id) (finish (apply #'append (nreverse batches)) nil))
+                (t
+                 (let ((dispatch-error
+                        (condition-case err
+                            (progn
+                              (mongodb-command-async
+                               conn database (mongodb--get-more-command collection cursor-id)
+                               (lambda (reply error) (receive reply error "nextBatch")) timeout)
+                              nil)
+                          (mongodb-error err))))
+                   (when dispatch-error (fail dispatch-error)))))))))
+      ;; Initial dispatch errors retain the command API's immediate-error contract.
+      (mongodb-command-async conn database command
+                             (lambda (response error) (receive response error "firstBatch")) timeout))))
 
 ;;;; Public command helpers
 
@@ -2309,6 +2477,16 @@ getMore commands."
   (mapcar (lambda (doc) (cdr (assoc "name" doc)))
           (mongodb-list-collection-docs conn database)))
 
+(defun mongodb-list-collections-async (conn database callback)
+  "Read collection names on CONN in DATABASE without waiting.
+CALLBACK receives (NAMES ERROR) after cursor collection finishes."
+  (mongodb--cursor-async
+   conn database "$cmd.listCollections"
+   `(("listCollections" . 1) ("cursor" . ,(mongodb-document nil)))
+   (lambda (documents error)
+     (funcall callback (unless error (mapcar (lambda (doc) (cdr (assoc "name" doc))) documents))
+              error))))
+
 (defun mongodb-create-collection (conn database collection &optional options)
   "Create COLLECTION in DATABASE on CONN."
   (mongodb-command conn database
@@ -2322,6 +2500,13 @@ getMore commands."
                           `(("listIndexes" . ,collection)
                             ("cursor" . ,(mongodb-document nil))))))
     (mongodb--cursor-results conn database collection response "firstBatch")))
+
+(defun mongodb-list-indexes-async (conn database collection callback)
+  "Read index documents for COLLECTION in DATABASE on CONN asynchronously.
+CALLBACK receives (DOCUMENTS ERROR) after cursor collection finishes."
+  (mongodb--cursor-async
+   conn database collection
+   `(("listIndexes" . ,collection) ("cursor" . ,(mongodb-document nil))) callback))
 
 (defun mongodb-find-command
     (collection &optional filter projection limit skip sort options)
@@ -2347,6 +2532,15 @@ FILTER, PROJECTION, LIMIT, SKIP, SORT, and OPTIONS map to find command fields."
                           (mongodb-find-command collection filter projection
                                                 limit skip sort options))))
     (mongodb--cursor-results conn database collection response "firstBatch")))
+
+(defun mongodb-find-async
+    (conn database collection callback &optional filter projection limit skip sort options)
+  "Read documents from COLLECTION in DATABASE on CONN without waiting.
+FILTER, PROJECTION, LIMIT, SKIP, SORT and OPTIONS are as for `mongodb-find'.
+CALLBACK receives (DOCUMENTS ERROR) after all cursor batches are collected."
+  (mongodb--cursor-async
+   conn database collection
+   (mongodb-find-command collection filter projection limit skip sort options) callback))
 
 (defun mongodb-count-documents (conn database collection &optional filter options)
   "Return count for COLLECTION in DATABASE on CONN."

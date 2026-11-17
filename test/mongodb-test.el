@@ -101,6 +101,7 @@ assertion fails, so a red test cannot leak the process or buffer."
                                       :buffer ,buf :noquery t))
             (,var (make-mongodb-conn :process ,proc :buffer ,buf :live t
                                      ,@slots)))
+       (set-process-sentinel ,proc #'mongodb--process-sentinel)
        (unwind-protect
            (progn ,@body)
          (mongodb-disconnect ,var)
@@ -914,6 +915,152 @@ roundtrip is semantic equivalence rather than byte identity for NaN."
                                       (mongodb--encode-document
                                        redecoded)))))))))
 
+;;;; Asynchronous transport and cursors
+
+(ert-deftest mongodb-test-async-command-wire-contract ()
+  "Fragmented replies, server errors and malformed frames settle once."
+  (dolist (case '(success server-error wrong-id length timeout disconnect peer-close callback-error))
+    (ert-info ((symbol-name case))
+      (mongodb-test--with-pipe-conn (conn)
+        (let ((calls 0) result failure sent delivery
+              (schedule (symbol-function 'run-at-time)))
+          (cl-letf (((symbol-function 'run-at-time)
+                     (lambda (delay repeat function &rest args)
+                       (if (and (eq case 'callback-error) (zerop delay))
+                           (setq delivery (cons function args))
+                         (apply schedule delay repeat function args))))
+                    ((symbol-function 'process-send-string)
+                     (lambda (_process bytes) (setq sent bytes))))
+            (mongodb-command-async
+             conn "app" '(("ping" . 1))
+             (lambda (value error)
+               (setq result value failure error)
+               (cl-incf calls)
+               (when (eq case 'callback-error) (error "Caller failed")))
+             (if (eq case 'timeout) 0 1))
+            (should (mongodb-busy-p conn))
+            (should-error (mongodb-command conn "app" '(("ping" . 1))) :type 'mongodb-error)
+            (unless (memq case '(timeout disconnect peer-close))
+              (let* ((request (mongodb--decode-message-frame sent))
+                     (id (mongodb--decoded-message-request-id request))
+                     (document (if (eq case 'server-error)
+                                   '(("ok" . 0) ("errmsg" . "denied") ("code" . 13))
+                                 '(("ok" . 1))))
+                     (reply (mongodb--make-op-msg 99 document))
+                     (reply (concat (substring reply 0 8)
+                                    (mongodb--pack-int32 (if (eq case 'wrong-id) (1+ id) id))
+                                    (substring reply 12))))
+                (if (eq case 'length)
+                    (funcall (process-filter (mongodb-conn-process conn))
+                             (mongodb-conn-process conn) (mongodb--pack-int32 2))
+                  (dotimes (offset (length reply))
+                    (funcall (process-filter (mongodb-conn-process conn))
+                             (mongodb-conn-process conn) (substring reply offset (1+ offset)))))))
+            (when (eq case 'disconnect) (mongodb-disconnect conn))
+            (when (eq case 'peer-close)
+              (delete-process (mongodb-conn-process conn)))
+            (should (= calls 0))
+            (when (memq case '(success server-error callback-error))
+              (should (mongodb-busy-p conn))
+              (should-error (mongodb-command conn "app" '(("ping" . 1))) :type 'mongodb-error))
+            (if (eq case 'callback-error)
+                (progn (should delivery)
+                       (should-error (apply (car delivery) (cdr delivery)) :type 'error))
+              (let ((deadline (+ (float-time) 2)))
+                (while (and (zerop calls) (< (float-time) deadline))
+                  (accept-process-output nil .01))))
+            (should (= calls 1))
+            (should-not (mongodb-busy-p conn))
+            (if (memq case '(success callback-error))
+                (progn (should (equal result '(("ok" . 1)))) (should-not failure))
+              (should failure))
+            (should (eq (and (mongodb-live-p conn) t)
+                        (and (memq case '(success server-error callback-error)) t)))
+            (accept-process-output nil .01)
+            (should (= calls 1))))))))
+
+(ert-deftest mongodb-test-async-cursor-continuation-and-cleanup ()
+  "Cursor batches preserve rows, int64 ids and cleanup on decoding errors."
+  (dolist (case '(success empty limit bad-batch server-error))
+    (ert-info ((symbol-name case))
+      (let ((mongodb-max-cursor-documents (if (eq case 'limit) 1 10))
+            commands result failure (calls 0))
+        (cl-letf (((symbol-function 'mongodb-live-p) (lambda (_) t))
+                  ((symbol-function 'mongodb-command-async)
+                   (lambda (_conn _db command callback &rest _)
+                     (push command commands)
+                     (pcase (caar command)
+                       ("killCursors"
+                        (should (equal (cdr (assoc "cursors" command)) (vector (mongodb-int64 11))))
+                        (run-at-time 0 nil callback '(("ok" . 1)) nil))
+                       ("getMore"
+                        (should (equal (cdar command) (mongodb-int64 11)))
+                        (should (equal (cdr (assoc "collection" command)) "actual.people"))
+                        (run-at-time 0 nil callback
+                                     (unless (eq case 'server-error)
+                                       `(("cursor" . (("id" . ,(if (eq case 'limit) 11 0))
+                                                      ("nextBatch" . [(("_id" . 2))])))))
+                                     (and (eq case 'server-error) '(mongodb-error "getMore failed"))))
+                       ("find"
+                        (run-at-time 0 nil callback
+                                     `(("cursor" . (("id" . 11) ("ns" . "app.actual.people")
+                                                    ("firstBatch" . ,(pcase case
+                                                                        ('empty [])
+                                                                        ('bad-batch "bad")
+                                                                        (_ [(("_id" . 1))])))))) nil)))
+                     t)))
+          (mongodb-find-async 'conn "app" "requested" (lambda (docs error)
+                                                          (setq result docs failure error)
+                                                          (cl-incf calls)))
+          (should (= calls 0))
+          (let ((deadline (+ (float-time) 1)))
+            (while (and (zerop calls) (< (float-time) deadline)) (accept-process-output nil .01)))
+          (should (= calls 1))
+          (if (memq case '(success empty))
+              (progn
+                (should-not failure)
+                (should (equal result (if (eq case 'empty) '((("_id" . 2)))
+                                       '((("_id" . 1)) (("_id" . 2)))))))
+            (should failure)
+            (should (equal (caaar commands) "killCursors"))))))))
+
+(ert-deftest mongodb-test-async-dispatch-abandonment ()
+  "Dispatch exits at each installation stage close the transport without delivery."
+  (dolist (stage '(filter send timer))
+    (dolist (case '(error quit throw))
+      (ert-info ((format "%s during %s" case stage))
+        (mongodb-test--with-pipe-conn (conn)
+          (let ((calls 0)
+                (filter (symbol-function 'set-process-filter))
+                (schedule (symbol-function 'run-at-time)))
+            (cl-labels ((abandon ()
+                          (pcase case
+                            ('error (error "dispatch failed"))
+                            ('quit (signal 'quit nil))
+                            ('throw (throw 'dispatch-exit t)))))
+              (cl-letf (((symbol-function 'set-process-filter)
+                         (lambda (process function)
+                           (when (and (eq stage 'filter)
+                                      (eq function #'mongodb--async-filter))
+                             (abandon))
+                           (funcall filter process function)))
+                        ((symbol-function 'process-send-string)
+                         (lambda (&rest _) (when (eq stage 'send) (abandon))))
+                        ((symbol-function 'run-at-time)
+                         (lambda (seconds repeat function &rest args)
+                           (when (and (eq stage 'timer) (= seconds 1)) (abandon))
+                           (apply schedule seconds repeat function args))))
+                (catch 'dispatch-exit
+                  (condition-case nil
+                      (mongodb-command-async conn "app" '(("ping" . 1))
+                                             (lambda (&rest _) (cl-incf calls)) 1)
+                    ((mongodb-error quit) nil)))))
+            (accept-process-output nil .01)
+            (should-not (mongodb-live-p conn))
+            (should-not (mongodb-busy-p conn))
+            (should-not (mongodb-conn-pending conn))
+            (should (= calls 0))))))))
+
 ;;;; Live smoke tests (need a reachable MongoDB server)
 
 (defun mongodb-test--live-params ()
@@ -922,6 +1069,94 @@ Set the MONGODB_TEST_URI environment variable, e.g.
 mongodb://127.0.0.1:27017/clutch_test, to enable them."
   (when-let* ((uri (getenv "MONGODB_TEST_URI")))
     (list :url uri)))
+
+(defun mongodb-test--await-async (start)
+  "Call START with a callback and return its (RESULT ERROR) after delivery."
+  (let (done result failure (deadline (+ (float-time) 5)))
+    (funcall start (lambda (value error) (setq result value failure error done t)))
+    (should-not done)
+    (while (and (not done) (< (float-time) deadline)) (accept-process-output nil .01))
+    (should done)
+    (cons result failure)))
+
+(ert-deftest mongodb-test-live-async-commands-and-cursors ()
+  "Real async replies preserve BSON values, multiple batches and connection reuse."
+  (skip-unless (mongodb-test--live-params))
+  (let* ((conn (mongodb-connect (mongodb-test--live-params)))
+         (database (or (mongodb-conn-database conn) "clutch_test"))
+         (collection (format "async_probe_%d" (emacs-pid))))
+    (unwind-protect
+        (progn
+          (mongodb-insert conn database collection
+                          (vector (mongodb-test--all-types-document)
+                                  '(("_id" . 1) ("nested" . (("value" . "hello"))))
+                                  '(("_id" . 2) ("empty" . ""))))
+          (let* ((expected (mongodb-find conn database collection))
+                 (outcome (mongodb-test--await-async
+                           (lambda (reply)
+                             (mongodb-find-async conn database collection reply
+                                                 nil nil nil nil nil '(("batchSize" . 1)))))))
+            (should-not (cdr outcome))
+            (should (equal (mapcar #'mongodb--encode-document (car outcome))
+                           (mapcar #'mongodb--encode-document expected))))
+          (let ((collections (mongodb-test--await-async
+                              (lambda (reply) (mongodb-list-collections-async conn database reply)))))
+            (should-not (cdr collections))
+            (should (member collection (car collections))))
+          (let ((outcome (mongodb-test--await-async
+                          (lambda (reply)
+                            (mongodb-list-indexes-async conn database collection reply)))))
+            (should-not (cdr outcome))
+            (should (equal (mapcar #'mongodb--encode-document (car outcome))
+                           (mapcar #'mongodb--encode-document (mongodb-list-indexes conn database collection)))))
+          (let ((outcome (mongodb-test--await-async
+                          (lambda (reply)
+                            (mongodb-command-async conn database '(("notACommand" . 1)) reply)))))
+            (should (cdr outcome))
+            (should (mongodb-live-p conn))
+            (should (mongodb--response-ok-p (mongodb-command conn database '(("ping" . 1))))))
+          (let ((mongodb-max-cursor-documents 1))
+            (let ((outcome (mongodb-test--await-async
+                            (lambda (reply)
+                              (mongodb-find-async conn database collection reply
+                                                  nil nil nil nil nil '(("batchSize" . 1)))))))
+              (should (string-match-p "exceeds 1-document" (error-message-string (cdr outcome))))
+              (should (mongodb-live-p conn)))))
+      (when (mongodb-live-p conn)
+        (mongodb-command conn database `(("drop" . ,collection))))
+      (mongodb-disconnect conn))))
+
+(ert-deftest mongodb-test-live-async-timeout-and-disconnect ()
+  "Blocked requests finish once when timed out or explicitly disconnected."
+  (skip-unless (and (mongodb-test--live-params)
+                    (equal (getenv "MONGODB_TEST_FAILPOINTS") "1")))
+  (let ((admin (mongodb-connect (mongodb-test--live-params))))
+    (unwind-protect
+        (dolist (case '(timeout disconnect))
+          (let ((conn (mongodb-connect (mongodb-test--live-params)))
+                (calls 0) failure (start (float-time)))
+            (unwind-protect
+                (progn
+                  (mongodb-command admin "admin"
+                                   '(("configureFailPoint" . "failCommand")
+                                     ("mode" . (("times" . 1)))
+                                     ("data" . (("failCommands" . ["ping"])
+                                                ("blockConnection" . t) ("blockTimeMS" . 500)))))
+                  (mongodb-command-async conn "admin" '(("ping" . 1))
+                                         (lambda (_value error) (cl-incf calls) (setq failure error))
+                                         (if (eq case 'timeout) .05 2))
+                  (should (< (- (float-time) start) .2))
+                  (when (eq case 'disconnect) (mongodb-disconnect conn))
+                  (let ((deadline (+ (float-time) 2)))
+                    (while (and (zerop calls) (< (float-time) deadline)) (accept-process-output nil .01)))
+                  (should (= calls 1))
+                  (should failure)
+                  (should-not (mongodb-live-p conn))
+                  (accept-process-output nil .6)
+                  (should (= calls 1)))
+              (mongodb-disconnect conn))))
+      (mongodb-command admin "admin" '(("configureFailPoint" . "failCommand") ("mode" . "off")))
+      (mongodb-disconnect admin))))
 
 (ert-deftest mongodb-test-live-roundtrip-through-server ()
   "Every BSON type survives an insert/find roundtrip through a server."
