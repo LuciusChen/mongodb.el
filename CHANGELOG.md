@@ -4,6 +4,10 @@ Notable user-visible changes are recorded here.
 
 ## Unreleased
 
+### Added
+
+- `mongodb-command-async`, `mongodb-find-async`, `mongodb-list-collections-async` and `mongodb-list-indexes-async` deliver results or errors through deferred callbacks. Cursor helpers collect subsequent batches and clean up live cursors on failure. `mongodb-busy-p` reports the single connection's request ownership.
+
 ## 0.1.1 - 2026-07-15
 
 ### Changed

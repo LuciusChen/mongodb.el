@@ -73,6 +73,19 @@ Abandoning a request through =quit= or a nonlocal =throw= also closes the connec
 
 Commands and document sequences are encoded once. Negotiated BSON, batch and message limits are checked against the bytes to be sent before transport begins; rejected oversized writes leave the connection available.
 
+For background reads, use =mongodb-command-async=, =mongodb-find-async=, =mongodb-list-collections-async= or =mongodb-list-indexes-async=. Each accepts a callback receiving =(result error)= exactly once after dispatch is accepted. Dispatch failures signal immediately. Server command errors preserve a synchronized connection, while response timeouts, malformed replies and disconnects close it. =mongodb-busy-p= stays true until callback delivery starts, allowing a cursor callback to issue its next command before another caller takes the connection.
+
+#+begin_src emacs-lisp
+(mongodb-find-async
+ conn "app" "users"
+ (lambda (documents error)
+   (if error (message "%s" (error-message-string error))
+     (message "Read %d documents" (length documents))))
+ '(("active" . t)) nil 100)
+#+end_src
+
+Asynchronous commands retain =mongodb-timeout-seconds= as each wire command's total-response deadline. Cursor helpers collect all batches with the same =mongodb-max-cursor-documents= limit as synchronous reads and attempt =killCursors= when a live cursor fails collection. Applications serialize work through each connection. Callback errors propagate after request cleanup.
+
 Use explicit BSON wrappers when the wire type matters:
 
 #+begin_src emacs-lisp
@@ -116,6 +129,8 @@ MONGODB_TEST_URI=mongodb://127.0.0.1:27017/clutch_test \
   -L . -l ert -l test/mongodb-test.el \
   --eval '(ert-run-tests-batch-and-exit)'
 #+end_src
+
+The timeout/disconnect fault-injection test also requires =MONGODB_TEST_FAILPOINTS= set to =1= and a disposable server started with =--setParameter enableTestCommands=1=. Its test account must be able to run =configureFailPoint= in =admin=. The ordinary live URI alone runs the remaining server tests.
 
 * License
 
