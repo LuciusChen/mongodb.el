@@ -448,8 +448,7 @@ is a fixed point."
         :conn "app" "users"
         '(("cursor" . (("id" . 10)
                         ("ns" . "app.users")
-                        ("firstBatch" . ("a" "b")))))
-        "firstBatch")
+                        ("firstBatch" . ("a" "b"))))))
        :type 'mongodb-error))
     (let ((kill (cl-find-if (lambda (command) (assoc "killCursors" command))
                             commands)))
@@ -465,16 +464,14 @@ is a fixed point."
     :conn "app" "users"
     '(("cursor" . (("id" . "not-an-int")
                     ("ns" . "app.users")
-                    ("firstBatch" . ("partial")))))
-    "firstBatch")
+                    ("firstBatch" . ("partial"))))))
    :type 'mongodb-error)
   (should-error
    (mongodb--cursor-results
     :conn "app" "users"
     '(("cursor" . (("id" . 0)
                     ("ns" . "app.users")
-                    ("firstBatch" . "not-an-array"))))
-    "firstBatch")
+                    ("firstBatch" . "not-an-array")))))
    :type 'mongodb-error))
 
 (ert-deftest mongodb-test-scram-resource-limits ()
@@ -628,7 +625,7 @@ is a fixed point."
                                                     '("b" "c")
                                                   '("d")))))))))
       (should (equal (mongodb--cursor-results
-                      :conn "app" "users" response "firstBatch")
+                      :conn "app" "users" response)
                      '("a" "b" "c" "d"))))
     (setq commands (nreverse commands))
     ;; Cursor ids ride the wire as int64 wrappers so a small id cannot

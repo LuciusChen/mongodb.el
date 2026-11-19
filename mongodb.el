@@ -2351,11 +2351,9 @@ integers are accepted for callers that construct cursors by hand."
   "Kill CURSOR-IDS for COLLECTION in DATABASE on CONN."
   (mongodb-command conn database (mongodb--kill-cursors-command collection cursor-ids)))
 
-(defun mongodb--cursor-results
-    (conn database collection response first-batch-key)
+(defun mongodb--cursor-results (conn database collection response)
   "Return all cursor results from RESPONSE using CONN.
-DATABASE, COLLECTION, and FIRST-BATCH-KEY describe the cursor and subsequent
-getMore commands."
+Send getMore commands to DATABASE for COLLECTION."
   (unless (and (integerp mongodb-max-cursor-documents)
                (>= mongodb-max-cursor-documents 0))
     (signal 'mongodb-error
@@ -2367,7 +2365,7 @@ getMore commands."
          (count 0))
     (cl-labels
         ((fail-limit ()
-           (when (and (integerp cursor-id) (/= cursor-id 0))
+           (unless (zerop cursor-id)
              (ignore-errors
                (mongodb-kill-cursors conn database collection (list cursor-id))))
            (signal 'mongodb-error
@@ -2383,8 +2381,8 @@ getMore commands."
                  (setq head cell))
                (setq tail cell
                      count (1+ count))))))
-      (add-batch (mongodb--cursor-batch cursor first-batch-key))
-      (while (and (integerp cursor-id) (/= cursor-id 0))
+      (add-batch (mongodb--cursor-batch cursor "firstBatch"))
+      (while (not (zerop cursor-id))
         (let* ((reply
                 (mongodb-command
                  conn database
@@ -2470,7 +2468,7 @@ synchronous cursor helpers.  Every wire command keeps its response timeout."
             ("cursor" . ,(mongodb-document nil))
             ,@(when filter `(("filter" . ,filter)))
             ,@(mongodb--document-pairs options)))))
-    (mongodb--cursor-results conn database "$cmd.listCollections" response "firstBatch")))
+    (mongodb--cursor-results conn database "$cmd.listCollections" response)))
 
 (defun mongodb-list-collections (conn database)
   "Return collection names for DATABASE on CONN."
@@ -2499,7 +2497,7 @@ CALLBACK receives (NAMES ERROR) after cursor collection finishes."
          (mongodb-command conn database
                           `(("listIndexes" . ,collection)
                             ("cursor" . ,(mongodb-document nil))))))
-    (mongodb--cursor-results conn database collection response "firstBatch")))
+    (mongodb--cursor-results conn database collection response)))
 
 (defun mongodb-list-indexes-async (conn database collection callback)
   "Read index documents for COLLECTION in DATABASE on CONN asynchronously.
@@ -2531,7 +2529,7 @@ FILTER, PROJECTION, LIMIT, SKIP, SORT, and OPTIONS map to find command fields."
          (mongodb-command conn database
                           (mongodb-find-command collection filter projection
                                                 limit skip sort options))))
-    (mongodb--cursor-results conn database collection response "firstBatch")))
+    (mongodb--cursor-results conn database collection response)))
 
 (defun mongodb-find-async
     (conn database collection callback &optional filter projection limit skip sort options)
@@ -2585,7 +2583,7 @@ OPTIONS are appended to the aggregate command after cursor normalization."
   (let ((response
          (mongodb-command conn database
                           (mongodb-aggregate-command collection pipeline options))))
-    (mongodb--cursor-results conn database collection response "firstBatch")))
+    (mongodb--cursor-results conn database collection response)))
 
 (defun mongodb--explain-verbosity (verbosity)
   "Return MongoDB explain VERBOSITY."
